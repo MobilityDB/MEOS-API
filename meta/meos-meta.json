@@ -1,0 +1,42 @@
+{
+  "functions": {
+    "tpointseq_make": {
+      "ownership": "caller",
+      "nullable": true,
+      "doc": "Creates a temporal point sequence from an array of instants.",
+      "meos": {
+        "temporalDim": "sequence",
+        "spatialDim": 2,
+        "interpolation": true,
+        "subtype": "TPoint"
+      }
+    },
+    "temporal_eq": {
+      "ownership": "caller",
+      "nullable": true,
+      "doc": "Returns the temporal equality between two temporal values.",
+      "meos": {
+        "temporalDim": "any",
+        "spatialDim": null,
+        "interpolation": false,
+        "subtype": "any"
+      }
+    },
+    "tpoint_speed": {
+      "ownership": "caller",
+      "nullable": true,
+      "doc": "Computes the instantaneous speed of a temporal point.",
+      "meos": {
+        "temporalDim": "sequence",
+        "spatialDim": null,
+        "interpolation": true,
+        "subtype": "TPoint"
+      }
+    }
+  },
+  "types": {
+    "TSequence": { "meosType": "TPointSeq" },
+    "TInstant":  { "meosType": "TPointInst" },
+    "interpType":{ "meosType": "Interpolation" }
+  }
+}

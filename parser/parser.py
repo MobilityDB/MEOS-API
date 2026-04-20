@@ -1,0 +1,114 @@
+import re
+import clang.cindex
+import json
+import tempfile
+import os
+from pathlib import Path
+
+from parser.extractors import extract_function, extract_struct, extract_enum
+from parser.type_resolver import resolve_idl_types
+
+def merge_meta(idl: dict, meta_path: Path) -> dict:
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    for fn in idl["functions"]:
+        if fn["name"] in meta.get("functions", {}):
+            fn.update(meta["functions"][fn["name"]])
+
+    for struct in idl["structs"]:
+        if struct["name"] in meta.get("types", {}):
+            struct.update(meta["types"][struct["name"]])
+
+    return idl
+
+
+def parse_meos(entry: Path, include_dir: Path) -> dict:
+    index = clang.cindex.Index.create()
+    tu = index.parse(str(entry), args=[
+        "-x", "c",
+        "-std=c11",
+        f"-I{include_dir}",
+        "-DMEOS",
+    ])
+
+    # Collect all .h files belonging to the project
+    own_files = {str(p.resolve()) for p in include_dir.glob("**/*.h")}
+
+    # First pass: build a mapping "anonymous struct location -> typedef name"
+    typedef_map: dict[str, str] = {}
+    for node in tu.cursor.walk_preorder():
+        loc = node.location.file
+        if not loc or str(Path(loc.name).resolve()) not in own_files:
+            continue
+        if node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+            canonical = node.underlying_typedef_type.get_canonical().spelling
+            m = re.search(r"\(unnamed at ([^)]+)\)", canonical)
+            if m:
+                typedef_map[m.group(1)] = node.spelling
+
+    functions, structs, enums = [], [], []
+
+    for node in tu.cursor.walk_preorder():
+        loc = node.location.file
+        if not loc or str(Path(loc.name).resolve()) not in own_files:
+            continue  # skip stdlib, system headers, etc.
+
+        if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+            functions.append(extract_function(node))
+
+        elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.spelling:
+            struct = extract_struct(node)
+            # Resolve anonymous struct names via typedef_map
+            m = re.search(r"\(unnamed at ([^)]+)\)", struct["name"])
+            if m:
+                typedef_name = typedef_map.get(m.group(1))
+                if typedef_name:
+                    struct["name"] = typedef_name
+                else:
+                    continue
+            structs.append(struct)
+
+        elif node.kind == clang.cindex.CursorKind.ENUM_DECL and node.spelling:
+            enums.append(extract_enum(node))
+
+
+    # Deduplicate by name (keep first occurrence)
+    def _dedup(items: list) -> list:
+        seen: set[str] = set()
+        result = []
+        for item in items:
+            if item["name"] not in seen:
+                seen.add(item["name"])
+                result.append(item)
+        return result
+
+    functions = _dedup(functions)
+    structs   = _dedup(structs)
+    enums     = _dedup(enums)
+
+    idl = {"functions": functions, "structs": structs, "enums": enums}
+
+    # Resolve types if the mappings file exists
+    mappings_path = Path("./meta/type-mappings.json")
+    return resolve_idl_types(idl, mappings_path)
+
+
+def build_entry_point(headers_dir: Path) -> str:
+    lines = []
+    for h in sorted(headers_dir.glob("**/*.h")):
+        lines.append(f'#include "{h.resolve()}"')
+    return "\n".join(lines)
+
+
+def parse_all_headers(headers_dir: Path) -> dict:
+    entry_src = build_entry_point(headers_dir)
+
+    with tempfile.NamedTemporaryFile(suffix=".h", mode="w", delete=False) as f:
+        f.write(entry_src)
+        tmp_path = f.name
+
+    try:
+        return parse_meos(Path(tmp_path), headers_dir)
+    finally:
+        os.unlink(tmp_path)
