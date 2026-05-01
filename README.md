@@ -1,8 +1,8 @@
-# MEOS IDL Generator
+# MEOS-API
 
-**MEOS IDL Generator** is a tool that allows you to automatically extract the full API of the [MEOS](https://libmeos.org/) C library and save it as a structured JSON file. Instead of manually reading through hundreds of C header files, you run one command and get a clean, complete description of every function, data structure, and enum that MEOS exposes.
+**MEOS-API** is the machine-readable description of the [MEOS](https://github.com/MobilityDB/MEOS) C library's public API. It is a JSON catalog — `meos-api.json` — that lists every function, structure, and enum that MEOS exposes, with the type signatures, ownership rules, and documentation strings.
 
-This JSON file, `meos-idl.json`, can then be used as a foundation for generating language bindings (Python, JavaScript, Java, Rust...), building documentation, or powering any tooling that needs to understand the MEOS API.
+This catalog is the foundation for generating language bindings (Python, Java, Rust, Go, .NET, JavaScript), building documentation, or powering any tooling that needs to understand the MEOS API without re-parsing C headers.
 
 ## Table of contents
 
@@ -13,10 +13,10 @@ This JSON file, `meos-idl.json`, can then be used as a foundation for generating
 
 ## How it works
 
-The tool works in two steps:
+The pipeline runs in two steps:
 
-1. **Parser**: scans all the needed MEOS `.h` header files using libclang and extracts every function signature, struct, and enum into structured JSON.
-2. **Merger**: enriches the result with manual annotations from `meta/meos-meta.json`, such as documentation and memory ownership rules.
+1. **Parser** — scans the MEOS `.h` header files using libclang and extracts every function signature, struct, and enum into structured JSON.
+2. **Merger** — enriches the parser output with manual annotations from `meta/meos-meta.json`, such as documentation and memory ownership rules.
 
 ## Getting started
 
@@ -45,13 +45,13 @@ To pin to a specific version:
 python setup.py --branch v1.2.0
 ```
 
-### 3. Generate the IDL
+### 3. Generate the catalog
 
 ```bash
 python run.py
 ```
 
-The result is then written to `output/meos-idl.json`.
+The result is written to `output/meos-api.json`.
 
 You can also point the tool at a different headers directory:
 
@@ -61,7 +61,7 @@ python run.py /path/to/custom/include
 
 ## Output format
 
-`meos-idl.json` contains 3 top-level arrays: `functions`, `structs`, and `enums`.
+`meos-api.json` contains 3 top-level arrays: `functions`, `structs`, and `enums`.
 
 A typical function entry looks like this:
 
@@ -80,22 +80,6 @@ A typical function entry looks like this:
 }
 ```
 
-Fields like `ownership`, `nullable`, and `doc` come from `meos-meta.json` and are merged on top of what the parser found in the C code.
-
 ## Adding metadata
 
-To annotate a function with documentation or extra information, edit `meta/meos-meta.json`:
-
-```json
-{
-  "functions": {
-    "my_function": {
-      "ownership": "caller",
-      "nullable": false,
-      "doc": "Returns a new object. The caller is responsible for freeing it."
-    }
-  }
-}
-```
-
-Then re-run `python run.py`. The new fields will appear in `meos-idl.json`.
+Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog.
