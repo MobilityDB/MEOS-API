@@ -19,16 +19,18 @@ def _canonical_spelling(ty) -> str:
 _BOOL_SPELLINGS = {"bool", "_Bool"}
 
 
+_BOOL_TOKEN_RE = re.compile(r"\b_Bool\b")
+
+
 def _c_spelling(ty) -> str:
     # Return the declared C spelling, with ``_Bool`` normalised to ``"bool"``.
     # Two bool representations arise depending on which postgres_int_defs.h is
     # in play:
     # - PostgreSQL headers: ``typedef char bool``  -> spelling already ``"bool"``
     # - Stub header:        ``#define bool _Bool`` -> spelling is ``"_Bool"``
-    spelling = ty.spelling
-    if spelling == "_Bool":
-        return "bool"
-    return spelling
+    # Compound types preserve the inner spelling, so ``bool *`` arrives as
+    # ``_Bool *``; substitute on the token rather than the whole string.
+    return _BOOL_TOKEN_RE.sub("bool", ty.spelling)
 
 
 def _canonical_c_spelling(ty) -> str:

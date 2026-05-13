@@ -94,8 +94,26 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
     return resolve_idl_types(idl, mappings_path)
 
 
+# Minimal stand-in for system headers so libclang does not fall back to
+# treating undeclared identifiers as int.  stdbool.h is the load-bearing one:
+# without it every `bool`-returning function is parsed with result_type
+# TypeKind.INT.
+_SYSTEM_HEADER_STUBS = """
+#ifndef bool
+#define bool _Bool
+#endif
+#ifndef true
+#define true 1
+#endif
+#ifndef false
+#define false 0
+#endif
+typedef unsigned long size_t;
+"""
+
+
 def build_entry_point(headers_dir: Path) -> str:
-    lines = []
+    lines = [_SYSTEM_HEADER_STUBS]
     for h in sorted(headers_dir.glob("**/*.h")):
         lines.append(f'#include "{h.resolve()}"')
     return "\n".join(lines)
