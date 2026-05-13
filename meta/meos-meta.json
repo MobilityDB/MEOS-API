@@ -1,4 +1,13 @@
 {
+  "$schema": {
+    "_doc": "Per-function structural metadata merged into meos-idl.json at parse time. Each entry sits at functions.<c_name>.shape and overrides what bindings can infer from the C signature alone. Field semantics:",
+    "shape.skip":                "Reason string; codegens omit this function entirely.",
+    "shape.arrayReturn":         "The function's return value is an array. lengthFrom describes where the length comes from.",
+    "shape.arrayReturn.lengthFrom.kind=accessor": "Call func(arg) on one of the function's inputs to get the length. Optional castTo lets the accessor receive a different type (struct-layout-compatible upcast).",
+    "shape.arrayReturn.lengthFrom.kind=param":    "Read the length from the named output parameter of the same function.",
+    "shape.outputArrays":        "List of additional output parameters that are parallel arrays sharing the primary length source.",
+    "shape.namedOutputs":        "List of parameters that are scalar out-parameters but do not use the canonical result/value names."
+  },
   "functions": {
     "tpointseq_make": {
       "ownership": "caller",
@@ -32,7 +41,91 @@
         "interpolation": true,
         "subtype": "TPoint"
       }
-    }
+    },
+
+    "bigintset_values":          { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "dateset_values":            { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "floatset_values":           { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "intset_values":             { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "textset_values":            { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "tstzset_values":            { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "geoset_values":             { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "npointset_values":          { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+
+    "spanset_spanarr":           { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "spanset_num_spans", "arg": "ss" } } } },
+    "spanset_sps":               { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "spanset_num_spans", "arg": "ss" } } } },
+
+    "tsequence_insts_p":         { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "temporal_num_instants", "arg": "seq", "castTo": "const Temporal *" } } } },
+    "tsequenceset_insts_p":      { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "tsequenceset_num_instants", "arg": "ss" } } } },
+    "tsequenceset_sequences_p":  { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "temporal_num_sequences", "arg": "ss", "castTo": "const Temporal *" } } } },
+
+    "temporal_time_split": {
+      "shape": {
+        "arrayReturn":  { "lengthFrom": { "kind": "param", "name": "count" } },
+        "outputArrays": [{ "param": "time_bins" }]
+      }
+    },
+    "tfloat_value_split": {
+      "shape": {
+        "arrayReturn":  { "lengthFrom": { "kind": "param", "name": "count" } },
+        "outputArrays": [{ "param": "bins" }]
+      }
+    },
+    "tfloat_value_time_split": {
+      "shape": {
+        "arrayReturn":  { "lengthFrom": { "kind": "param", "name": "count" } },
+        "outputArrays": [{ "param": "value_bins" }, { "param": "time_bins" }]
+      }
+    },
+    "tint_value_split": {
+      "shape": {
+        "arrayReturn":  { "lengthFrom": { "kind": "param", "name": "count" } },
+        "outputArrays": [{ "param": "bins" }]
+      }
+    },
+    "tint_value_time_split": {
+      "shape": {
+        "arrayReturn":  { "lengthFrom": { "kind": "param", "name": "count" } },
+        "outputArrays": [{ "param": "value_bins" }, { "param": "time_bins" }]
+      }
+    },
+
+    "tgeo_space_split": {
+      "shape": {
+        "arrayReturn":  { "lengthFrom": { "kind": "param", "name": "count" } },
+        "outputArrays": [{ "param": "space_bins" }]
+      }
+    },
+    "tgeo_space_time_split": {
+      "shape": {
+        "arrayReturn":  { "lengthFrom": { "kind": "param", "name": "count" } },
+        "outputArrays": [{ "param": "space_bins" }, { "param": "time_bins" }]
+      }
+    },
+
+    "tpoint_as_mvtgeom": {
+      "shape": {
+        "outputArrays": [
+          { "param": "gsarr",    "lengthFrom": { "kind": "param", "name": "count" } },
+          { "param": "timesarr", "lengthFrom": { "kind": "param", "name": "count" } }
+        ]
+      }
+    },
+
+    "tpointseq_make_coords": {
+      "shape": {
+        "arrayInputGroup": {
+          "params":   ["xcoords", "ycoords", "zcoords", "times"],
+          "count":    "count",
+          "nullable": ["zcoords", "times"]
+        }
+      }
+    },
+
+    "tempsubtype_from_string":   { "shape": { "namedOutputs": ["subtype"] } },
+    "geom_min_bounding_radius":  { "shape": { "namedOutputs": ["radius"] } },
+
+    "ttext_values":              { "shape": { "arrayReturn": { "lengthFrom": { "kind": "param", "name": "count" } } } }
   },
   "types": {
     "TSequence": { "meosType": "TPointSeq" },
