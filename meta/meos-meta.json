@@ -53,6 +53,8 @@
     "tstzset_values":            { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
     "geoset_values":             { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
     "npointset_values":          { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "cbufferset_values":         { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
+    "poseset_values":            { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "set_num_values", "arg": "s" } } } },
 
     "spanset_spanarr":           { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "spanset_num_spans", "arg": "ss" } } } },
     "spanset_sps":               { "shape": { "arrayReturn": { "lengthFrom": { "kind": "accessor", "func": "spanset_num_spans", "arg": "ss" } } } },
