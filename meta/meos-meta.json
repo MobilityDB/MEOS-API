@@ -105,6 +105,10 @@
       }
     },
 
+    "stbox_quad_split": {
+      "shape": { "arrayReturn": { "lengthFrom": { "kind": "param", "name": "count" } } }
+    },
+
     "tpoint_as_mvtgeom": {
       "shape": {
         "outputArrays": [
