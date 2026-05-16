@@ -98,6 +98,13 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
 # treating undeclared identifiers as int.  stdbool.h is the load-bearing one:
 # without it every `bool`-returning function is parsed with result_type
 # TypeKind.INT.
+#
+# The postgres integer typedefs are the same hazard: without a real
+# pg_config.h, postgres/c.h never typedefs int64, so int64 (and every
+# type built on it: TimestampTz, Timestamp, TimeADT, DateADT, ...)
+# collapses to implicit int and timestamp parameters are emitted 32-bit.
+# These mirror MobilityDB's postgres/c.h (LP64 branch), timestamp_def.h
+# and date.h exactly.
 _SYSTEM_HEADER_STUBS = """
 #ifndef bool
 #define bool _Bool
@@ -109,6 +116,21 @@ _SYSTEM_HEADER_STUBS = """
 #define false 0
 #endif
 typedef unsigned long size_t;
+typedef signed char int8;
+typedef signed short int16;
+typedef signed int int32;
+typedef long int int64;
+typedef unsigned char uint8;
+typedef unsigned short uint16;
+typedef unsigned int uint32;
+typedef unsigned long int uint64;
+typedef float float4;
+typedef double float8;
+typedef int64 Timestamp;
+typedef int64 TimestampTz;
+typedef int64 TimeADT;
+typedef int64 TimeOffset;
+typedef int32 DateADT;
 """
 
 
