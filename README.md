@@ -14,6 +14,7 @@ This catalog is the foundation for generating language bindings (Python, Java, G
 - [Adding metadata](#adding-metadata)
 - [Portable bare-name dialect](#portable-bare-name-dialect)
 - [OpenAPI generation](#openapi-generation)
+- [The object model](#the-object-model)
 
 ## Ecosystem
 
@@ -62,12 +63,14 @@ service contracts generated from the same model:
 
 ## How it works
 
-The pipeline runs in four steps:
+The pipeline runs as a chain of stages:
 
-1. **Parser** — scans the MEOS `.h` header files using libclang and extracts every function signature, struct, and enum into structured JSON.
+1. **Parser** — scans the MEOS `.h` header files using libclang and extracts every function signature, struct, and enum into structured JSON; a recovery pass restores the PG-vendored C types (`bool`, `int64`, `Timestamp(Tz)`, `H3Index`) that the preprocessor collapses to `int`.
 2. **Reconcile** — restores opaque types the PostgreSQL stub headers `#define` to `int` (`Interval`, `text`, …) from the header source, so they are not mistaken for `int *` out-parameters.
 3. **Enrich** — derives the service-projection metadata (`category` / `typeEncodings` / `network` / `wire`).
 4. **Merger** — applies manual annotations from `meta/meos-meta.json` (documentation, ownership, overrides) on top.
+5. **Portable aliases** — attaches the canonical portable bare-name mapping from `meta/portable-aliases.json`. See [Portable bare-name dialect](#portable-bare-name-dialect).
+6. **Object model** — makes the *implicit* MEOS class hierarchy explicit: it derives the class lattice and assigns every function to the class it is a method of, from the canonical mapping in `meta/object-model.json`. See [The object model](#the-object-model).
 
 ## Getting started
 
@@ -102,12 +105,21 @@ python setup.py --branch v1.2.0
 python run.py
 ```
 
-The result is written to `output/meos-api.json`.
+The result is written to `output/meos-idl.json`.
 
 You can also point the tool at a different headers directory:
 
 ```bash
 python run.py /path/to/custom/include
+```
+
+The object-model step also derives the per-function error contract by
+scanning the MobilityDB C sources (`_mobilitydb/meos/src`, fetched by
+`setup.py`). To audit the derived lattice against the most mature
+hand-built model (PyMEOS):
+
+```bash
+python object_model_parity.py   # -> output/meos-object-model-parity.json
 ```
 
 ## Output format
@@ -182,6 +194,12 @@ See [`docs/enrichment.md`](docs/enrichment.md) for the full contract and
 [`tests/test_enrich.py`](tests/test_enrich.py) for worked examples on real
 MEOS signatures (run: `python3 tests/test_enrich.py`).
 
+In addition, `meos-idl.json` carries an `objectModel` block: the explicit
+class lattice (`classes`, `lattice`), the reverse index assigning each
+function to the class it is a method of (`functionToClass`), the
+closed-algebra companion hierarchies (`companions`), the error contract
+(`errors`), and the irregularity worklist (`corrections`).
+
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog — including any field derived by the service-projection pass (e.g. correcting a `category` or forcing `network.exposable`).
@@ -230,3 +248,19 @@ no MEOS runtime); see [`docs/openapi.md`](docs/openapi.md) for the projection
 rules, `x-meos-*` extensions, and roadmap (OGC API, MCP, runtime server), and
 [`tests/test_openapi.py`](tests/test_openapi.py) for worked examples
 (`python3 tests/test_openapi.py`).
+
+## The object model
+
+MEOS is C — it has no classes. The object model is encoded by convention
+in the `Temporal`/`TInstant`/`TSequence`/`TSequenceSet` struct family (the
+template axis), the `temptype` discriminator whose base type is the
+missing template parameter (the type-family axis), and the function-name
+prefixes that bind a function to the class it is a method of
+(`temporal_*` = the late-bound superclass; `tnumber_*`/`tspatial_*`/
+`tpoint_*`/`tgeo_*` = abstract families; `tbool_*`/`tint_*`/… = exact
+types). `meta/object-model.json` makes that lattice explicit so every
+binding/engine derives the **same** classes and methods from one mapping.
+
+See [docs/object-model.md](docs/object-model.md) for the full
+specification, the closed-algebra companion hierarchies, the error
+contract, the parity audit, and the irregularity worklist.
