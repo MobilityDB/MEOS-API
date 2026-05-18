@@ -42,7 +42,12 @@ def step_clone(branch: str) -> None:
             REPO_URL,
             str(CLONE_DIR),
         ])
-        run(["git", "-C", str(CLONE_DIR), "sparse-checkout", "set", "meos/include", "postgres"])
+    # `meos/src` is needed by the object-model stage: the error-contract
+    # scan and the lattice drift gate read the predicate bodies and
+    # MEOS_TEMPTYPE_CATALOG. Applied idempotently so existing clones pick
+    # it up on update too.
+    run(["git", "-C", str(CLONE_DIR), "sparse-checkout", "set",
+         "meos/include", "meos/src", "postgres"])
     print(f"      Done.")
 
 

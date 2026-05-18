@@ -1,0 +1,1461 @@
+{
+  "_comment": "The implicit MEOS object model, made explicit — the single codegen source of truth for the class hierarchy and its methods. MEOS is C: it has no classes. The object model is encoded by convention in (1) the Temporal/TInstant/TSequence/TSequenceSet struct family discriminated by `subtype` (the template axis), (2) the `temptype` discriminator whose base type is the missing template parameter (the type-family axis), and (3) function-name prefixes that bind a function to the class it is a method of (temporal_* = the superclass, late-bound; tnumber_*/tspatial_*/tpoint_*/tgeo_* = abstract families; tbool_*/tint_*/... = exact types). This file makes that lattice explicit so every binding/engine (PyMEOS, JMEOS, MEOS.NET, MobilityDuck, ...) derives the SAME classes and methods from one mapping instead of re-curating it by hand. Curated canonical data verbatim; the parser only adds DERIVED lookups (children, depth, method assignment, reverse indexes) — no class is guessed.",
+  "provenance": {
+    "discussion": "MobilityDB#861 (edge-to-cloud portability); MEOS-API object-model generalization",
+    "matureModel": "PyMEOS (the most mature hand-built OO model) is used as the parity ORACLE, not the source of truth: it is a strict subset of today's MEOS (it lacks TGeometry/TGeography/TCBuffer/TNPoint/TPose/TRGeometry classes that MEOS now defines).",
+    "sourceOfTruth": "MobilityDB meos/src/temporal/meos_catalog.c — the type-family predicate functions and MEOS_TEMPTYPE_CATALOG are the authoritative membership oracle; meos/include/meos.h — the tempSubtype and errorCode enums. The regression test re-derives every membership set from these so this file cannot silently drift.",
+    "predicates": {
+      "temporal_type": "meos_catalog.c — all temporal types (superclass membership)",
+      "talpha_type": "meos_catalog.c — {T_TBOOL,T_TTEXT} (+ internal tdoubleN)",
+      "tnumber_type": "meos_catalog.c — {T_TINT,T_TFLOAT}",
+      "tnumber_basetype": "meos_catalog.c — {T_INT4,T_FLOAT8}",
+      "tspatial_type": "meos_catalog.c — points+geos (+ cbuffer/npoint/pose/rgeo, #if-gated)",
+      "tpoint_type": "meos_catalog.c — {T_TGEOMPOINT,T_TGEOGPOINT}",
+      "tgeo_type": "meos_catalog.c — {T_TGEOMETRY,T_TGEOGRAPHY}",
+      "tgeo_type_all": "meos_catalog.c — {T_TGEOMETRY,T_TGEOGRAPHY,T_TGEOMPOINT,T_TGEOGPOINT} (overlap — see corrections)",
+      "tgeometry_type": "meos_catalog.c — {T_TGEOMPOINT,T_TGEOMETRY} (the geometry-based TRAIT, not the TGeometry class — see corrections)",
+      "tgeodetic_type": "meos_catalog.c — {T_TGEOGPOINT,T_TGEOGRAPHY} (the geodetic TRAIT)",
+      "catalog": "MEOS_TEMPTYPE_CATALOG[] — temptype -> base type (the missing template parameter)"
+    },
+    "manual": {
+      "_comment": "The MobilityDB manual is the AUTHORITATIVE source for the conceptual class tree of the spatial subtree. The figure is conceptual and partial (spatial-only; omits Temporal/TAlpha/TNumber and the planned tpcpoint/tpcpatch). This model reconciles to it: TGeo is the broad parent of all PostGIS-derived types (= tgeo_type_all); TPoint is added as an API-level intermediate under TGeo (not drawn in the figure) so the tpoint_* method family binds to a class.",
+      "chapter": "Ch.7 Temporal Geometry Types (doc/temporal_spatial_p1.xml), https://mobilitydb.github.io/MobilityDB/master/ch07.html",
+      "figure": "Figure 7.1 'Hierarchy of spatiotemporal types in MobilityDB' (doc/images/tspatial.svg)",
+      "figureNodes": [
+        "TSpatial",
+        "TGeo",
+        "TGeometry",
+        "TGeography",
+        "TGeomPoint",
+        "TGeogPoint",
+        "TCbuffer",
+        "TNpoint",
+        "TPose",
+        "TRGeometry"
+      ],
+      "figureEdges": "TSpatial -> {TGeo, TCbuffer, TNpoint, TPose, TRGeometry}; TGeo -> {TGeometry, TGeography, TGeomPoint, TGeogPoint}",
+      "modelAdds": [
+        "TPoint (API-level intermediate under TGeo; see OM-M6)"
+      ]
+    }
+  },
+  "axes": {
+    "_comment": "Temporal is concretized along two orthogonal axes. A concrete class is the product leaf-family x subtype, e.g. TFloatSeq, TGeomPointInst.",
+    "subtype": {
+      "enum": "tempSubtype",
+      "_comment": "The template axis — Temporal/TInstant/TSequence/TSequenceSet. Values verbatim from meos.h tempSubtype; gated against source.",
+      "values": [
+        {
+          "name": "ANYTEMPSUBTYPE",
+          "value": 0,
+          "class": null,
+          "prefix": null
+        },
+        {
+          "name": "TINSTANT",
+          "value": 1,
+          "class": "TInstant",
+          "prefix": "tinstant"
+        },
+        {
+          "name": "TSEQUENCE",
+          "value": 2,
+          "class": "TSequence",
+          "prefix": "tsequence"
+        },
+        {
+          "name": "TSEQUENCESET",
+          "value": 3,
+          "class": "TSequenceSet",
+          "prefix": "tsequenceset"
+        }
+      ]
+    },
+    "typeFamily": {
+      "_comment": "The type-family axis — the inheritance lattice; the leaf's base type is the missing template parameter. Single-inheritance TREE (the geometry/geodetic split is a TRAIT, not a parent, to avoid a diamond — see traits)."
+    }
+  },
+  "lattice": {
+    "_comment": "Each node: kind (root|abstract|leaf); parent (class-tree parent, single inheritance); predicate (the MEOS C membership oracle); prefix(es) (function-name prefix(es) that bind methods to this node — methods of a node are inherited by all descendants); temptypes (MeosType members; gated against the predicate body); for leaves cBaseType (gated against MEOS_TEMPTYPE_CATALOG) and conditional (#if compile guard).",
+    "Temporal": {
+      "kind": "root",
+      "parent": null,
+      "predicate": "temporal_type",
+      "prefixes": [
+        "temporal"
+      ],
+      "temptypes": [
+        "T_TBOOL",
+        "T_TINT",
+        "T_TFLOAT",
+        "T_TTEXT",
+        "T_TGEOMPOINT",
+        "T_TGEOGPOINT",
+        "T_TGEOMETRY",
+        "T_TGEOGRAPHY",
+        "T_TCBUFFER",
+        "T_TNPOINT",
+        "T_TPOSE",
+        "T_TRGEOMETRY"
+      ],
+      "doc": "Superclass of every temporal type; temporal_* functions are late-bound over `subtype` and `temptype`."
+    },
+    "TAlpha": {
+      "kind": "abstract",
+      "parent": "Temporal",
+      "predicate": "talpha_type",
+      "prefixes": [
+        "talpha"
+      ],
+      "temptypes": [
+        "T_TBOOL",
+        "T_TTEXT"
+      ],
+      "doc": "Non-numeric, non-spatial temporal types (step/discrete interpolation only). A real MEOS grouping (talpha_type) with no user-facing class name in PyMEOS — see corrections."
+    },
+    "TBool": {
+      "kind": "leaf",
+      "parent": "TAlpha",
+      "predicate": null,
+      "prefixes": [
+        "tbool"
+      ],
+      "temptypes": [
+        "T_TBOOL"
+      ],
+      "cBaseType": "T_BOOL"
+    },
+    "TText": {
+      "kind": "leaf",
+      "parent": "TAlpha",
+      "predicate": null,
+      "prefixes": [
+        "ttext"
+      ],
+      "temptypes": [
+        "T_TTEXT"
+      ],
+      "cBaseType": "T_TEXT"
+    },
+    "TNumber": {
+      "kind": "abstract",
+      "parent": "Temporal",
+      "predicate": "tnumber_type",
+      "prefixes": [
+        "tnumber"
+      ],
+      "temptypes": [
+        "T_TINT",
+        "T_TFLOAT"
+      ],
+      "basePredicate": "tnumber_basetype",
+      "doc": "Temporal numbers; supports linear interpolation."
+    },
+    "TInt": {
+      "kind": "leaf",
+      "parent": "TNumber",
+      "predicate": null,
+      "prefixes": [
+        "tint"
+      ],
+      "temptypes": [
+        "T_TINT"
+      ],
+      "cBaseType": "T_INT4"
+    },
+    "TFloat": {
+      "kind": "leaf",
+      "parent": "TNumber",
+      "predicate": null,
+      "prefixes": [
+        "tfloat"
+      ],
+      "temptypes": [
+        "T_TFLOAT"
+      ],
+      "cBaseType": "T_FLOAT8"
+    },
+    "TSpatial": {
+      "kind": "abstract",
+      "parent": "Temporal",
+      "predicate": "tspatial_type",
+      "prefixes": [
+        "tspatial"
+      ],
+      "temptypes": [
+        "T_TGEOMPOINT",
+        "T_TGEOGPOINT",
+        "T_TGEOMETRY",
+        "T_TGEOGRAPHY",
+        "T_TCBUFFER",
+        "T_TNPOINT",
+        "T_TPOSE",
+        "T_TRGEOMETRY"
+      ],
+      "doc": "Temporal types carrying an STBox spatial bounding box."
+    },
+    "TGeo": {
+      "kind": "abstract",
+      "parent": "TSpatial",
+      "predicate": "tgeo_type_all",
+      "apiPredicate": "tgeo_type",
+      "prefixes": [
+        "tgeo"
+      ],
+      "userFacingName": "TGeo",
+      "temptypes": [
+        "T_TGEOMETRY",
+        "T_TGEOGRAPHY",
+        "T_TGEOMPOINT",
+        "T_TGEOGPOINT"
+      ],
+      "doc": "All PostGIS-derived spatiotemporal types (geometry/geography-based). Authoritative parent per MobilityDB manual Ch.7 Figure 7.1 (= the broad C predicate tgeo_type_all). NOTE: the narrower C predicate tgeo_type() and most tgeo_* functions reject points — class membership (manual) is broader than tgeo_* API applicability; see correction OM-M1."
+    },
+    "TPoint": {
+      "kind": "abstract",
+      "parent": "TGeo",
+      "predicate": "tpoint_type",
+      "prefixes": [
+        "tpoint"
+      ],
+      "userFacingName": "TPoint",
+      "temptypes": [
+        "T_TGEOMPOINT",
+        "T_TGEOGPOINT"
+      ],
+      "doc": "Temporal points. API-level intermediate (C predicate tpoint_type + the tpoint_* method family); NOT drawn in the manual Figure 7.1 (a conceptual diagram) but required so the tpoint_* methods bind to a class — see correction OM-M6."
+    },
+    "TGeomPoint": {
+      "kind": "leaf",
+      "parent": "TPoint",
+      "predicate": null,
+      "prefixes": [
+        "tgeompoint"
+      ],
+      "userFacingName": "TGeomPoint",
+      "temptypes": [
+        "T_TGEOMPOINT"
+      ],
+      "cBaseType": "T_GEOMETRY",
+      "traits": [
+        "geometryBased"
+      ]
+    },
+    "TGeogPoint": {
+      "kind": "leaf",
+      "parent": "TPoint",
+      "predicate": null,
+      "prefixes": [
+        "tgeogpoint"
+      ],
+      "userFacingName": "TGeogPoint",
+      "temptypes": [
+        "T_TGEOGPOINT"
+      ],
+      "cBaseType": "T_GEOGRAPHY",
+      "traits": [
+        "geodetic"
+      ]
+    },
+    "TGeometry": {
+      "kind": "leaf",
+      "parent": "TGeo",
+      "predicate": null,
+      "prefixes": [
+        "tgeometry"
+      ],
+      "userFacingName": "TGeometry",
+      "temptypes": [
+        "T_TGEOMETRY"
+      ],
+      "cBaseType": "T_GEOMETRY",
+      "traits": [
+        "geometryBased"
+      ]
+    },
+    "TGeography": {
+      "kind": "leaf",
+      "parent": "TGeo",
+      "predicate": null,
+      "prefixes": [
+        "tgeography"
+      ],
+      "userFacingName": "TGeography",
+      "temptypes": [
+        "T_TGEOGRAPHY"
+      ],
+      "cBaseType": "T_GEOGRAPHY",
+      "traits": [
+        "geodetic"
+      ]
+    },
+    "TCbuffer": {
+      "kind": "leaf",
+      "parent": "TSpatial",
+      "predicate": null,
+      "prefixes": [
+        "tcbuffer"
+      ],
+      "userFacingName": "TCbuffer",
+      "temptypes": [
+        "T_TCBUFFER"
+      ],
+      "cBaseType": "T_CBUFFER",
+      "conditional": "CBUFFER"
+    },
+    "TNpoint": {
+      "kind": "leaf",
+      "parent": "TSpatial",
+      "predicate": null,
+      "prefixes": [
+        "tnpoint"
+      ],
+      "userFacingName": "TNpoint",
+      "temptypes": [
+        "T_TNPOINT"
+      ],
+      "cBaseType": "T_NPOINT",
+      "conditional": "NPOINT"
+    },
+    "TPose": {
+      "kind": "leaf",
+      "parent": "TSpatial",
+      "predicate": null,
+      "prefixes": [
+        "tpose"
+      ],
+      "userFacingName": "TPose",
+      "temptypes": [
+        "T_TPOSE"
+      ],
+      "cBaseType": "T_POSE",
+      "conditional": "POSE"
+    },
+    "TRGeometry": {
+      "kind": "leaf",
+      "parent": "TSpatial",
+      "predicate": null,
+      "prefixes": [
+        "trgeometry",
+        "trgeo"
+      ],
+      "userFacingName": "TRGeometry",
+      "internalPrefix": "trgeo",
+      "temptypes": [
+        "T_TRGEOMETRY"
+      ],
+      "cBaseType": "T_POSE",
+      "conditional": "RGEO",
+      "note": "Base type is T_POSE, not a geometry — base != name (see corrections). User-facing API name is `trgeometry`; internal C functions keep the `trgeo_` prefix and must NOT be normalized."
+    }
+  },
+  "traits": {
+    "_comment": "Orthogonal boolean axes — NOT inheritance parents (modelling them as parents would create a diamond TGeomPoint<-{TPoint,TGeometryBased}). Tagged on leaves; each backed by a MEOS predicate, gated against source.",
+    "geometryBased": {
+      "predicate": "tgeometry_type",
+      "temptypes": [
+        "T_TGEOMPOINT",
+        "T_TGEOMETRY"
+      ],
+      "doc": "Cartesian (planar) base — geometry."
+    },
+    "geodetic": {
+      "predicate": "tgeodetic_type",
+      "temptypes": [
+        "T_TGEOGPOINT",
+        "T_TGEOGRAPHY"
+      ],
+      "doc": "Ellipsoidal base — geography."
+    }
+  },
+  "prefixMap": {
+    "_comment": "function-name prefix -> {node, scope}. The classifier matches the LONGEST prefix first (so tgeompoint_ beats tgeo_, tsequenceset_ beats tsequence_, and constructors <leaf><subtype>_ beat <leaf>_). scope: superclass | family | exact | subtype | companion. A function with no prefix match (operator overloads, base-type helpers like datum_*/geo_*, plumbing) is recorded under functionToClass as class=null with reason — never force-fitted.",
+    "rule": "longest-prefix-wins",
+    "superclass": [
+      "temporal"
+    ],
+    "family": [
+      "talpha",
+      "tnumber",
+      "tspatial",
+      "tpoint",
+      "tgeo"
+    ],
+    "exact": [
+      "tbool",
+      "ttext",
+      "tint",
+      "tfloat",
+      "tgeompoint",
+      "tgeogpoint",
+      "tgeometry",
+      "tgeography",
+      "tcbuffer",
+      "tnpoint",
+      "tpose",
+      "trgeo",
+      "trgeometry"
+    ],
+    "subtype": [
+      "tinstant",
+      "tsequence",
+      "tsequenceset"
+    ],
+    "companion": [
+      "span",
+      "spanset",
+      "set",
+      "tbox",
+      "stbox"
+    ]
+  },
+  "companions": {
+    "_comment": "MEOS is a CLOSED ALGEBRA: temporal operations return/consume spans, sets and boxes. Without these companion hierarchies the methods cannot be typed (e.g. tnumber_to_span -> *Span, temporal_time -> TsTzSpanSet, tnumber_to_tbox -> TBox). Parallel hierarchies (not subclasses of Temporal). temptypes gated against the MeosType enum.",
+    "Box": {
+      "root": "Box",
+      "nodes": {
+        "Box": {
+          "kind": "root",
+          "parent": null,
+          "doc": "Bounding-box family."
+        },
+        "TBox": {
+          "kind": "leaf",
+          "parent": "Box",
+          "prefixes": [
+            "tbox"
+          ],
+          "temptype": "T_TBOX",
+          "doc": "Numeric x time box (bbox of TNumber)."
+        },
+        "STBox": {
+          "kind": "leaf",
+          "parent": "Box",
+          "prefixes": [
+            "stbox"
+          ],
+          "temptype": "T_STBOX",
+          "doc": "Space x time box (bbox of TSpatial)."
+        }
+      }
+    },
+    "Collection": {
+      "root": "Collection",
+      "nodes": {
+        "Collection": {
+          "kind": "root",
+          "parent": null
+        },
+        "Set": {
+          "kind": "abstract",
+          "parent": "Collection",
+          "prefixes": [
+            "set"
+          ],
+          "doc": "Unordered set of base values."
+        },
+        "Span": {
+          "kind": "abstract",
+          "parent": "Collection",
+          "prefixes": [
+            "span"
+          ],
+          "doc": "Contiguous range over an ordered base type."
+        },
+        "SpanSet": {
+          "kind": "abstract",
+          "parent": "Collection",
+          "prefixes": [
+            "spanset"
+          ],
+          "doc": "Set of disjoint spans."
+        },
+        "IntSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_INTSET"
+        },
+        "BigIntSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_BIGINTSET"
+        },
+        "FloatSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_FLOATSET"
+        },
+        "TextSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_TEXTSET"
+        },
+        "DateSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_DATESET"
+        },
+        "TsTzSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_TSTZSET"
+        },
+        "GeomSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_GEOMSET"
+        },
+        "GeogSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_GEOGSET"
+        },
+        "NpointSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_NPOINTSET",
+          "conditional": "NPOINT"
+        },
+        "PoseSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_POSESET",
+          "conditional": "POSE"
+        },
+        "CbufferSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_CBUFFERSET",
+          "conditional": "CBUFFER"
+        },
+        "IntSpan": {
+          "kind": "leaf",
+          "parent": "Span",
+          "temptype": "T_INTSPAN"
+        },
+        "BigIntSpan": {
+          "kind": "leaf",
+          "parent": "Span",
+          "temptype": "T_BIGINTSPAN"
+        },
+        "FloatSpan": {
+          "kind": "leaf",
+          "parent": "Span",
+          "temptype": "T_FLOATSPAN"
+        },
+        "DateSpan": {
+          "kind": "leaf",
+          "parent": "Span",
+          "temptype": "T_DATESPAN"
+        },
+        "TsTzSpan": {
+          "kind": "leaf",
+          "parent": "Span",
+          "temptype": "T_TSTZSPAN"
+        },
+        "IntSpanSet": {
+          "kind": "leaf",
+          "parent": "SpanSet",
+          "temptype": "T_INTSPANSET"
+        },
+        "BigIntSpanSet": {
+          "kind": "leaf",
+          "parent": "SpanSet",
+          "temptype": "T_BIGINTSPANSET"
+        },
+        "FloatSpanSet": {
+          "kind": "leaf",
+          "parent": "SpanSet",
+          "temptype": "T_FLOATSPANSET"
+        },
+        "DateSpanSet": {
+          "kind": "leaf",
+          "parent": "SpanSet",
+          "temptype": "T_DATESPANSET"
+        },
+        "TsTzSpanSet": {
+          "kind": "leaf",
+          "parent": "SpanSet",
+          "temptype": "T_TSTZSPANSET"
+        }
+      }
+    }
+  },
+  "algebra": {
+    "_comment": "Closed-algebra relations — which companion type a temporal family yields, so codegen can type returns/arguments. Curated from the canonical accessor functions; informative, not exhaustive.",
+    "relations": [
+      {
+        "from": "Temporal",
+        "to": "TsTzSpan",
+        "relation": "timeExtent",
+        "via": "temporal_to_tstzspan"
+      },
+      {
+        "from": "Temporal",
+        "to": "TsTzSpanSet",
+        "relation": "time",
+        "via": "temporal_time",
+        "note": "TsTzSpanSet (PyMEOS / MEOS.js casing) is the model name for the MEOS tstzspanset collection type"
+      },
+      {
+        "from": "TNumber",
+        "to": "Span",
+        "relation": "valueSpan",
+        "via": "tnumber_to_span"
+      },
+      {
+        "from": "TNumber",
+        "to": "TBox",
+        "relation": "bbox",
+        "via": "tnumber_to_tbox"
+      },
+      {
+        "from": "TSpatial",
+        "to": "STBox",
+        "relation": "bbox",
+        "via": "tspatial_to_stbox"
+      },
+      {
+        "from": "Temporal",
+        "to": "Set",
+        "relation": "values",
+        "via": "<leaf>_values / <leaf>_valueset"
+      }
+    ]
+  },
+  "errors": {
+    "_comment": "The MEOS error/exception contract. MEOS has a single raise mechanism: meos_error(int errlevel, int errcode, const char *fmt, ...) (meos.h). errcode is an `errorCode` enum value. The per-function `raises` set is DERIVED by static scan of the function definition body in MobilityDB meos/src (see derivation) — never fabricated.",
+    "enum": "errorCode",
+    "raiseSite": "meos_error(int errlevel, int errcode, const char *format, ...)",
+    "codes": [
+      {
+        "name": "MEOS_SUCCESS",
+        "value": 0,
+        "meaning": "Successful operation"
+      },
+      {
+        "name": "MEOS_ERR_INTERNAL_ERROR",
+        "value": 1,
+        "meaning": "Unspecified internal error"
+      },
+      {
+        "name": "MEOS_ERR_INTERNAL_TYPE_ERROR",
+        "value": 2,
+        "meaning": "Internal type error"
+      },
+      {
+        "name": "MEOS_ERR_VALUE_OUT_OF_RANGE",
+        "value": 3,
+        "meaning": "Internal out of range error"
+      },
+      {
+        "name": "MEOS_ERR_DIVISION_BY_ZERO",
+        "value": 4,
+        "meaning": "Internal division by zero error"
+      },
+      {
+        "name": "MEOS_ERR_MEMORY_ALLOC_ERROR",
+        "value": 5,
+        "meaning": "Internal malloc error"
+      },
+      {
+        "name": "MEOS_ERR_AGGREGATION_ERROR",
+        "value": 6,
+        "meaning": "Internal aggregation error"
+      },
+      {
+        "name": "MEOS_ERR_DIRECTORY_ERROR",
+        "value": 7,
+        "meaning": "Internal directory error"
+      },
+      {
+        "name": "MEOS_ERR_FILE_ERROR",
+        "value": 8,
+        "meaning": "Internal file error"
+      },
+      {
+        "name": "MEOS_ERR_INVALID_ARG",
+        "value": 10,
+        "meaning": "Invalid argument"
+      },
+      {
+        "name": "MEOS_ERR_INVALID_ARG_TYPE",
+        "value": 11,
+        "meaning": "Invalid argument type"
+      },
+      {
+        "name": "MEOS_ERR_INVALID_ARG_VALUE",
+        "value": 12,
+        "meaning": "Invalid argument value"
+      },
+      {
+        "name": "MEOS_ERR_FEATURE_NOT_SUPPORTED",
+        "value": 13,
+        "meaning": "Feature not currently supported"
+      },
+      {
+        "name": "MEOS_ERR_MFJSON_INPUT",
+        "value": 20,
+        "meaning": "MFJSON input error"
+      },
+      {
+        "name": "MEOS_ERR_MFJSON_OUTPUT",
+        "value": 21,
+        "meaning": "MFJSON output error"
+      },
+      {
+        "name": "MEOS_ERR_TEXT_INPUT",
+        "value": 22,
+        "meaning": "Text input error"
+      },
+      {
+        "name": "MEOS_ERR_TEXT_OUTPUT",
+        "value": 23,
+        "meaning": "Text output error"
+      },
+      {
+        "name": "MEOS_ERR_WKB_INPUT",
+        "value": 24,
+        "meaning": "WKB input error"
+      },
+      {
+        "name": "MEOS_ERR_WKB_OUTPUT",
+        "value": 25,
+        "meaning": "WKB output error"
+      },
+      {
+        "name": "MEOS_ERR_GEOJSON_INPUT",
+        "value": 26,
+        "meaning": "GEOJSON input error"
+      },
+      {
+        "name": "MEOS_ERR_GEOJSON_OUTPUT",
+        "value": 27,
+        "meaning": "GEOJSON output error"
+      }
+    ],
+    "derivation": {
+      "sourceGlob": "<MobilityDB>/meos/src/**/*.c",
+      "direct": "Collect the 2nd argument symbol of every meos_error(...) call textually present in the function's definition body.",
+      "viaEnsure": "MEOS guards arguments through `ensure_*` helper predicates that themselves call meos_error. Build an ensureFn -> {codes} map from the ensure_* bodies and resolve ONE indirection level; tag those entries via=\"ensure\".",
+      "honesty": "Each raises entry carries via=\"direct\"|\"ensure\". If the source tree is unavailable the scan is a no-op: per-function raises is omitted and errors.status=\"source-unavailable\" — an honest signal, never an empty-set claim and never a fabricated verdict (mirrors portable_parity.py).",
+      "status": "pending-scan"
+    }
+  },
+  "scope": {
+    "inScopeTypeFamilies": [
+      "temporal",
+      "alpha",
+      "number",
+      "geo",
+      "point",
+      "cbuffer",
+      "npoint",
+      "pose",
+      "rgeo"
+    ],
+    "note": "cbuffer / npoint / pose / rgeo are FULL user-facing temporal types and ARE in scope — full leaf classes like every other type, never deferred or excluded from any parity headline. The companion Box and Collection hierarchies are in scope because the closed algebra requires them to type method returns/arguments. Where the parity oracle (PyMEOS) lacks a class that MEOS defines, that is incomplete work in the oracle to close (a gap with a stated correction), never an accepted exclusion of the MEOS class."
+  },
+  "notes": [
+    "Derive classes and methods by REUSING the MEOS prefix convention (equivalence by construction), never by reimplementing or guessing; a function with no prefix match is recorded honestly as unclassified with a reason, never force-fitted.",
+    "Single-inheritance class TREE; the geometry/geodetic distinction is a TRAIT axis, not a parent, to avoid a diamond — a clarifying correction over ad-hoc hand-built models.",
+    "User-facing API uses the full name `trgeometry`; internal functions keep the `trgeo_` prefix — do NOT normalize the internal prefix.",
+    "Goal: 100% — every public MEOS function is assigned to exactly one class (or honestly recorded as a free/operator/plumbing function), and the derived lattice is a superset-correct, drift-gated reflection of MEOS."
+  ],
+  "corrections": {
+    "_comment": "Irregularities found while making the model explicit, surfaced as a durable, reviewable worklist (the user asked for corrections on every irregularity). side=meos|pymeos. These SEED object_model_parity.py; the parity audit may add more. Reporting only — fixes land as separate PRs in those repos by their own sessions.",
+    "items": [
+      {
+        "id": "OM-M1",
+        "side": "meos",
+        "severity": "naming",
+        "location": "meos/src/temporal/meos_catalog.c tgeo_type() vs tgeo_type_all()",
+        "observed": "The MobilityDB manual (Ch.7 Figure 7.1) is authoritative: the CLASS TGeo is the broad parent of {tgeometry,tgeography,tgeompoint,tgeogpoint} (= the C predicate tgeo_type_all). But the C predicate tgeo_type() is narrow {tgeometry,tgeography} and most tgeo_* functions reject points — so the tgeo_* API is narrower than TGeo class membership. The two C predicates with near-identical names encode different scopes (class vs API applicability).",
+        "suggested": "Treat tgeo_type_all() as the class-membership predicate for TGeo (per the manual) and rename the narrow tgeo_type() to e.g. tgeo_nonpoint_type() (or generalise the tgeo_* functions to accept points). Codegen binds tgeo_* methods to TGeo but must mark them not-applicable to the TPoint subtree until resolved."
+      },
+      {
+        "id": "OM-M2",
+        "side": "meos",
+        "severity": "naming",
+        "location": "meos/src/temporal/meos_catalog.c tgeometry_type()",
+        "observed": "tgeometry_type() = {tgeompoint,tgeometry} means 'geometry-based (non-geodetic)', NOT 'is the TGeometry type'. Misleads readers into thinking it selects TGeometry.",
+        "suggested": "Rename to tgeometric_type()/tspatial_geometric_type() (paired with tgeodetic_type()) to express the planar-vs-ellipsoidal trait axis unambiguously."
+      },
+      {
+        "id": "OM-M3",
+        "side": "meos",
+        "severity": "doc",
+        "location": "MEOS_TEMPTYPE_CATALOG[] {T_TRGEOMETRY, T_POSE}",
+        "observed": "TRGeometry's base type is T_POSE, not a geometry — base type != type name, surprising and undocumented at the model level.",
+        "suggested": "Document the rigid-geometry = pose-backed design in the type catalog; codegen must read cBaseType from the catalog, never infer it from the class name."
+      },
+      {
+        "id": "OM-M4",
+        "side": "meos",
+        "severity": "modelling",
+        "location": "meos/src/temporal/meos_catalog.c talpha_type()",
+        "observed": "talpha_type() = {tbool,ttext}(+internal tdoubleN) is a real intermediate grouping with no user-facing class name; PyMEOS has no TAlpha. The non-number/non-spatial branch is implicit.",
+        "suggested": "Adopt TAlpha as the documented abstract class for step-interpolated scalar temporals (parent of TBool/TText); generators expose it as an abstract base."
+      },
+      {
+        "id": "OM-M5",
+        "side": "meos",
+        "severity": "naming",
+        "location": "meos/include/meos_pose.h (commit 70817cd23)",
+        "observed": "tpose_to_tpoint -> tpose_to_tgeompoint and tdistance_tpose_point -> tdistance_tpose_geo renames show the prefix grammar strains on overloaded 'point'/'geo'.",
+        "suggested": "Adopt a consistent suffix grammar ecosystem-wide: _to_<exactLeafType>, and <argKind> ∈ {geo,point,tpoint,...} naming the exact argument shape; apply via the signature-uniformization worklist."
+      },
+      {
+        "id": "OM-M6",
+        "side": "meos",
+        "severity": "doc",
+        "location": "MobilityDB manual Ch.7 Figure 7.1 (doc/images/tspatial.svg)",
+        "observed": "The published class-hierarchy figure is conceptual and PARTIAL: (a) it is spatial-only — it omits the Temporal root and the TAlpha/TNumber/TBool/TInt/TFloat/TText subtree; (b) it draws tgeompoint/tgeogpoint as direct TGeo subtypes with no TPoint node, yet the C API has tpoint_type() + a 25-function tpoint_* family that needs a class to bind to. This model is a superset that reconciles both: TPoint is inserted as an API-level abstract under TGeo.",
+        "suggested": "Either add TPoint to Figure 7.1 (and the omitted non-spatial subtree to a companion figure) or annotate the figure as the conceptual spatial view; document that the API recognises a TPoint grouping under TGeo."
+      },
+      {
+        "id": "OM-M7",
+        "side": "meos",
+        "severity": "missing-type",
+        "location": "MEOS catalog (MeosType enum) + manual Figure 7.1",
+        "observed": "tpcpoint (temporal point-cloud point) and tpcpatch (temporal point-cloud patch) are absent from master MEOS (0 hits in meos/include, meos/src, doc/*.xml) and from Figure 7.1. They are planned spatial leaf types not yet in the drift-gated source of truth.",
+        "suggested": "Add T_TPCPOINT/T_TPCPATCH to the MeosType enum + MEOS_TEMPTYPE_CATALOG and the tpcpoint_*/tpcpatch_* API; this model derives them automatically once present (TSpatial conditional-guarded leaves). Until then they are honestly out of scope, never fabricated."
+      },
+      {
+        "id": "OM-P1",
+        "side": "pymeos",
+        "severity": "missing-class",
+        "location": "PyMEOS pymeos/factory.py _TemporalFactory._mapper",
+        "observed": "Only 6 leaf families x 3 subtypes (18 entries): TBool/TInt/TFloat/TText/TGeomPoint/TGeogPoint. Missing the temporal types MEOS now defines: TGeometry, TGeography, TCbuffer, TNpoint, TPose, TRGeometry (x3 subtypes = 18 missing classes).",
+        "suggested": "Generate the full leaf x subtype matrix from this model (codegen) so PyMEOS is a complete, drift-gated reflection of MEOS instead of a hand-maintained subset."
+      },
+      {
+        "id": "OM-P2",
+        "side": "pymeos",
+        "severity": "missing-class",
+        "location": "PyMEOS pymeos/temporal, pymeos/main",
+        "observed": "No TAlpha intermediate; TBool/TText hang directly off Temporal, so the talpha_* method group has no home class.",
+        "suggested": "Introduce TAlpha (abstract, parent of TBool/TText) carrying talpha_* methods."
+      },
+      {
+        "id": "OM-P3",
+        "side": "pymeos",
+        "severity": "code-smell",
+        "location": "PyMEOS pymeos/main/tpoint.py (TGeomPointInst/TGeogPointInst)",
+        "observed": "_make_function = lambda *args: None and _cast_function = lambda x: None are non-functional placeholders to satisfy the abstract template; the real constructor is bypassed.",
+        "suggested": "Wire the real <leaf>inst_make constructor (derivable from the model's subtype-constructor mapping) or restructure the template so the hole is unnecessary."
+      },
+      {
+        "id": "OM-P4",
+        "side": "pymeos",
+        "severity": "type-axis",
+        "location": "PyMEOS pymeos/main/tpoint.py TPoint(Temporal[shp.Point,...])",
+        "observed": "TPoint uses shapely BaseGeometry as the base-type parameter while every other family uses a scalar base — the base-type axis is inconsistent across families.",
+        "suggested": "Align the generic base parameter with the model's cBaseType (GEOMETRY/GEOGRAPHY) and a consistent wrapper type."
+      },
+      {
+        "id": "OM-P5",
+        "side": "pymeos",
+        "severity": "naming",
+        "location": "PyMEOS pymeos/main/tpoint.py bearing()",
+        "observed": "bearing() dispatches to bearing_tpoint_point/bearing_tpoint_tpoint — method placed on TPoint but the C name is not a tpoint_* prefix; ad-hoc vs the consistent tpoint_azimuth.",
+        "suggested": "Record bearing_* under functionToClass as an operator/free function with a curated canonical home (TPoint), so every binding places it identically instead of per-binding ad hoc."
+      },
+      {
+        "id": "OM-P6",
+        "side": "pymeos",
+        "severity": "missing-class",
+        "location": "PyMEOS pymeos/factory.py _CollectionFactory._mapper",
+        "observed": "Collection factory lacks BigIntSet/Span/SpanSet and NpointSet/PoseSet/CbufferSet though MEOS defines those collection types.",
+        "suggested": "Generate the full Collection hierarchy from companions.Collection so closed-algebra returns are typeable on every binding."
+      },
+      {
+        "id": "OM-P7",
+        "side": "pymeos",
+        "severity": "missing-class",
+        "location": "PyMEOS pymeos/main, pymeos/temporal",
+        "observed": "No abstract spatial intermediates: PyMEOS has TPoint but no TSpatial and no TGeo. Per the manual Figure 7.1 the tree is TSpatial -> TGeo -> {TGeometry, TGeography, TPoint -> {TGeomPoint, TGeogPoint}} with TCbuffer/TNpoint/TPose/TRGeometry under TSpatial; the tspatial_*/tgeo_* method groups have no home class.",
+        "suggested": "Introduce TSpatial (abstract, parent of TGeo/TCbuffer/TNpoint/TPose/TRGeometry) and make TGeo the abstract parent of TGeometry/TGeography/TPoint (matching the manual + tgeo_type_all), so tspatial_*/tgeo_* bind to a class."
+      }
+    ]
+  },
+  "dispatch": {
+    "_comment": "Canonical argument->backing dispatch for OO members whose editorial routing is not derivable from the C-name token model. Transcribed VERBATIM (AST-extracted 1:1 from the hand-written pymeos tpoint/tfloat/tint/tbool/ttext oracle) from the PyMEOS cross-repo handoff RFC #94 (tools/oo_codegen/RFC-dispatch-metadata.md): geo.at/geo.distance from section 3, the complete extended set from section 7. Do not re-derive (section 6) - the prose recipe produced 5 verified errors. geo is single-block (TGeomPoint/TGeogPoint disambiguated at runtime via geodeticFromSelf); temporal is per-concrete dispatch.temporal.{tfloat,tint,tbool,ttext}.<member> (adopted structural contract; no <t>/<base> placeholders). scalarType = the exact isinstance test for a py:scalar entry. Consumed by every binding's faithful OO codegen for equivalence by construction.",
+    "argTransformVocabulary": [
+      "geoToGserialized",
+      "stboxToGeo",
+      "scalarCast",
+      "scalarValue",
+      "textsetMake",
+      "innerPtr",
+      "geodeticFromSelf",
+      "coerce",
+      "via:super"
+    ],
+    "geo": {
+      "at": {
+        "dispatch": [
+          {
+            "py": "Point",
+            "fn": "tpoint_at_value",
+            "argTransform": "geoToGserialized",
+            "geodeticFromSelf": true
+          },
+          {
+            "py": "BaseGeometry",
+            "fn": "tpoint_at_geom",
+            "argTransform": "geoToGserialized",
+            "geodeticFromSelf": true
+          },
+          {
+            "py": "GeoSet",
+            "fn": "temporal_at_values"
+          },
+          {
+            "py": "STBox",
+            "fn": "tgeo_at_stbox",
+            "extraArgs": [
+              "true"
+            ]
+          }
+        ],
+        "fallback": "super",
+        "result": "temporal"
+      },
+      "distance": {
+        "dispatch": [
+          {
+            "py": "BaseGeometry",
+            "fn": "tdistance_tgeo_geo",
+            "argTransform": "geoToGserialized",
+            "geodeticFromSelf": true
+          },
+          {
+            "py": "STBox",
+            "fn": "tdistance_tgeo_geo",
+            "argTransform": "stboxToGeo"
+          },
+          {
+            "py": "TPoint",
+            "fn": "tdistance_tgeo_tgeo"
+          }
+        ],
+        "fallback": "raise",
+        "result": "temporal"
+      },
+      "minus": {
+        "fallback": "super",
+        "result": "temporal",
+        "dispatch": [
+          {
+            "py": "Point",
+            "fn": "tpoint_minus_value",
+            "argTransform": "geoToGserialized",
+            "geodeticFromSelf": true
+          },
+          {
+            "py": "BaseGeometry",
+            "fn": "tpoint_minus_geom",
+            "argTransform": "geoToGserialized",
+            "geodeticFromSelf": true
+          },
+          {
+            "py": "GeoSet",
+            "fn": "temporal_minus_values"
+          },
+          {
+            "py": "STBox",
+            "fn": "tgeo_minus_stbox",
+            "extraArgs": [
+              "true"
+            ]
+          }
+        ]
+      },
+      "nearest_approach_distance": {
+        "fallback": "raise",
+        "result": "scalar",
+        "dispatch": [
+          {
+            "py": "BaseGeometry",
+            "fn": "nad_tgeo_geo",
+            "argTransform": "geoToGserialized",
+            "geodeticFromSelf": true
+          },
+          {
+            "py": "STBox",
+            "fn": "nad_tgeo_stbox"
+          },
+          {
+            "py": "TPoint",
+            "fn": "nad_tgeo_tgeo"
+          }
+        ]
+      }
+    },
+    "temporal": {
+      "tfloat": {
+        "always_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "float",
+              "fn": "always_eq_tfloat_float",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "always_eq_temporal_temporal"
+            }
+          ]
+        },
+        "always_not_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "float",
+              "fn": "always_ne_tfloat_float",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "always_ne_temporal_temporal"
+            }
+          ]
+        },
+        "ever_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "float",
+              "fn": "ever_eq_tfloat_float",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "ever_eq_temporal_temporal"
+            }
+          ]
+        },
+        "ever_not_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "float",
+              "fn": "ever_ne_tfloat_float",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "ever_ne_temporal_temporal"
+            }
+          ]
+        },
+        "temporal_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int|float",
+              "fn": "teq_tfloat_float",
+              "argTransform": "scalarCast"
+            }
+          ]
+        },
+        "temporal_not_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int|float",
+              "fn": "tne_tfloat_float",
+              "argTransform": "scalarCast"
+            }
+          ]
+        },
+        "at": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int|float",
+              "fn": "tfloat_at_value",
+              "argTransform": "scalarCast"
+            },
+            {
+              "py": "IntSet",
+              "coerce": "to_floatset",
+              "via": "super"
+            },
+            {
+              "py": "IntSpan",
+              "coerce": "to_floatspan",
+              "via": "super"
+            },
+            {
+              "py": "IntSpanSet",
+              "coerce": "to_floatspanset",
+              "via": "super"
+            }
+          ]
+        },
+        "minus": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int|float",
+              "fn": "tfloat_minus_value",
+              "argTransform": "scalarCast"
+            },
+            {
+              "py": "IntSet",
+              "coerce": "to_floatset",
+              "via": "super"
+            },
+            {
+              "py": "IntSpan",
+              "coerce": "to_floatspan",
+              "via": "super"
+            },
+            {
+              "py": "IntSpanSet",
+              "coerce": "to_floatspanset",
+              "via": "super"
+            }
+          ]
+        }
+      },
+      "tint": {
+        "always_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int",
+              "fn": "always_eq_tint_int",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "always_eq_temporal_temporal"
+            }
+          ]
+        },
+        "always_not_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int",
+              "fn": "always_ne_tint_int",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "always_ne_temporal_temporal"
+            }
+          ]
+        },
+        "ever_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int",
+              "fn": "ever_eq_tint_int",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "ever_eq_temporal_temporal"
+            }
+          ]
+        },
+        "ever_not_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int",
+              "fn": "ever_ne_tint_int",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "ever_ne_temporal_temporal"
+            }
+          ]
+        },
+        "temporal_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int",
+              "fn": "teq_tint_int",
+              "argTransform": "scalarValue"
+            }
+          ]
+        },
+        "temporal_not_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int",
+              "fn": "tne_tint_int",
+              "argTransform": "scalarValue"
+            }
+          ]
+        },
+        "at": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int|float",
+              "fn": "tint_at_value",
+              "argTransform": "scalarCast"
+            },
+            {
+              "py": "FloatSet",
+              "coerce": "to_intset",
+              "via": "super"
+            },
+            {
+              "py": "FloatSpan",
+              "coerce": "to_intspan",
+              "via": "super"
+            },
+            {
+              "py": "FloatSpanSet",
+              "coerce": "to_intspanset",
+              "via": "super"
+            }
+          ]
+        },
+        "minus": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "int|float",
+              "fn": "tint_minus_value",
+              "argTransform": "scalarCast"
+            },
+            {
+              "py": "FloatSet",
+              "coerce": "to_intset",
+              "via": "super"
+            },
+            {
+              "py": "FloatSpan",
+              "coerce": "to_intspan",
+              "via": "super"
+            },
+            {
+              "py": "FloatSpanSet",
+              "coerce": "to_intspanset",
+              "via": "super"
+            }
+          ]
+        }
+      },
+      "tbool": {
+        "temporal_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "bool",
+              "fn": "teq_tbool_bool",
+              "argTransform": "scalarValue"
+            }
+          ]
+        },
+        "temporal_not_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "bool",
+              "fn": "tne_tbool_bool",
+              "argTransform": "scalarValue"
+            }
+          ]
+        },
+        "at": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "bool",
+              "fn": "tbool_at_value",
+              "argTransform": "scalarValue"
+            }
+          ]
+        },
+        "minus": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "bool",
+              "fn": "tbool_minus_value",
+              "argTransform": "scalarValue"
+            }
+          ]
+        }
+      },
+      "ttext": {
+        "always_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "always_eq_ttext_text",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "always_eq_temporal_temporal"
+            }
+          ]
+        },
+        "always_not_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "always_ne_ttext_text",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "always_ne_temporal_temporal"
+            }
+          ]
+        },
+        "ever_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "ever_eq_ttext_text",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "ever_eq_temporal_temporal"
+            }
+          ]
+        },
+        "ever_not_equal": {
+          "fallback": "raise",
+          "result": "bool_gt0",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "ever_ne_ttext_text",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "self",
+              "fn": "ever_ne_temporal_temporal"
+            }
+          ]
+        },
+        "temporal_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "teq_ttext_text",
+              "argTransform": "scalarValue"
+            }
+          ]
+        },
+        "temporal_not_equal": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "tne_ttext_text",
+              "argTransform": "scalarValue"
+            }
+          ]
+        },
+        "at": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "ttext_at_value",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "list[str]",
+              "fn": "temporal_at_values",
+              "argTransform": "textsetMake"
+            }
+          ]
+        },
+        "minus": {
+          "fallback": "super",
+          "result": "temporal",
+          "dispatch": [
+            {
+              "py": "scalar",
+              "scalarType": "str",
+              "fn": "ttext_minus_value",
+              "argTransform": "scalarValue"
+            },
+            {
+              "py": "list[str]",
+              "fn": "temporal_minus_values",
+              "argTransform": "textsetMake"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

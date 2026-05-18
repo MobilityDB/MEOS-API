@@ -14,20 +14,28 @@ from parser.enrich import enrich_idl
 from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
+from parser.object_model import attach_object_model, find_mobilitydb_src
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
-META_PATH   = Path("./meta/meos-meta.json")
+META_PATH     = Path("./meta/meos-meta.json")
 PORTABLE_PATH = Path("./meta/portable-aliases.json")
 COVERING_PATH = Path("./meta/temporal-covering.json")
+OBJMODEL_PATH = Path("./meta/object-model.json")
 OUTPUT_DIR  = Path("./output")
+
+# MobilityDB C sources for the error-contract scan. Explicit argv[2] wins;
+# otherwise resolved (env / _mobilitydb sparse checkout / src sibling).
+# Absent → honest source-unavailable signal, never a fabricated empty set.
+MOBILITYDB_SRC = (Path(sys.argv[2]) if len(sys.argv) > 2
+                  else find_mobilitydb_src(HEADERS_DIR))
 
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. Parse C headers
-    print(f"[1/3] Parsing {HEADERS_DIR}...", file=sys.stderr)
+    print(f"[1/4] Parsing {HEADERS_DIR}...", file=sys.stderr)
     idl = parse_all_headers(HEADERS_DIR)
 
     # 1b. Recover PG-vendored C types the preprocessor collapsed to int
@@ -59,10 +67,10 @@ def main():
 
     # 2. Merge with manual metadata
     if META_PATH.exists():
-        print(f"[2/3] Merging with {META_PATH}...", file=sys.stderr)
+        print(f"[2/4] Merging with {META_PATH}...", file=sys.stderr)
         idl = merge_meta(idl, META_PATH)
     else:
-        print(f"[2/3] No meta found at {META_PATH}, skipping.", file=sys.stderr)
+        print(f"[2/4] No meta found at {META_PATH}, skipping.", file=sys.stderr)
 
     # 3. Attach the canonical portable bare-name mapping (codegen truth)
     print(f"[3/4] Attaching portable aliases from {PORTABLE_PATH}...",
@@ -121,6 +129,12 @@ def main():
           file=sys.stderr)
     idl = attach_temporal_covering(idl, COVERING_PATH)
 
+    # 7. Derive the explicit object model (class lattice + methods + error
+    #    contract) from the implicit MEOS prefix convention.
+    print(f"[7/7] Deriving object model from {OBJMODEL_PATH} "
+          f"(error scan: {MOBILITYDB_SRC})...", file=sys.stderr)
+    idl = attach_object_model(idl, OBJMODEL_PATH, MOBILITYDB_SRC)
+
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
         json.dump(idl, f, indent=2)
@@ -129,12 +143,18 @@ def main():
     pa = idl.get("portableAliases", {}).get("count", 0)
     cov = idl.get("temporalCovering", {}).get("count", 0)
     exposable = idl.get("enrichment", {}).get("exposableFunctions", 0)
+    om = idl.get("objectModel", {}).get("summary", {})
     print(f"\nDone: {len(idl['functions'])} functions "
           f"({exposable} stateless-exposable), "
           f"{len(idl['structs'])} structs, "
           f"{len(idl['enums'])} enums, "
           f"{pa} portable bare-name aliases, "
           f"{cov} temporal covering types", file=sys.stderr)
+    if om:
+        print(f"      object model: {om['classesWithMethods']} classes, "
+              f"{om['functionsClassified']}/{om['functionsTotal']} functions "
+              f"classified ({om['coveragePct']}%), "
+              f"errors: {om['errorStatus']}", file=sys.stderr)
 
 
 if __name__ == "__main__":
