@@ -76,6 +76,48 @@ def _c_spelling(ty) -> str:
     return _demote_external_opaque(spelling)
 
 
+# Canonical spellings of plain C scalars/builtins.
+_SCALAR_CANON = {
+    "void", "_Bool", "bool", "char", "signed char", "unsigned char",
+    "short", "unsigned short", "int", "unsigned int", "long",
+    "unsigned long", "long long", "unsigned long long",
+    "float", "double", "long double",
+}
+# Named opaque types that the PostgreSQL *stub* headers collapse to a bare
+# scalar even without a pointer (type-erased values). Kept by name so they
+# read as themselves, not as the stub's underlying integer.
+_EXPLICIT_OPAQUE = {"Datum"}
+
+
+def _strip(s: str) -> str:
+    return " ".join(
+        re.sub(r"\b(const|volatile|struct|union|enum)\b", " ", s)
+        .replace("*", " ").split()
+    )
+
+
+def _preserved_opaque(ty) -> str | None:
+    """Keep the *declared* name of opaque types the PG stubs canonicalise to
+    a bare scalar (``Interval *`` / ``text *`` -> ``const int *``, ``Datum``
+    -> ``unsigned long``). A pointer whose typedef'd pointee resolves to a
+    plain scalar is, in practice, always a stubbed opaque struct — so the
+    declared spelling is the truthful one. Genuine scalar pointers
+    (``int *result``) are unaffected: their pointee is a builtin, not a
+    distinct typedef name.
+    """
+    if ty.kind == clang.cindex.TypeKind.POINTER:
+        pointee = ty.get_pointee()
+        dname = _strip(pointee.spelling)
+        cname = _strip(pointee.get_canonical().spelling)
+        if (dname and dname not in _SCALAR_CANON and "(" not in dname
+                and cname in _SCALAR_CANON and dname != cname):
+            return ty.spelling.replace("_Bool", "bool")
+        return None
+    if _strip(ty.spelling) in _EXPLICIT_OPAQUE:
+        return _strip(ty.spelling)
+    return None
+
+
 def _canonical_c_spelling(ty) -> str:
     # Like ``_canonical_spelling`` but normalises boolean types to ``"bool"``.
     # Handles:
@@ -87,6 +129,9 @@ def _canonical_c_spelling(ty) -> str:
     # Fallback: also catch _Bool reached through other typedef chains
     if ty.get_canonical().kind == clang.cindex.TypeKind.BOOL:
         return "bool"
+    preserved = _preserved_opaque(ty)
+    if preserved is not None:
+        return _demote_external_opaque(preserved)
     return _demote_external_opaque(_canonical_spelling(ty))
 
 
