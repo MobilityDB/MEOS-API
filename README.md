@@ -10,6 +10,7 @@ This catalog is the foundation for generating language bindings (Python, Java, R
 - [Getting started](#getting-started)
 - [Output format](#output-format)
 - [Adding metadata](#adding-metadata)
+- [Runtime server](#runtime-server)
 
 ## How it works
 
@@ -83,3 +84,34 @@ A typical function entry looks like this:
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog.
+
+## Runtime server
+
+The same enriched catalog also drives a runtime HTTP server — the projection
+that **executes** rather than just describes:
+
+```bash
+python run.py                                 # produce the enriched catalog
+python serve.py                               # 127.0.0.1:8080 (StubEngine)
+MEOS_LIBRARY_PATH=/path/libmeos.so python serve.py   # real engine
+```
+
+Each *stateless-exposable* function is served as `POST /{function}`:
+validate the JSON body, `decode` each serialized string to an opaque handle,
+`invoke` the function, `encode` the result, reply `{"result": …}` (`204`
+void, `400 {"error","code"}` on failure). All MEOS work sits behind a
+pluggable `Engine`: `CtypesEngine` (`dlopen` a built `libmeos`, every opaque
+value an anonymous `void *`) or `StubEngine` (no build needed; routing and
+validation still work).
+
+Built from the live MobilityDB `master` catalog this is **1963 operations**
+(91% of the public API; internal `meos_internal*.h` policy-excluded);
+generation, routing, validation and dispatch are exercised end-to-end over
+real HTTP (`tests/test_server.py`), and the full stack is validated against
+an installed `/usr/local/lib/libmeos.so` — `POST /temporal_copy` →
+`200 {"result":"{t@…, f@…}"}` (decode → invoke → `temporal_out(maxdd=15)`),
+`floatset_value_n` n=2 → `2.5` via a byref out-parameter, a malformed body
+→ `400` with the real MEOS message, and the server survives it
+(`tests/test_engine_integration.py`, skipped unless `MEOS_LIBRARY_PATH` is
+set). See [`docs/server.md`](docs/server.md). Stdlib only (`http.server`);
+no new dependencies.
