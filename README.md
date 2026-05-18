@@ -10,6 +10,7 @@ This catalog is the foundation for generating language bindings (Python, Java, R
 - [Getting started](#getting-started)
 - [Output format](#output-format)
 - [Adding metadata](#adding-metadata)
+- [Portable bare-name dialect](#portable-bare-name-dialect)
 
 ## How it works
 
@@ -83,3 +84,21 @@ A typical function entry looks like this:
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog.
+
+## Portable bare-name dialect
+
+`meta/portable-aliases.json` is the **single codegen source of truth**
+(RFC #920) for the canonical portable bare-name dialect — the operator →
+bare-name mapping that MobilityDB now registers natively (PR #1075). The
+pipeline folds it into the catalog as `portableAliases` (with `byOperator`
+/ `byBareName` lookups), so **every binding/engine generates the identical
+bare names** and a user learns one reference and assumes the rest.
+
+It is curated canonical data, kept verbatim (only bijective lookups are
+derived — no C-symbol guessing; upstream aliases reuse each operator's own
+backing function, equivalence by construction). The mapping is
+type-agnostic and applies to **every** temporal type family —
+`temporal`, `geo`, `cbuffer`, `npoint`, `pose`, `rgeo` are all in scope and
+must not be excluded from any parity headline. `python tools/portable_parity.py`
+audits it against the catalog — currently **29/29 = 100%** backed (verified,
+no guessing). See [`docs/portable-aliases.md`](docs/portable-aliases.md).

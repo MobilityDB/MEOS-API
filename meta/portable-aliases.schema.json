@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MobilityDB/MEOS-API/blob/main/meta/portable-aliases.schema.json",
+  "title": "Portable bare-name dialect — canonical SoT",
+  "description": "Schema for `meta/portable-aliases.json` (RFC #920). Catches shape regressions earlier than the unit tests; validated as a test step in `tests/test_portable.py`.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["provenance", "families", "alreadyCanonical", "explicitBacking", "scope", "notes"],
+  "properties": {
+    "_comment": {"type": "string"},
+    "_explicitBackingComment": {"type": "string"},
+
+    "provenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["discussion", "rfc", "nativePR"],
+      "properties": {
+        "discussion":    {"type": "string"},
+        "rfc":           {"type": "string"},
+        "nativePR":      {"type": "string"},
+        "manualChapter": {"type": "string"}
+      }
+    },
+
+    "families": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operator", "bareName"],
+          "properties": {
+            "operator": {"type": "string", "minLength": 1, "maxLength": 8},
+            "bareName": {"type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9]*$"}
+          }
+        }
+      }
+    },
+
+    "alreadyCanonical": {
+      "type": "array",
+      "description": "Entries already aligned with the canonical naming — no new alias needed. Discriminated by `kind` so consumers don't have to guess the shape.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "family", "operators", "pattern"],
+            "properties": {
+              "kind":      {"const": "family"},
+              "family":    {"type": "string", "minLength": 1},
+              "operators": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "pattern":   {"type": "string", "pattern": "_\\*$"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "functions"],
+            "properties": {
+              "kind":      {"const": "functions"},
+              "functions": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+            }
+          }
+        ]
+      }
+    },
+
+    "explicitBacking": {
+      "type": "object",
+      "description": "Bare names whose C family prefix differs from the bare name itself (verified against the catalog, not guessed).",
+      "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"},
+        "minItems": 1
+      }
+    },
+
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inScopeTypeFamilies", "note", "deferralIsError"],
+      "properties": {
+        "inScopeTypeFamilies": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "note": {"type": "string"},
+        "deferralIsError": {
+          "const": true,
+          "description": "Structured flag (vs prose) — when true, downstream parity tables MUST NOT exclude any in-scope family. Replaces the substring-match assertion on `note` (PR #8 review item #1)."
+        }
+      }
+    },
+
+    "notes": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1
+    }
+  }
+}
