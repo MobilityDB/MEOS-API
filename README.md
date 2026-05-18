@@ -10,6 +10,7 @@ This catalog is the foundation for generating language bindings (Python, Java, R
 - [Getting started](#getting-started)
 - [Output format](#output-format)
 - [Adding metadata](#adding-metadata)
+- [MCP generation](#mcp-generation)
 
 ## How it works
 
@@ -83,3 +84,28 @@ A typical function entry looks like this:
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog.
+
+## MCP generation
+
+The enriched catalog also projects onto a **Model Context Protocol (MCP)**
+tool manifest, so an LLM/agent can call the MEOS value algebra directly:
+
+```bash
+python run.py                 # produce the enriched catalog
+python generate_mcp.py        # output/meos-idl.json -> output/meos-mcp.json
+```
+
+Every *stateless-exposable* MEOS function becomes one MCP tool with a
+**self-contained** JSON Schema (2020-12) — enums and opaque-type schemas are
+inlined, since MCP clients don't resolve external `$ref`s. Spatiotemporal
+values are passed as serialized strings (text/WKT, MF-JSON, HexWKB);
+`annotations` mark the tools read-only/idempotent; `x-meos.{decode,encode}`
+give a runtime everything it needs to dispatch a call.
+
+Against the live MobilityDB `master` catalog this yields **1952 tools**
+(90% of the public API; internal `meos_internal*.h` policy-excluded),
+array params rendered as JSON arrays.
+Pure `dict` → `dict` (no libclang, no MEOS runtime); see
+[`docs/mcp.md`](docs/mcp.md) for the projection rules and roadmap, and
+[`tests/test_mcp.py`](tests/test_mcp.py) for worked examples
+(`python3 tests/test_mcp.py`).
