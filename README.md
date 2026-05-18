@@ -14,6 +14,7 @@ This catalog is the foundation for generating language bindings (Python, Java, G
 - [Adding metadata](#adding-metadata)
 - [Portable bare-name dialect](#portable-bare-name-dialect)
 - [OpenAPI generation](#openapi-generation)
+- [MCP generation](#mcp-generation)
 - [The object model](#the-object-model)
 
 ## Ecosystem
@@ -248,6 +249,31 @@ no MEOS runtime); see [`docs/openapi.md`](docs/openapi.md) for the projection
 rules, `x-meos-*` extensions, and roadmap (OGC API, MCP, runtime server), and
 [`tests/test_openapi.py`](tests/test_openapi.py) for worked examples
 (`python3 tests/test_openapi.py`).
+
+## MCP generation
+
+The enriched catalog also projects onto a **Model Context Protocol (MCP)**
+tool manifest, so an LLM/agent can call the MEOS value algebra directly:
+
+```bash
+python run.py                 # produce the enriched catalog
+python generate_mcp.py        # output/meos-idl.json -> output/meos-mcp.json
+```
+
+Every *stateless-exposable* MEOS function becomes one MCP tool with a
+**self-contained** JSON Schema (2020-12) — enums and opaque-type schemas are
+inlined, since MCP clients don't resolve external `$ref`s. Spatiotemporal
+values are passed as serialized strings (text/WKT, MF-JSON, HexWKB);
+`annotations` mark the tools read-only/idempotent; `x-meos.{decode,encode}`
+give a runtime everything it needs to dispatch a call.
+
+Against the live MobilityDB `master` catalog this yields one MCP tool per
+stateless-exposable function (internal `meos_internal*.h` policy-excluded),
+array params rendered as JSON arrays.
+Pure `dict` → `dict` (no libclang, no MEOS runtime); see
+[`docs/mcp.md`](docs/mcp.md) for the projection rules and roadmap, and
+[`tests/test_mcp.py`](tests/test_mcp.py) for worked examples
+(`python3 tests/test_mcp.py`).
 
 ## The object model
 
