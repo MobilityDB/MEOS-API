@@ -10,6 +10,8 @@ from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
 from parser.doxygroup import attach_groups
+from parser.header_types import reconcile
+from parser.enrich import enrich_idl
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -42,6 +44,15 @@ def main():
     idl, nn = merge_nullable(idl, HEADERS_DIR.parent)
     print(f"      nullable params from Doxygen `may be NULL`: {nn}",
           file=sys.stderr)
+
+    # 1d. Restore opaque types the PG stub headers #define'd away to int.
+    print(f"      reconciling types from header source...", file=sys.stderr)
+    idl = reconcile(idl, HEADERS_DIR)
+
+    # 1e. Derive service-projection metadata (category / encodings / network).
+    #     Runs before the merge so manual annotations override the heuristics.
+    print(f"      enriching {len(idl['functions'])} functions...", file=sys.stderr)
+    idl = enrich_idl(idl)
 
     # 2. Merge with manual metadata
     if META_PATH.exists():
@@ -99,7 +110,9 @@ def main():
     print(f"      → {idl_path} written", file=sys.stderr)
 
     pa = idl.get("portableAliases", {}).get("count", 0)
-    print(f"\nDone: {len(idl['functions'])} functions, "
+    exposable = idl.get("enrichment", {}).get("exposableFunctions", 0)
+    print(f"\nDone: {len(idl['functions'])} functions "
+          f"({exposable} stateless-exposable), "
           f"{len(idl['structs'])} structs, "
           f"{len(idl['enums'])} enums, "
           f"{pa} portable bare-name aliases", file=sys.stderr)
