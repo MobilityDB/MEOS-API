@@ -10,6 +10,7 @@ This catalog is the foundation for generating language bindings (Python, Java, R
 - [Getting started](#getting-started)
 - [Output format](#output-format)
 - [Adding metadata](#adding-metadata)
+- [OpenAPI generation](#openapi-generation)
 
 ## How it works
 
@@ -83,3 +84,30 @@ A typical function entry looks like this:
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog.
+
+## OpenAPI generation
+
+The enriched catalog (the `network` / `wire` / `typeEncodings` produced by the
+service-projection pass) can be projected onto an **OpenAPI 3.1** contract —
+this is the concrete "OpenAPI is a projection of MEOS-API" step:
+
+```bash
+python run.py                 # produce the enriched catalog
+python generate_openapi.py    # output/meos-idl.json -> output/meos-openapi.json
+```
+
+Every *stateless-exposable* MEOS function becomes one RPC-style
+`POST /{function}` operation (≈ an OGC API – Processes "process"); opaque
+values cross the wire as strings carried in their `typeEncodings`
+(text / MF-JSON / HexWKB), surfaced as reusable component schemas. `x-meos-*`
+extensions carry the decode/encode function names and category so a
+downstream server or MCP generator can consume the same document.
+
+Against the live MobilityDB `master` catalog this yields **1952 operations**
+(90% of the public API; internal `meos_internal*.h` policy-excluded),
+including array-of-string params for builders. The generator is pure
+`dict` → `dict` (no libclang,
+no MEOS runtime); see [`docs/openapi.md`](docs/openapi.md) for the projection
+rules, `x-meos-*` extensions, and roadmap (OGC API, MCP, runtime server), and
+[`tests/test_openapi.py`](tests/test_openapi.py) for worked examples
+(`python3 tests/test_openapi.py`).
