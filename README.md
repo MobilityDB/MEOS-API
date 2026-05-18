@@ -10,13 +10,15 @@ This catalog is the foundation for generating language bindings (Python, Java, R
 - [Getting started](#getting-started)
 - [Output format](#output-format)
 - [Adding metadata](#adding-metadata)
+- [The object model](#the-object-model)
 
 ## How it works
 
-The pipeline runs in two steps:
+The pipeline runs in three steps:
 
 1. **Parser** — scans the MEOS `.h` header files using libclang and extracts every function signature, struct, and enum into structured JSON.
 2. **Merger** — enriches the parser output with manual annotations from `meta/meos-meta.json`, such as documentation and memory ownership rules.
+3. **Object model** — makes the *implicit* MEOS class hierarchy explicit: it derives the class lattice and assigns every function to the class it is a method of, from the canonical mapping in `meta/object-model.json`. See [The object model](#the-object-model).
 
 ## Getting started
 
@@ -51,12 +53,21 @@ python setup.py --branch v1.2.0
 python run.py
 ```
 
-The result is written to `output/meos-api.json`.
+The result is written to `output/meos-idl.json`.
 
 You can also point the tool at a different headers directory:
 
 ```bash
 python run.py /path/to/custom/include
+```
+
+The object-model step also derives the per-function error contract by
+scanning the MobilityDB C sources (`_mobilitydb/meos/src`, fetched by
+`setup.py`). To audit the derived lattice against the most mature
+hand-built model (PyMEOS):
+
+```bash
+python object_model_parity.py   # -> output/meos-object-model-parity.json
 ```
 
 ## Output format
@@ -80,6 +91,28 @@ A typical function entry looks like this:
 }
 ```
 
+In addition, `meos-idl.json` carries an `objectModel` block: the explicit
+class lattice (`classes`, `lattice`), the reverse index assigning each
+function to the class it is a method of (`functionToClass`), the
+closed-algebra companion hierarchies (`companions`), the error contract
+(`errors`), and the irregularity worklist (`corrections`).
+
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog.
+
+## The object model
+
+MEOS is C — it has no classes. The object model is encoded by convention
+in the `Temporal`/`TInstant`/`TSequence`/`TSequenceSet` struct family (the
+template axis), the `temptype` discriminator whose base type is the
+missing template parameter (the type-family axis), and the function-name
+prefixes that bind a function to the class it is a method of
+(`temporal_*` = the late-bound superclass; `tnumber_*`/`tspatial_*`/
+`tpoint_*`/`tgeo_*` = abstract families; `tbool_*`/`tint_*`/… = exact
+types). `meta/object-model.json` makes that lattice explicit so every
+binding/engine derives the **same** classes and methods from one mapping.
+
+See [docs/object-model.md](docs/object-model.md) for the full
+specification, the closed-algebra companion hierarchies, the error
+contract, the parity audit, and the irregularity worklist.
