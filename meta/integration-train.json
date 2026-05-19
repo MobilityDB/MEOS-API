@@ -1,0 +1,75 @@
+{
+  "schema": "integration-train/0.1.0-draft",
+  "purpose": "Dependency-ordered merge train + per-wave verification gates that make the ecosystem-wide 100% parity PROVABLE at one point, instead of asserted from per-PR isolation-green. Operationalizes MobilityDB discussion #895 (wave-based merge plan).",
+  "anchor": "The MEOS-API meos-idl.json regenerated from the integrated MobilityDB surface is the parity proof artifact: every binding derives from it.",
+  "invariant": "100% parity is DEMONSTRABLE only when the full train is composed and every wave gate passes together. Per-PR isolation-green is necessary, not sufficient.",
+  "merge_gate": "All merges are maintainer-only (no self-merge by any session). This train reduces that gate to a mechanical action: merge in wave order; CI turns green at each wave.",
+  "waves": [
+    {
+      "id": 0,
+      "name": "MobilityDB core - extended-type C surface",
+      "repo": "MobilityDB/MobilityDB",
+      "status": "PROVEN",
+      "verified": "2026-05-19, _mobilitydb branch complete-extype-surface (this repo)",
+      "compose": {
+        "base": "master",
+        "linear_stack_tip": {"pr": 1085, "ref": "pull/1085/head", "head": "ea8f357", "contains": "master->#1081(66d8afa)->#1082(cf9ed91)->#1083(131eccb)->#1084(d60e63c)->#1085(ea8f357)"},
+        "then_pair": {"refs": ["pull/1051/head (#1051 e624027)", "pull/951/head (#951 19e3e35)"], "note": "clean linear pair #1051->#951; cherry-picks clean onto the stack tip (proven). #951 includes the typed tnpoint_from_mfjson uniformity wrapper."},
+        "docs_only_low_priority": {"pr": 953, "branch": "split/tnpoint-production-guidance"}
+      },
+      "gate": {
+        "meos_api_catalog_functions": 2699,
+        "meos_api_pr10_tests": "21/21",
+        "from_mfjson_uniform": ["tcbuffer_from_mfjson->TCbuffer", "tnpoint_from_mfjson->TNpoint", "tpose_from_mfjson->TPose"],
+        "concrete_constructors": ["tcbufferinst_make->TCbufferInst", "tposeinst_make->TPoseInst"]
+      },
+      "merge_order": "stack bottom-up #1081->#1082->#1083->#1084->#1085, then #1051->#951. Do NOT re-flatten to independent branches (the C-library session already rebased these into clean linear sequences).",
+      "known_conflicts_resolved": ["#1083 vs #1084 (rebased into the linear stack)", "#1051 vs #951 (rebased into the #1051->#951 pair)"]
+    },
+    {
+      "id": 1,
+      "name": "Substrate - PyMEOS-CFFI MEOS-1.4",
+      "repo": "MobilityDB/PyMEOS-CFFI",
+      "status": "IN_FLIGHT",
+      "prs": [{"pr": 19, "branch": "bump/meos-1.4"}, {"pr": 18, "branch": "refactor/codegen-meos-idl", "draft": true}],
+      "action": "regenerate builder/meos-idl.json against the Wave-0 MobilityDB surface",
+      "gate": "pymeos_cffi builds + imports against a Wave-0 MEOS",
+      "owner": "live PyMEOS session"
+    },
+    {
+      "id": 2,
+      "name": "CRITICAL PATH - PyMEOS master health (MEOS-1.4 bump)",
+      "repo": "MobilityDB/PyMEOS",
+      "status": "BLOCKING_ALL",
+      "prs": [{"pr": 81, "branch": "bump/meos-1.4", "draft": true}, {"pr": 82, "branch": "bump/meos-1.3"}],
+      "problem": "PyMEOS master is broken vs MEOS master: rename skew geoset_*->spatialset_*, tpoint_*->tspatial_*, pgis_geometry_in->geom_in, spanset_make arity. Pristine PyMEOS master = 426 failed / 2721 passed; red on EVERY PyMEOS PR's Test-PyMEOS check.",
+      "gate": "PyMEOS test.yml collects and 426->0 failures, built against Wave-1 CFFI / Wave-0 MEOS",
+      "owner": "live PyMEOS session",
+      "note": "Build the bump against the integrated Wave-0 (not bare master) so it is done once, correctly, against the final C surface."
+    },
+    {
+      "id": 3,
+      "name": "PyMEOS features (downstream of Wave 2)",
+      "repo": "MobilityDB/PyMEOS",
+      "status": "GREEN_IN_ISOLATION",
+      "prs": [
+        {"pr": 85, "branch": "fix/black-datespan", "head": "bd7b426", "gate": "black --check . passes whole-repo", "status": "READY (verified green-on-gate 2026-05-19; only its inherited Test-PyMEOS red is Wave-2)"},
+        {"pr": 87, "branch": "feat/portable-aliases", "gate": "portable_parity.py: 0 unbacked, 29 pairs, 6 families"},
+        {"pr": 88, "branch": "feat/extended-temporal-types", "gate": "suites collect; NotImplementedError stubs -> real once the Wave-0 surface is in the MEOS PyMEOS-CI builds", "stack_base": true},
+        {"pr": 89, "branch": "refactor/oo-codegen-meos-idl", "stacked_on": 88, "gate": "codegen.py --check (MEOS-API meos-idl.json SoT; proven zero-regression 407==407)"},
+        {"pr": 90, "branch": "refactor/oo-codegen-tcbuffer-switch", "stacked_on": 89, "gate": "tcbuffer_test 26p/1f; generated mixin backing-identical to oracle"},
+        {"pr": 91, "branch": "refactor/oo-codegen-tpose-switch", "stacked_on": 90},
+        {"pr": 84, "branch": "feat/datalake-consumer", "head": "9a6f8b9", "gate": "tests/io 4/4; temporal footer byte-identical to MobilityDuck #146", "independent": true, "status": "code verified correct + interop confirmed 2026-05-19"}
+      ],
+      "interop_dependency": {"repo": "MobilityDB/MobilityDuck", "prs": [{"pr": 146, "branch": "lake/temporal-footer"}, {"pr": 147, "branch": "lake/edge-to-cloud-quickstart"}], "for": "#84 TemporalParquet second-consumer interop demonstration"}
+    }
+  ],
+  "catalog_anchor": {
+    "repo": "MobilityDB/MEOS-API",
+    "prs": [
+      {"pr": 10, "branch": "feat/object-model", "status": "verified 21/21 vs Wave-0", "role": "object model (class lattice/methods/error contract)"},
+      {"pr": 8, "branch": "feat/portable-aliases", "role": "portable bare-name 29-pair SoT"}
+    ]
+  },
+  "current_status": "Wave 0 PROVEN. Waves 1-3 are entirely gated on Wave 2 (the MEOS-1.4 bump) - the single universal unblock. No remaining correctness work; the gap is integration + maintainer-merge ordering."
+}
