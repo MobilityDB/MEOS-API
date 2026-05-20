@@ -1,0 +1,107 @@
+name: OpenAPI validate
+
+# Validates the generated meos-openapi.json against the OpenAPI 3.1 spec on
+# every PR that touches the parser, generator, or meta files — and on every
+# push to master. Fails the build if the projection is not a valid OpenAPI
+# document.
+#
+# Natural follow-up named in PR #5's body. Runs the same regenerate path a
+# downstream consumer would: clone MobilityDB master for headers, parse with
+# libclang, produce the enriched catalog, project to OpenAPI, validate.
+
+on:
+  pull_request:
+    paths:
+      - 'parser/**'
+      - 'generator/**'
+      - 'meta/**'
+      - 'generate_openapi.py'
+      - 'run.py'
+      - 'requirements.txt'
+      - '.github/workflows/openapi-validate.yml'
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  openapi-validate:
+    name: Regenerate + validate meos-openapi.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # libclang (Python wheel) needs the system C headers MEOS depends on
+      # so types like `size_t`, `json_object *`, `GSERIALIZED *`, … resolve
+      # to their real names instead of degrading to `int` / `int *`. Mirror
+      # the same install set as MobilityAPI's vendor-drift workflow so the
+      # two regenerate paths produce byte-identical catalogs.
+      - name: Install dev headers for libclang sysroot
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev \
+            libjson-c-dev libgsl-dev libproj-dev libgeos-dev \
+            postgresql-server-dev-16
+
+      - name: Clone MobilityDB master (MEOS headers source)
+        run: |
+          git clone --depth 1 https://github.com/MobilityDB/MobilityDB \
+            "$RUNNER_TEMP/mobilitydb"
+          echo "MOBILITYDB_HEADERS=$RUNNER_TEMP/mobilitydb/meos/include" \
+            >> "$GITHUB_ENV"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install openapi-spec-validator
+
+      # generate_openapi.py requires the enriched catalog (network fields).
+      # The enrichment pipeline lives on PR #4 (feat/service-enrichment),
+      # which on its branch rewrites run.py to do parse + reconcile + enrich
+      # in one step.  On any branch that does not yet include #4's content,
+      # check out the PR #4 tree (parser/ + run.py) so the regenerate step
+      # uses the enriched-pipeline run.py.  Tree-level checkout sidesteps
+      # the runner's lack of a default git identity.
+      - name: Fetch + apply enrichment pipeline from PR #4 if absent
+        run: |
+          if [ ! -f parser/enrich.py ]; then
+            echo "::notice::PR #4 enrichment pipeline not present on this branch; checking out PR #4 tree"
+            git fetch origin refs/pull/4/head:pr4
+            # PR #4 supplies: parser/enrich.py, parser/header_types.py, and
+            # a rewritten run.py that orchestrates parse + reconcile + enrich
+            # in one invocation.  Copy all three onto the working tree.
+            git checkout pr4 -- parser/ run.py 2>/dev/null || true
+            ls -la parser/enrich.py run.py
+          fi
+
+      - name: Regenerate the catalog (parse + reconcile + enrich in one step)
+        run: python3 run.py "$MOBILITYDB_HEADERS"
+
+      - name: Project to OpenAPI 3.1
+        run: python3 generate_openapi.py
+
+      - name: Validate meos-openapi.json against OpenAPI 3.1
+        run: |
+          python3 -c "
+          import json
+          from openapi_spec_validator import OpenAPIV31SpecValidator
+          spec = json.load(open('output/meos-openapi.json'))
+          # OpenAPIV31SpecValidator(spec).validate() raises on violation,
+          # returns None on success. Works with openapi-spec-validator 0.9.x.
+          OpenAPIV31SpecValidator(spec).validate()
+          print(f\"::notice::meos-openapi.json conforms to OpenAPI 3.1 — \"
+                f\"{len(spec.get('paths', {}))} paths, \"
+                f\"{len(spec.get('components', {}).get('schemas', {}))} schemas.\")
+          "
+
+      - name: Upload meos-openapi.json as artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meos-openapi
+          path: output/meos-openapi.json
+          if-no-files-found: error
