@@ -1,0 +1,61 @@
+name: Integration train validate
+
+# Validates the integration-train manifest (`meta/integration-train.json`)
+# is a well-formed instance of its declared schema, and that `verify-train.sh`
+# stays syntactically valid (so the wave-by-wave verifier never silently
+# breaks).
+#
+# Mirrors the OpenAPI-validate workflow pattern from PR #5 — fail fast on
+# any structural drift to the parity-proof artifact.
+
+on:
+  pull_request:
+    paths:
+      - 'meta/integration-train.json'
+      - 'docs/integration-train.md'
+      - 'verify-train.sh'
+      - '.github/workflows/integration-train-validate.yml'
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  validate-manifest:
+    name: Validate integration-train manifest + verifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifest is valid JSON
+        run: |
+          python3 -c "
+          import json, sys
+          d = json.load(open('meta/integration-train.json'))
+          assert 'schema' in d, 'missing schema field'
+          assert d['schema'].startswith('integration-train/'), \
+              f\"unexpected schema: {d['schema']}\"
+          assert 'waves' in d, 'missing waves field'
+          assert isinstance(d['waves'], list) and len(d['waves']) > 0, \
+              'waves must be a non-empty list'
+          for w in d['waves']:
+              assert 'id' in w, f'wave missing id: {w}'
+              assert 'name' in w, f\"wave {w['id']} missing name\"
+              assert 'status' in w, f\"wave {w['id']} missing status\"
+              assert w['status'] in {
+                  'PROVEN', 'IN_FLIGHT', 'BLOCKING_ALL',
+                  'GREEN_IN_ISOLATION', 'ANCHOR_DEFINED',
+              }, f\"wave {w['id']} bad status: {w['status']}\"
+          ids = [w['id'] for w in d['waves']]
+          assert ids == sorted(ids), f'wave ids not sorted: {ids}'
+          print(f'OK schema={d[\"schema\"]} waves={len(d[\"waves\"])} ids={ids}')
+          "
+
+      - name: Validate verify-train.sh is syntactically valid
+        run: bash -n verify-train.sh
+
+      - name: Validate verify-train.sh is executable
+        run: |
+          if [ ! -x verify-train.sh ]; then
+            echo "::error::verify-train.sh must be executable"
+            exit 1
+          fi
