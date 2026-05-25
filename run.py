@@ -4,12 +4,16 @@ from pathlib import Path
 
 from parser.parser import parse_all_headers, merge_meta
 from parser.portable import attach_portable_aliases
+from parser.sqlnames import merge_sql_names
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
 META_PATH   = Path("./meta/meos-meta.json")
 PORTABLE_PATH = Path("./meta/portable-aliases.json")
 OUTPUT_DIR  = Path("./output")
+# Full MobilityDB checkout (meos/src + mobilitydb/src) carrying the Doxygen
+# @csqlfn / @sqlfn / @sqlop tags that link the MEOS-C, MobilityDB-C and SQL names.
+MDB_SRC     = Path("./_mobilitydb")
 
 
 def main():
@@ -25,6 +29,12 @@ def main():
         idl = merge_meta(idl, META_PATH)
     else:
         print(f"[2/3] No meta found at {META_PATH}, skipping.", file=sys.stderr)
+
+    # 2b. Attach the MEOS-C -> MobilityDB-C -> SQL name chain (+ operator) from the
+    #     @csqlfn / @sqlfn / @sqlop Doxygen tags, so every binding derives its names
+    #     from one source of truth instead of a hand-maintained per-binding map.
+    idl, sn = merge_sql_names(idl, MDB_SRC)
+    print(f"      SQL name chain attached to {sn} functions", file=sys.stderr)
 
     # 3. Attach the canonical portable bare-name mapping (codegen truth)
     print(f"[3/3] Attaching portable aliases from {PORTABLE_PATH}...",
