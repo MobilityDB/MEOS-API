@@ -42,7 +42,10 @@ def step_clone(branch: str) -> None:
             REPO_URL,
             str(CLONE_DIR),
         ])
-        run(["git", "-C", str(CLONE_DIR), "sparse-checkout", "set", "meos/include", "postgres"])
+        # meos/include = public headers; meos/src + mobilitydb/src carry the
+        # @csqlfn / @sqlfn / @sqlop Doxygen tags for the SQL-name chain.
+        run(["git", "-C", str(CLONE_DIR), "sparse-checkout", "set",
+             "meos/include", "meos/src", "mobilitydb/src", "postgres"])
     print(f"      Done.")
 
 
