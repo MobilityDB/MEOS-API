@@ -4,6 +4,7 @@ from pathlib import Path
 
 from parser.parser import parse_all_headers, merge_meta
 from parser.portable import attach_portable_aliases
+from parser.typerecover import recover_collapsed_types
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -18,6 +19,14 @@ def main():
     # 1. Parse C headers
     print(f"[1/3] Parsing {HEADERS_DIR}...", file=sys.stderr)
     idl = parse_all_headers(HEADERS_DIR)
+
+    # 1b. Recover PG-vendored C types the preprocessor collapsed to int
+    #     (bool / int64 / Timestamp(Tz) / H3Index) from the header text.
+    #     No-op when the headers parse those types correctly.
+    idl, rec = recover_collapsed_types(idl, HEADERS_DIR)
+    if rec["returns"] or rec["params"]:
+        print(f"      recovered {rec['returns']} return types, "
+              f"{rec['params']} params from collapsed int", file=sys.stderr)
 
     # 2. Merge with manual metadata
     if META_PATH.exists():
