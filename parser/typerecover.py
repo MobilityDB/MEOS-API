@@ -44,6 +44,8 @@ _TYPE_MAP = {
     "GBOX": "GBOX",
     "BOX3D": "BOX3D",
     "AFFINE": "AFFINE",
+    "Jsonb": "Jsonb",
+    "JsonPath": "JsonPath",
 }
 
 _NAMES = "|".join(sorted(_TYPE_MAP, key=len, reverse=True))
