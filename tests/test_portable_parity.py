@@ -35,7 +35,7 @@ class ParityLogicTests(unittest.TestCase):
             "nad_tfloat_tfloat",                           # explicit backing
         ])                                                 # of nearestApproach…
         r = build_parity(cat)
-        self.assertEqual(r["total"], 29)
+        self.assertEqual(r["total"], 41)
         self.assertEqual(r["byBareName"]["overlaps"]["status"], "backed")
         self.assertEqual(r["byBareName"]["overlaps"]["via"], "prefix")
         self.assertEqual(r["byBareName"]["overlaps"]["backedBy"], 2)
@@ -47,13 +47,13 @@ class ParityLogicTests(unittest.TestCase):
         self.assertEqual(nad["via"], "explicit")
         self.assertNotIn("nearestApproachDistance", r["unbacked"])
         self.assertEqual(r["byBareName"]["overlaps"]["family"], "topology")
-        self.assertEqual(r["byBareName"]["teq"]["operator"], "#=")
+        self.assertEqual(r["byBareName"]["tEq"]["operator"], "#=")
 
     def test_every_bare_name_classified(self):
         r = build_parity(_catalog([]))            # nothing backs anything
-        self.assertEqual(r["total"], 29)
+        self.assertEqual(r["total"], 41)
         self.assertEqual(r["backed"], 0)
-        self.assertEqual(len(r["unbacked"]), 29)  # all flagged, 0 dropped
+        self.assertEqual(len(r["unbacked"]), 41)  # all flagged, 0 dropped
         self.assertTrue(all(v["status"] in ("backed",
                                             "needs-explicit-backing")
                             for v in r["byBareName"].values()))
@@ -72,7 +72,7 @@ class LiveParityGate(unittest.TestCase):
         r = build_parity(cat)
         self.assertEqual(
             r["backed"] + r["needsExplicitBacking"], r["total"])
-        self.assertEqual(r["total"], 29)
+        self.assertEqual(r["total"], 41)
 
 
 if __name__ == "__main__":
