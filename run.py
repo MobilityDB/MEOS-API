@@ -8,7 +8,7 @@ from parser.portable import attach_portable_aliases
 from parser.typerecover import recover_collapsed_types
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
-from parser.sqlfn import attach_sqlfn_map
+from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -64,6 +64,16 @@ def main():
     if MEOS_SRC.exists() and MDB_SRC.exists():
         idl, nsql = attach_sqlfn_map(idl, MEOS_SRC, MDB_SRC)
         print(f"[4/4] Attached {nsql} @sqlfn SQL names", file=sys.stderr)
+        # Guard: a copy-paste @csqlfn in meos/src can point an ever/always function at
+        # the opposite-prefix wrapper (eintersects_* tagged #Aintersects_*), flipping its
+        # SQL name and breaking the binding overload dispatch. The parser is faithful, so
+        # surface the SOURCE mistag here rather than ship a wrong catalog silently.
+        ea_bad = lint_ea_sqlfn(idl)
+        if ea_bad:
+            print(f"      ⚠ {len(ea_bad)} @csqlfn e/a-prefix mistag(es) in meos/src "
+                  f"(fix at source — wrong @sqlfn resolved):", file=sys.stderr)
+            for cname, sf in ea_bad:
+                print(f"        {cname} -> @sqlfn {sf}", file=sys.stderr)
 
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:

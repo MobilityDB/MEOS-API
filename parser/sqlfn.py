@@ -84,3 +84,27 @@ def attach_sqlfn_map(idl, meos_src, mdb_src):
             f["sqlfnAll"] = [s for s, _ in lst]
         n += 1
     return idl, n
+
+
+# MEOS-C ever/always spatial-relationship functions are named <e|a><verb>_...; their
+# @csqlfn must point at the matching <E|A><verb>_... wrapper. A copy-paste @csqlfn in
+# meos/src (e.g. eintersects_tgeo_geo tagged #Aintersects_tgeo_geo) silently flips the
+# resolved @sqlfn from eX to aX — which then drops the real overload from the eX dispatch
+# group and lets a wrong subtype backing be reached (a runtime "must be of type ..." error
+# in the bindings). The parser is faithful, so guard the SOURCE here: flag any function
+# whose name e/a prefix disagrees with its resolved @sqlfn e/a prefix.
+_EA_FAMILY = re.compile(
+    r"^(e|a)(intersects|disjoint|contains|contained|covers|coveredby|touches|"
+    r"dwithin|within|equals|crosses|overlaps)_")
+
+
+def lint_ea_sqlfn(idl):
+    """Return [(meos_c_name, sqlfn)] where the function's ever/always (e/a) name prefix
+    contradicts its resolved @sqlfn — a source @csqlfn mistag in meos/src."""
+    bad = []
+    for f in idl["functions"]:
+        sf = f.get("sqlfn")
+        m = _EA_FAMILY.match(f["name"])
+        if sf and m and re.match(r"^[ea][A-Z]", sf) and sf[0] != m.group(1):
+            bad.append((f["name"], sf))
+    return bad
