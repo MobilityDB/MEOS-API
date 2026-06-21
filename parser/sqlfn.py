@@ -17,7 +17,14 @@ Adds per function (when the chain resolves): `sqlfn`, `sqlop`, `mdbC`.
 import re
 from pathlib import Path
 
-_CSQLFN = re.compile(r"@csqlfn\s+#(\w+)\s*\(\)")
+# A @csqlfn tag carries one OR MORE #Wrapper() references — comma- or
+# space-separated, and possibly continued across doxygen lines — because a single
+# MEOS function can back several wrappers (the ever/always pair eDisjoint/aDisjoint
+# share one ea_* function; the shift/scale/shift_scale trio share one C function).
+# The tag value runs from @csqlfn up to the next doxygen tag or the comment close.
+_CSQLFN = re.compile(r"@csqlfn\b")
+_CSQLFN_REF = re.compile(r"#(\w+)\s*\(\)")
+_CSQLFN_END = re.compile(r"@\w|\*/")
 # After the doxygen close, the MEOS-C definition: an optional return-type line
 # (no parens/braces/;/=), then `name(`.
 _FNDEF = re.compile(r"\*/\s*\n(?:[^\n(){};=]+\n)?(\w+)\s*\(")
@@ -27,15 +34,29 @@ _DATUM = re.compile(r"Datum\s+(\w+)\s*\(\s*PG_FUNCTION_ARGS")
 
 
 def _meos_to_mdb(meos_src):
-    """MEOS-C function name -> MobilityDB-C wrapper name (from @csqlfn)."""
+    """MEOS-C function name -> ordered list of MobilityDB-C wrapper names (from
+    @csqlfn). One MEOS function can back more than one wrapper — the ever/always
+    pair eDisjoint/aDisjoint share a single ea_* function tagged
+    `@csqlfn #Edisjoint_…() #Adisjoint_…()` — so each @csqlfn carries one or more
+    #Wrapper() references; collect them all (mirrors _mdb_to_sql collecting every
+    @sqlfn rather than the first)."""
     out = {}
     for cf in Path(meos_src).rglob("*.c"):
         text = cf.read_text(errors="ignore")
         for m in _CSQLFN.finditer(text):
-            mdb_c = m.group(1)
+            tail = text[m.end():]
+            end = _CSQLFN_END.search(tail)
+            value = tail[:end.start()] if end else tail
+            wrappers = _CSQLFN_REF.findall(value)
+            if not wrappers:
+                continue
             fm = _FNDEF.search(text, m.end())
-            if fm:
-                out.setdefault(fm.group(1), mdb_c)
+            if not fm:
+                continue
+            lst = out.setdefault(fm.group(1), [])
+            for w in wrappers:
+                if w not in lst:
+                    lst.append(w)
     return out
 
 
@@ -69,19 +90,28 @@ def attach_sqlfn_map(idl, meos_src, mdb_src):
     d2s = _mdb_to_sql(mdb_src)
     n = 0
     for f in idl["functions"]:
-        mdb_c = m2d.get(f["name"])
-        if not mdb_c:
+        wrappers = m2d.get(f["name"])
+        if not wrappers:
             continue
-        lst = d2s.get(mdb_c)
-        if not lst:
+        # A MEOS function can back several wrappers (the ever/always pair), each
+        # carrying its own @sqlfn; collect the (sqlfn, sqlop) pairs across all of
+        # them in order, keeping the primary (first) wrapper for back-compat.
+        pairs = []
+        for w in wrappers:
+            for entry in d2s.get(w, []):
+                if entry not in pairs:
+                    pairs.append(entry)
+        if not pairs:
             continue
-        f["mdbC"] = mdb_c
-        f["sqlfn"] = lst[0][0]
-        if lst[0][1]:
-            f["sqlop"] = lst[0][1]
-        # Shared wrapper exposing >1 SQL name: record them all (binding picks).
-        if len(lst) > 1:
-            f["sqlfnAll"] = [s for s, _ in lst]
+        f["mdbC"] = wrappers[0]
+        f["sqlfn"] = pairs[0][0]
+        if pairs[0][1]:
+            f["sqlop"] = pairs[0][1]
+        # Shared wrapper OR ever/always pair exposing >1 SQL name: record them all.
+        if len(pairs) > 1:
+            f["sqlfnAll"] = [s for s, _ in pairs]
+        if len(wrappers) > 1:
+            f["mdbCAll"] = wrappers
         n += 1
     return idl, n
 
