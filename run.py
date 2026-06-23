@@ -8,7 +8,7 @@ from parser.portable import attach_portable_aliases
 from parser.typerecover import recover_collapsed_types
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
-from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn
+from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -74,6 +74,17 @@ def main():
                   f"(fix at source — wrong @sqlfn resolved):", file=sys.stderr)
             for cname, sf in ea_bad:
                 print(f"        {cname} -> @sqlfn {sf}", file=sys.stderr)
+        # Guard: @sqlfn names that differ only by case (e.g. tDistance vs tdistance)
+        # are the SAME SQL function (PostgreSQL folds the identifier) but DISTINCT
+        # binding names — a case-insensitive engine (Spark SQL) registers both under
+        # one UDF, so one silently shadows the other. Invisible in SQL; surface the
+        # casing straggler here, to be fixed at the MEOS-C @sqlfn source.
+        case_bad = lint_sqlfn_case_collisions(idl)
+        if case_bad:
+            print(f"      ⚠ {len(case_bad)} @sqlfn case-collision(s) (pick ONE canonical "
+                  f"spelling at the MEOS-C source — binding-breaking otherwise):", file=sys.stderr)
+            for _lo, spellings in case_bad:
+                print(f"        {' vs '.join(spellings)}", file=sys.stderr)
 
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:

@@ -138,3 +138,21 @@ def lint_ea_sqlfn(idl):
         if sf and m and re.match(r"^[ea][A-Z]", sf) and sf[0] != m.group(1):
             bad.append((f["name"], sf))
     return bad
+
+
+def lint_sqlfn_case_collisions(idl):
+    """Return [(lower, [spelling, ...])] for @sqlfn names that collide
+    case-insensitively but differ in case (e.g. tDistance vs tdistance).
+
+    PostgreSQL folds unquoted identifiers to lower case, so the two spell the
+    SAME SQL function and the clash is invisible in SQL / pg_regress. But the
+    binding name is taken case-SENSITIVELY, and case-insensitive engines (Spark
+    SQL, …) register every spelling under one UDF — so one silently shadows the
+    other. A canonical binding name must have exactly ONE spelling; surface a
+    casing straggler here before it reaches a binding."""
+    by_lower = {}
+    for f in idl["functions"]:
+        for sf in [f.get("sqlfn"), *f.get("sqlfnAll", [])]:
+            if sf:
+                by_lower.setdefault(sf.lower(), set()).add(sf)
+    return sorted((lo, sorted(sp)) for lo, sp in by_lower.items() if len(sp) > 1)
