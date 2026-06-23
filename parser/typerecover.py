@@ -35,6 +35,7 @@ _TYPE_MAP = {
     "Timestamp": "Timestamp",
     "TimestampTz": "TimestampTz",
     "H3Index": "uint64_t",
+    "Quadbin": "uint64_t",
     "text": "text",
     "GSERIALIZED": "GSERIALIZED",
     "Interval": "Interval",
@@ -75,7 +76,8 @@ def _recovery(fragment):
     suffix = (" " + stars) if stars else ""
     collapsed = f"{const}int{suffix}"
     recovered = f"{const}{_TYPE_MAP[m.group('base')]}{suffix}"
-    return collapsed, recovered
+    original = f"{const}{m.group('base')}{suffix}"
+    return collapsed, recovered, original
 
 
 def _parse_header_decls(headers_dir):
@@ -123,12 +125,17 @@ def recover_collapsed_types(idl, headers_dir):
         """Rewrite a return/param slot in place; return 1 if rewritten."""
         if not (recovery and isinstance(slot, dict)):
             return 0
-        collapsed, recovered = recovery
+        collapsed, recovered, original = recovery
         key = "c" if "c" in slot else "cType"
-        if _nospace(slot.get(key)) != _nospace(collapsed):
+        # The base name is either erased to int by the host-collision prefix
+        # rename (slot spells `collapsed`), or it survives while only the
+        # canonical collapses (slot spells `original`, e.g. a MobilityDB typedef
+        # such as Quadbin whose uint64 underlying type was the part that erased).
+        recoverable = (_nospace(collapsed), _nospace(original))
+        if _nospace(slot.get(key)) not in recoverable:
             return 0
         slot[key] = recovered
-        if _nospace(slot.get("canonical")) == _nospace(collapsed):
+        if _nospace(slot.get("canonical")) in recoverable:
             slot["canonical"] = recovered
         return 1
 
