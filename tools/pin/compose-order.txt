@@ -1,0 +1,43 @@
+# USER-APPROVED-PIN-WRITE — creating MEOS-API's pin manifest (user 2026-06-25, per-binding
+#   generator policy rollout). New file in the MEOS-API repo, NOT a mutation of MobilityDB's
+#   pin tooling.
+#
+# MEOS-API pin — THE canonical, dependency-ordered fold manifest (per-binding policy).
+#
+# MEOS-API is the ROOT of the chain: it is the catalog PRODUCER, not a generated binding.
+# `run.py` reads the MEOS pin's `meos/include` headers and emits `output/meos-idl.json` — the
+# single source of truth every binding consumes. This manifest lists MEOS-API's own enrichment
+# + projection PRs. (policy: generator-per-binding-canonical-policy)
+#
+# Format:  <PR#> <head-branch>            # role.   '?' = membership/order UNCONFIRMED.
+# base = current origin/master. Derived from the live DAG (gh pr list, this turn).
+
+# ── WAVE 0 — CATALOG CORRECTNESS (parser / type recovery / enrichment) ──
+2     feat/shape-metadata                   # shape annotations in meos-meta.json for binding codegens
+16    feat/generate-shape-from-headers      # generate fn shape (output arrays + nullability) from headers
+20    fix/recover-jsonb-jsonpath-types      # recover Jsonb/JsonPath collapsed C types
+22    fix/recover-quadbin-type              # recover Quadbin collapsed C type
+17    feat/sql-name-chain                   # MEOS-C -> MobilityDB-C -> SQL name chain from @csqlfn/@sqlfn/@sqlop
+18    feat/sqlfn-name-map                   # attach the @sqlfn SQL-name map to the catalog
+19    feat/portable-aliases-comparison-families  # camelCase comparison families (tempEq/everEq/alwaysEq)
+21    feat/catalog-doxygen-groups           # attach the doxygen @ingroup module group to the catalog
+4     feat/service-enrichment               # derive service-projection metadata (category/network/wire)
+
+# ── WAVE 1 — CATALOG PROJECTIONS (language-AGNOSTIC; these legitimately live in MEOS-API) ──
+5     feat/openapi-generator                # OpenAPI 3.1 contract from the enriched catalog
+6     feat/mcp-generator                    # MCP tool manifest from the enriched catalog
+13    feat/movfeat-openapi-generator        # OGC API – Moving Features OpenAPI projection
+10    feat/object-model                     # explicit MEOS object model (class lattice, methods, error contract)
+7     feat/runtime-server                   # contract-driven runtime HTTP server with a pluggable MEOS engine
+12    feat/openapi-validator-gate           # CI: openapi-validate workflow
+
+# ── WAVE 2 — INTEGRATION / DOCS ──
+14    feat/integration-train                # Waves 0–5 dependency-ordered manifest + verifier
+9     docs/cross-repo-handoff               # cross-repo handoff brief for consuming meos-api.json
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# Language BINDINGS (PyMEOS/JMEOS/GoMEOS/MEOS.NET/meos-rs/Duck/Spark/Flink/Kafka/Nebula) are
+# NOT in this manifest — each is a separate repo with its OWN compose-order.txt, generated FROM
+# this catalog. The dependency-ordered chain that regenerates the whole ecosystem from a pin is
+# `tools/ecosystem-generate.sh`. See GENERATION.md.
+# ════════════════════════════════════════════════════════════════════════════════════
