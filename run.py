@@ -5,6 +5,7 @@ from pathlib import Path
 
 from parser.parser import parse_all_headers, merge_meta
 from parser.portable import attach_portable_aliases
+from parser.covering import attach_temporal_covering
 from parser.typerecover import recover_collapsed_types
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
@@ -16,6 +17,7 @@ from parser.extractors import find_unlisted_foreign_structs
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
 META_PATH   = Path("./meta/meos-meta.json")
 PORTABLE_PATH = Path("./meta/portable-aliases.json")
+COVERING_PATH = Path("./meta/temporal-covering.json")
 OUTPUT_DIR  = Path("./output")
 
 
@@ -52,7 +54,7 @@ def main():
         print(f"[2/3] No meta found at {META_PATH}, skipping.", file=sys.stderr)
 
     # 3. Attach the canonical portable bare-name mapping (codegen truth)
-    print(f"[3/3] Attaching portable aliases from {PORTABLE_PATH}...",
+    print(f"[3/4] Attaching portable aliases from {PORTABLE_PATH}...",
           file=sys.stderr)
     idl = attach_portable_aliases(idl, PORTABLE_PATH)
 
@@ -103,16 +105,23 @@ def main():
               f"{', '.join(unlisted)} — add to _EXTERNAL_OPAQUE_STRUCTS to map "
               f"them to void * uniformly across bindings", file=sys.stderr)
 
+    # 6. Attach the temporal-covering descriptor (Parquet/Iceberg projection)
+    print(f"      Attaching temporal covering from {COVERING_PATH}...",
+          file=sys.stderr)
+    idl = attach_temporal_covering(idl, COVERING_PATH)
+
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
         json.dump(idl, f, indent=2)
     print(f"      → {idl_path} written", file=sys.stderr)
 
     pa = idl.get("portableAliases", {}).get("count", 0)
+    cov = idl.get("temporalCovering", {}).get("count", 0)
     print(f"\nDone: {len(idl['functions'])} functions, "
           f"{len(idl['structs'])} structs, "
           f"{len(idl['enums'])} enums, "
-          f"{pa} portable bare-name aliases", file=sys.stderr)
+          f"{pa} portable bare-name aliases, "
+          f"{cov} temporal covering types", file=sys.stderr)
 
 
 if __name__ == "__main__":
