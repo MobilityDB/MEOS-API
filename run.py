@@ -10,6 +10,7 @@ from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
 from parser.doxygroup import attach_groups
+from parser.extractors import find_unlisted_foreign_structs
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -92,6 +93,15 @@ def main():
     if MEOS_SRC.exists():
         idl, ngrp = attach_groups(idl, MEOS_SRC)
         print(f"[5/5] Attached {ngrp} doxygen @ingroup groups", file=sys.stderr)
+
+    # Surface any forward-declared external ABI struct pointer not yet
+    # normalised to void * (see parser.extractors._EXTERNAL_OPAQUE_STRUCTS),
+    # so a new one is classified explicitly instead of diverging per binding.
+    unlisted = find_unlisted_foreign_structs(idl)
+    if unlisted:
+        print(f"      WARNING: unlisted external struct pointer(s) in the API: "
+              f"{', '.join(unlisted)} — add to _EXTERNAL_OPAQUE_STRUCTS to map "
+              f"them to void * uniformly across bindings", file=sys.stderr)
 
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
