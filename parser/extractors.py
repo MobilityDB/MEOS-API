@@ -90,10 +90,65 @@ def _canonical_c_spelling(ty) -> str:
     return _demote_external_opaque(_canonical_spelling(ty))
 
 
+# -----------------------------------------------------------------------------
+# Family classification
+#
+# MobilityDB groups its optional type families in dedicated subdirectories of
+# ``meos/include`` (``cbuffer/``, ``npoint/``, ``pose/``, ``rgeo/``, ``h3/``,
+# ``quadbin/``, ``pointcloud/``, ``json/``, ``raster/``), each fronted by a
+# top-level public ``meos_<family>.h`` header. The tree layout is therefore the
+# single source of truth for family membership: a binding gates a family in or
+# out purely by this field, so edge builds can drop unused families (e.g.
+# ``POINTCLOUD``) to shrink their footprint. Everything else — the temporal
+# core, the base ``geo``/tpoint types the families build on, and the shared
+# top-level headers — is ``CORE`` and always emitted.
+# -----------------------------------------------------------------------------
+_SUBDIR_FAMILY = {
+    "cbuffer": "CBUFFER",
+    "npoint": "NPOINT",
+    "pose": "POSE",
+    "rgeo": "RGEO",
+    "h3": "H3",
+    "quadbin": "QUADBIN",
+    "pointcloud": "POINTCLOUD",
+    "json": "JSON",
+    "raster": "RASTER",
+}
+
+_TOPLEVEL_FAMILY = {
+    "meos_cbuffer.h": "CBUFFER",
+    "meos_npoint.h": "NPOINT",
+    "meos_pose.h": "POSE",
+    "meos_rgeo.h": "RGEO",
+    "meos_h3.h": "H3",
+    "meos_quadbin.h": "QUADBIN",
+    "meos_pointcloud.h": "POINTCLOUD",
+    "meos_json.h": "JSON",
+    "meos_arrow.h": "ARROW",
+    "meos_raster.h": "RASTER",
+}
+
+
+def _family_of(loc_path: str) -> str:
+    """Classify the declaring header into its optional family, or ``CORE``.
+
+    The family is taken from the header's parent directory (the canonical
+    grouping); the top-level ``meos_<family>.h`` public headers are mapped by
+    name. Anything unmatched (temporal core, base geo, shared headers) is
+    ``CORE`` and always emitted.
+    """
+    path = Path(loc_path)
+    fam = _SUBDIR_FAMILY.get(path.parent.name)
+    if fam is not None:
+        return fam
+    return _TOPLEVEL_FAMILY.get(path.name, "CORE")
+
+
 def extract_function(node) -> dict:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
+        "family": _family_of(node.location.file.name),
         "returnType": {
             "c": _c_spelling(node.result_type),
             "canonical": _canonical_c_spelling(node.result_type),
@@ -113,6 +168,7 @@ def extract_struct(node) -> dict:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
+        "family": _family_of(node.location.file.name),
         "fields": [
             {
                 "name": f.spelling,
@@ -129,6 +185,7 @@ def extract_enum(node) -> dict:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
+        "family": _family_of(node.location.file.name),
         "values": [
             {
                 "name": v.spelling,
