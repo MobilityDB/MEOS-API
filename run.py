@@ -5,6 +5,8 @@ from pathlib import Path
 from parser.parser import parse_all_headers, merge_meta
 from parser.portable import attach_portable_aliases
 from parser.typerecover import recover_collapsed_types
+from parser.shapeinfer import infer_shapes
+from parser.nullable import merge_nullable
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -27,6 +29,16 @@ def main():
     if rec["returns"] or rec["params"]:
         print(f"      recovered {rec['returns']} return types, "
               f"{rec['params']} params from collapsed int", file=sys.stderr)
+
+    # 1c. Generate the codegen `shape` from the signatures + Doxygen, replacing
+    #     the hand-maintained meta stub.  outputArrays/arrayReturn come from the
+    #     parameter forms; nullable comes from the C `@param ... may be NULL` SoT.
+    idl, sh = infer_shapes(idl)
+    print(f"      inferred shape: {sh['arrayReturn']} array returns, "
+          f"{sh['outputArrays']} output arrays", file=sys.stderr)
+    idl, nn = merge_nullable(idl, HEADERS_DIR.parent)
+    print(f"      nullable params from Doxygen `may be NULL`: {nn}",
+          file=sys.stderr)
 
     # 2. Merge with manual metadata
     if META_PATH.exists():
