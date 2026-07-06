@@ -44,13 +44,13 @@ class TypeRecoverTests(unittest.TestCase):
 
     def test_text_pointer_returns_recovered(self):
         # Pre-fix these came back as ``int *``.
-        for name in ("cstring2text", "ttext_start_value", "text_copy",
+        for name in ("cstring_to_text", "ttext_start_value", "text_copy",
                      "text_upper", "textset_end_value"):
             self.assertEqual(self._ret(name), "text *", name)
 
     def test_text_const_pointer_params_recovered(self):
         # ``const text *`` collapses to ``const int *``.
-        self.assertIn("const text *", self._param_ctypes("text2cstring"))
+        self.assertIn("const text *", self._param_ctypes("text_to_cstring"))
         self.assertIn("const text *", self._param_ctypes("textcat_ttext_text"))
 
     def test_text_double_pointer_recovered(self):
