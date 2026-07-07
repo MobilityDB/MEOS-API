@@ -19,7 +19,8 @@ MAP = ROOT / "meta" / "portable-aliases.json"
 SCHEMA = ROOT / "meta" / "portable-aliases.schema.json"
 _EXPECTED_FAMILY_SIZES = {
     "topology": 4, "timePosition": 4, "spaceX": 4, "spaceY": 4,
-    "spaceZ": 4, "temporalComparison": 6, "distance": 2, "same": 1,
+    "spaceZ": 4, "temporalComparison": 6, "everComparison": 6,
+    "alwaysComparison": 6, "distance": 2, "same": 1,
 }
 
 
@@ -39,11 +40,12 @@ class MappingFileTests(unittest.TestCase):
         for op, bn in [("&&", "overlaps"), ("@>", "contains"),
                        ("-|-", "adjacent"), ("<<#", "before"),
                        ("#&>", "overafter"), ("|&>", "overabove"),
-                       ("/&>", "overback"), ("#=", "teq"), ("#<>", "tne"),
+                       ("/&>", "overback"), ("#=", "tEq"), ("#<>", "tNe"),
+                       ("?=", "eEq"), ("%=", "aEq"),
                        ("|=|", "nearestApproachDistance"), ("~=", "same")]:
             self.assertEqual(flat[op], bn)
-        self.assertEqual(sum(_EXPECTED_FAMILY_SIZES.values()), 29)
-        self.assertEqual(len(flat), 29)
+        self.assertEqual(sum(_EXPECTED_FAMILY_SIZES.values()), 41)
+        self.assertEqual(len(flat), 41)
 
     def test_scope_correction_no_exclusion(self):
         # The corrected 100%-parity rule: these are IN scope, never deferred.
@@ -72,10 +74,11 @@ class MappingFileTests(unittest.TestCase):
                 self.assertIn("functions", entry)
 
     def test_already_canonical_and_provenance(self):
-        pats = {a.get("pattern") for a in self.d["alreadyCanonical"]
-                if a.get("kind") == "family"}
-        self.assertIn("ever_*", pats)
-        self.assertIn("always_*", pats)
+        funcs = {f for a in self.d["alreadyCanonical"]
+                 if a.get("kind") == "functions"
+                 for f in a["functions"]}
+        self.assertIn("eIntersects", funcs)
+        self.assertIn("atTime", funcs)
         self.assertEqual(self.d["provenance"]["nativePR"][:14],
                          "MobilityDB#107")
 
@@ -102,13 +105,13 @@ class AttachTests(unittest.TestCase):
     def test_attach_and_derive(self):
         idl = attach_portable_aliases({"functions": []}, MAP)
         pa = idl["portableAliases"]
-        self.assertEqual(pa["count"], 29)
+        self.assertEqual(pa["count"], 41)
         self.assertEqual(pa["byOperator"]["&&"], "overlaps")
         self.assertEqual(pa["byBareName"]["overlaps"], "&&")
         self.assertEqual(pa["bareNames"], sorted(pa["byBareName"]))
-        # bijective: 29 distinct operators and 29 distinct bare names
-        self.assertEqual(len(pa["byOperator"]), 29)
-        self.assertEqual(len(pa["byBareName"]), 29)
+        # bijective: 41 distinct operators and 41 distinct bare names
+        self.assertEqual(len(pa["byOperator"]), 41)
+        self.assertEqual(len(pa["byBareName"]), 41)
         self.assertIn("cbuffer", pa["scope"]["inScopeTypeFamilies"])
         self.assertEqual(pa["explicitBacking"],
                          {"nearestApproachDistance": ["nad"]})

@@ -98,35 +98,33 @@
       }
     ],
     "temporalComparison": [
-      {
-        "operator": "#=",
-        "bareName": "teq"
-      },
-      {
-        "operator": "#<>",
-        "bareName": "tne"
-      },
-      {
-        "operator": "#<",
-        "bareName": "tlt"
-      },
-      {
-        "operator": "#<=",
-        "bareName": "tle"
-      },
-      {
-        "operator": "#>",
-        "bareName": "tgt"
-      },
-      {
-        "operator": "#>=",
-        "bareName": "tge"
-      }
+      { "operator": "#=",  "bareName": "tEq" },
+      { "operator": "#<>", "bareName": "tNe" },
+      { "operator": "#<",  "bareName": "tLt" },
+      { "operator": "#<=", "bareName": "tLe" },
+      { "operator": "#>",  "bareName": "tGt" },
+      { "operator": "#>=", "bareName": "tGe" }
+    ],
+    "everComparison": [
+      { "operator": "?=",  "bareName": "eEq" },
+      { "operator": "?<>", "bareName": "eNe" },
+      { "operator": "?<",  "bareName": "eLt" },
+      { "operator": "?<=", "bareName": "eLe" },
+      { "operator": "?>",  "bareName": "eGt" },
+      { "operator": "?>=", "bareName": "eGe" }
+    ],
+    "alwaysComparison": [
+      { "operator": "%=",  "bareName": "aEq" },
+      { "operator": "%<>", "bareName": "aNe" },
+      { "operator": "%<",  "bareName": "aLt" },
+      { "operator": "%<=", "bareName": "aLe" },
+      { "operator": "%>",  "bareName": "aGt" },
+      { "operator": "%>=", "bareName": "aGe" }
     ],
     "distance": [
       {
         "operator": "<->",
-        "bareName": "tdistance"
+        "bareName": "tDistance"
       },
       {
         "operator": "|=|",
@@ -141,22 +139,6 @@
     ]
   },
   "alreadyCanonical": [
-    {
-      "kind": "family",
-      "family": "ever",
-      "operators": [
-        "?="
-      ],
-      "pattern": "ever_*"
-    },
-    {
-      "kind": "family",
-      "family": "always",
-      "operators": [
-        "%="
-      ],
-      "pattern": "always_*"
-    },
     {
       "kind": "functions",
       "functions": [
