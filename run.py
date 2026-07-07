@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ from parser.portable import attach_portable_aliases
 from parser.typerecover import recover_collapsed_types
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
+from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -51,6 +53,38 @@ def main():
     print(f"[3/3] Attaching portable aliases from {PORTABLE_PATH}...",
           file=sys.stderr)
     idl = attach_portable_aliases(idl, PORTABLE_PATH)
+
+    # 4. Attach the SQL-name map (@sqlfn/@sqlop) from the vendored source.
+    #    The source root is overridable (MDB_SRC_ROOT) so a binding can point the
+    #    @sqlfn/@ingroup extraction at the SAME pinned checkout as the headers,
+    #    keeping the catalog reproducibly equivalent to that pin.
+    SRC_ROOT = Path(os.environ.get("MDB_SRC_ROOT", "./_mobilitydb"))
+    MEOS_SRC = SRC_ROOT / "meos" / "src"
+    MDB_SRC = SRC_ROOT / "mobilitydb" / "src"
+    if MEOS_SRC.exists() and MDB_SRC.exists():
+        idl, nsql = attach_sqlfn_map(idl, MEOS_SRC, MDB_SRC)
+        print(f"[4/4] Attached {nsql} @sqlfn SQL names", file=sys.stderr)
+        # Guard: a copy-paste @csqlfn in meos/src can point an ever/always function at
+        # the opposite-prefix wrapper (eintersects_* tagged #Aintersects_*), flipping its
+        # SQL name and breaking the binding overload dispatch. The parser is faithful, so
+        # surface the SOURCE mistag here rather than ship a wrong catalog silently.
+        ea_bad = lint_ea_sqlfn(idl)
+        if ea_bad:
+            print(f"      ⚠ {len(ea_bad)} @csqlfn e/a-prefix mistag(es) in meos/src "
+                  f"(fix at source — wrong @sqlfn resolved):", file=sys.stderr)
+            for cname, sf in ea_bad:
+                print(f"        {cname} -> @sqlfn {sf}", file=sys.stderr)
+        # Guard: @sqlfn names that differ only by case (e.g. tDistance vs tdistance)
+        # are the SAME SQL function (PostgreSQL folds the identifier) but DISTINCT
+        # binding names — a case-insensitive engine (Spark SQL) registers both under
+        # one UDF, so one silently shadows the other. Invisible in SQL; surface the
+        # casing straggler here, to be fixed at the MEOS-C @sqlfn source.
+        case_bad = lint_sqlfn_case_collisions(idl)
+        if case_bad:
+            print(f"      ⚠ {len(case_bad)} @sqlfn case-collision(s) (pick ONE canonical "
+                  f"spelling at the MEOS-C source — binding-breaking otherwise):", file=sys.stderr)
+            for _lo, spellings in case_bad:
+                print(f"        {' vs '.join(spellings)}", file=sys.stderr)
 
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
