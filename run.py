@@ -9,6 +9,7 @@ from parser.typerecover import recover_collapsed_types
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
+from parser.doxygroup import attach_groups
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -85,6 +86,12 @@ def main():
                   f"spelling at the MEOS-C source — binding-breaking otherwise):", file=sys.stderr)
             for _lo, spellings in case_bad:
                 print(f"        {' vs '.join(spellings)}", file=sys.stderr)
+
+    # 5. Attach the doxygen module group (@ingroup) from the vendored source, so
+    #    bindings organize their generated surface like the reference manual.
+    if MEOS_SRC.exists():
+        idl, ngrp = attach_groups(idl, MEOS_SRC)
+        print(f"[5/5] Attached {ngrp} doxygen @ingroup groups", file=sys.stderr)
 
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
