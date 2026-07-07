@@ -81,6 +81,22 @@ class TypeRecoverTests(unittest.TestCase):
         self.assertGreater(len(geo_fns), 50,
                            "GSERIALIZED* collapsed toward int — typerecover regression?")
 
+    # ---- jsonb Jsonb / jsonpath JsonPath (opaque PG types, collapse to int) -
+
+    def test_jsonb_recovered_when_tjsonb_present(self):
+        # The temporal-JSONB surface is built only when MEOS is compiled with
+        # JSON=ON, so this assertion is conditional on the parsed source
+        # carrying it (skipped otherwise to stay source-agnostic).
+        jsonb_fns = [n for n in self.by_name
+                     if "jsonb" in n.lower() or "tjsonb" in n.lower()]
+        if not jsonb_fns:
+            self.skipTest("source parsed without the JSON=ON tjsonb surface")
+        # An out-parameter that pre-fix came back as ``int **``.
+        self.assertIn("Jsonb **", self._param_ctypes("jsonbset_value_n"))
+        carriers = [f for f in self.by_name.values() if "Jsonb *" in json.dumps(f)]
+        self.assertGreater(len(carriers), 20,
+                           "Jsonb* collapsed toward int — typerecover regression?")
+
     # ---- other PG-vendored opaque types (Interval / DateADT / Datum / ...) -
 
     def test_interval_params_recovered(self):
