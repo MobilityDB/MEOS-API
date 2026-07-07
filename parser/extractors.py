@@ -19,6 +19,51 @@ def _canonical_spelling(ty) -> str:
 _BOOL_SPELLINGS = {"bool", "_Bool"}
 
 
+# External ABI structs that appear in the MEOS public API only at the FFI
+# boundary — the Arrow C Data Interface structs.  They are forward-declared
+# with no field layout and carry no MEOS semantics, so a pointer to one is
+# ABI-identical to ``void *``.  Emitting them as ``void *`` lets every binding's
+# opaque-pointer-family handling (JNR ``Pointer``, cffi ``_ffi.CData``, Go
+# ``unsafe.Pointer``, .NET ``IntPtr``, rust ``*mut c_void``) wrap them
+# uniformly.  The idiomatic Arrow bridge — allocating the struct and importing
+# it through the language's Arrow library — lives in each binding's hand-written
+# layer, keyed off the ``*_to_arrow`` / ``*_from_arrow`` function name, as with
+# any other opaque-pointer-family value.
+_EXTERNAL_OPAQUE_STRUCTS = ("ArrowSchema", "ArrowArray")
+
+
+def _demote_external_opaque(spelling: str) -> str:
+    # Map a pointer to an external, layout-less ABI struct to the equivalent
+    # ``void``-pointer spelling, preserving const qualifiers and pointer depth.
+    for name in _EXTERNAL_OPAQUE_STRUCTS:
+        spelling = re.sub(rf"\bstruct\s+{name}\b", "void", spelling)
+        spelling = re.sub(rf"\b{name}\b", "void", spelling)
+    return spelling
+
+
+def find_unlisted_foreign_structs(idl) -> list:
+    # A MEOS type is typedef'd, so its declared ``cType`` appears bare (``Pose
+    # *``) in at least one signature; a foreign, forward-declared ABI struct is
+    # never typedef'd, so it only ever appears elaborated (``struct ArrowSchema
+    # *``).  Any base name seen only in the elaborated form, and not already
+    # normalised to ``void *`` by ``_EXTERNAL_OPAQUE_STRUCTS``, is an external
+    # type the bindings handle divergently (permissive ones map it to a raw
+    # pointer, conservative ones skip it).  Surface it so it is classified
+    # explicitly instead of silently diverging per binding.
+    elaborated, bare = set(), set()
+    for fn in idl.get("functions", []):
+        spellings = [p.get("cType") for p in fn.get("params", [])]
+        spellings.append(fn.get("returnType", {}).get("c"))
+        for sp in spellings:
+            if not isinstance(sp, str) or "*" not in sp:
+                continue
+            base = re.sub(r"\b(const|struct)\b|\*", " ", sp).strip()
+            if not base:
+                continue
+            (elaborated if re.search(r"\bstruct\b", sp) else bare).add(base)
+    return sorted(elaborated - bare - set(_EXTERNAL_OPAQUE_STRUCTS))
+
+
 def _c_spelling(ty) -> str:
     # Return the declared C spelling, with ``_Bool`` normalised to ``"bool"``.
     # Two bool representations arise depending on which postgres_int_defs.h is
@@ -28,7 +73,7 @@ def _c_spelling(ty) -> str:
     spelling = ty.spelling
     if spelling == "_Bool":
         return "bool"
-    return spelling
+    return _demote_external_opaque(spelling)
 
 
 def _canonical_c_spelling(ty) -> str:
@@ -42,7 +87,7 @@ def _canonical_c_spelling(ty) -> str:
     # Fallback: also catch _Bool reached through other typedef chains
     if ty.get_canonical().kind == clang.cindex.TypeKind.BOOL:
         return "bool"
-    return _canonical_spelling(ty)
+    return _demote_external_opaque(_canonical_spelling(ty))
 
 
 def extract_function(node) -> dict:
