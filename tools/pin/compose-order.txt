@@ -13,8 +13,9 @@
 # base = current origin/master. Derived from the live DAG (gh pr list, this turn).
 
 # ── WAVE 0 — CATALOG CORRECTNESS (parser / type recovery / enrichment) ──
-2     feat/shape-metadata                   # shape annotations in meos-meta.json for binding codegens
-16    feat/generate-shape-from-headers      # generate fn shape (output arrays + nullability) from headers
+16    feat/generate-shape-from-headers      # generate fn shape (arrayReturn/outputArrays/nullable) from the
+                                            #   C signatures + Doxygen, covering all functions (parser/shapeinfer.py +
+                                            #   nullable.py). meta/meos-meta.json is an override layer on top.
 20    fix/recover-jsonb-jsonpath-types      # recover Jsonb/JsonPath collapsed C types
 22    fix/recover-quadbin-type              # recover Quadbin collapsed C type
 17    feat/sql-name-chain                   # MEOS-C -> MobilityDB-C -> SQL name chain from @csqlfn/@sqlfn/@sqlop
