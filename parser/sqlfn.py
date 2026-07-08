@@ -61,12 +61,14 @@ def _split_top_commas(s):
 
 
 def _wrapper_sql_sigs(sql_src):
-    """MobilityDB-C wrapper name -> (sqlArity, sqlArityMax) from the CREATE FUNCTION
-    definitions. The SQL signature is the binding-facing arity, NOT the C one: an arg
-    with a DEFAULT clause is optional, and any trailing C param absent from the SQL form
-    is a C-only out-param (e.g. the `size_t *` of the *_as_hexwkb family). So a generator
-    binding the @sqlfn name must expose sqlArity..sqlArityMax args, NOT the full C list.
-    Across overloads of one wrapper, take min-required / max-total."""
+    """MobilityDB-C wrapper name -> (sqlArity, sqlArityMax, {sqlReturnType, ...}) from the
+    CREATE FUNCTION definitions. The SQL signature is the binding-facing arity, NOT the C
+    one: an arg with a DEFAULT clause is optional, and any trailing C param absent from the
+    SQL form is a C-only out-param (e.g. the `size_t *` of the *_as_hexwkb family). So a
+    generator binding the @sqlfn name must expose sqlArity..sqlArityMax args, NOT the full C
+    list. The RETURNS type is likewise binding-facing: the C signature loses the concrete SQL
+    subtype for polymorphic `Temporal *` returns. Across overloads of one wrapper, take
+    min-required / max-total arity and the UNION of return types."""
     out = {}
     sql_src = Path(sql_src)
     if not sql_src.exists():
@@ -84,9 +86,23 @@ def _wrapper_sql_sigs(sql_src):
             wrapper = wm.group(1)
             args = [a for a in _split_top_commas(text[start:i - 1]) if a.strip()]
             required = sum(1 for a in args if not re.search(r"\bDEFAULT\b", a, re.I))
+            # The SQL return type sits between the arg-list close `)` and the `AS`
+            # clause (`) RETURNS <type> AS '...','<Wrapper>'`). It is the binding-facing
+            # SQL subtype, which the C signature does NOT carry for the polymorphic
+            # `Temporal *`-returning functions (getX -> tfloat, centroid -> tgeompoint):
+            # the C return is a bare `Temporal *`, so without this a generator cannot
+            # render the concrete SQL result type. The CREATE FUNCTION is the SoT.
+            rt = None
+            rm = re.match(r"RETURNS\s+(?:SETOF\s+)?(.+)$",
+                          text[i:wm.start()].strip(), re.I | re.S)
+            if rm:
+                rt = " ".join(rm.group(1).split())
             prev = out.get(wrapper)
-            out[wrapper] = ((min(prev[0], required), max(prev[1], len(args)))
-                            if prev else (required, len(args)))
+            if prev:
+                rets = prev[2] | ({rt} if rt else set())
+                out[wrapper] = (min(prev[0], required), max(prev[1], len(args)), rets)
+            else:
+                out[wrapper] = (required, len(args), {rt} if rt else set())
     return out
 
 
@@ -168,7 +184,15 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
         # (DEFAULT), and C params beyond sqlArityMax are C-only out-params.
         sig = w2sig.get(wrappers[0])
         if sig:
-            f["sqlArity"], f["sqlArityMax"] = sig
+            f["sqlArity"], f["sqlArityMax"], rets = sig
+            # The binding-facing SQL return type (the CREATE FUNCTION `RETURNS` clause).
+            # Lets a generator render the concrete SQL subtype for a polymorphic
+            # `Temporal *` C return (getX -> tfloat, centroid -> tgeompoint). One wrapper
+            # normally has a single return type; record all if overloads disagree.
+            if len(rets) == 1:
+                f["sqlReturnType"] = next(iter(rets))
+            elif len(rets) > 1:
+                f["sqlReturnTypeAll"] = sorted(rets)
         if pairs[0][1]:
             f["sqlop"] = pairs[0][1]
         # Shared wrapper OR ever/always pair exposing >1 SQL name: record them all.
