@@ -25,9 +25,15 @@ from pathlib import Path
 _CSQLFN = re.compile(r"@csqlfn\b")
 _CSQLFN_REF = re.compile(r"#(\w+)\s*\(\)")
 _CSQLFN_END = re.compile(r"@\w|\*/")
-# After the doxygen close, the MEOS-C definition: an optional return-type line
-# (no parens/braces/;/=), then `name(`.
-_FNDEF = re.compile(r"\*/\s*\n(?:[^\n(){};=]+\n)?(\w+)\s*\(")
+# After the doxygen close, the MEOS-C definition. The return type may sit on its
+# own line (`bool\nleft_tpcbox_tpcbox(`) OR on the same line as the name
+# (`bool tpcbox_eq(const TPCBox *box1, ...)`, the one-line predicate style). Match
+# both: an optional return-type line, then an optional same-line type prefix
+# (word/space/`*` only), then `name(`. Without the same-line case a one-line def is
+# not matched and its @csqlfn silently attaches to the NEXT matchable definition,
+# collapsing several wrappers onto one MEOS function (the tpcbox_eq..ge comparison
+# operators lost their SQL name that way).
+_FNDEF = re.compile(r"\*/\s*\n(?:[^\n(){};=]+\n)?(?:[\w\s*]+?\s)?(\w+)\s*\(")
 _SQLFN = re.compile(r"@sqlfn\s+(\w+)\s*\(\)")
 _SQLOP = re.compile(r"@sqlop\s+@p\s+(\S+)")
 _DATUM = re.compile(r"Datum\s+(\w+)\s*\(\s*PG_FUNCTION_ARGS")
