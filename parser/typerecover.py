@@ -32,6 +32,7 @@ from pathlib import Path
 _TYPE_MAP = {
     "bool": "bool",
     "int64": "int64_t",
+    "uint64": "uint64_t",
     "Timestamp": "Timestamp",
     "TimestampTz": "TimestampTz",
     "H3Index": "uint64_t",

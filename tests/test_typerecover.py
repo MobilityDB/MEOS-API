@@ -122,6 +122,17 @@ class TypeRecoverTests(unittest.TestCase):
         self.assertEqual(self._ret("bigintset_values"), "int64_t *")
         self.assertEqual(self._ret("th3index_values"), "uint64_t *")
 
+    def test_uint64_recovered(self):
+        # The bare PG ``uint64`` typedef collapses to ``int`` and must recover
+        # to ``uint64_t`` (like ``int64`` -> ``int64_t``), else 64-bit values
+        # (hash seeds, quadbin cells) truncate to 32 bits in generated
+        # bindings. These ``*_hash_extended`` functions use the bare ``uint64``
+        # typedef (not the H3Index/Quadbin aliases), so they recover only when
+        # the ``uint64`` map entry is present — a guard against dropping it.
+        self.assertEqual(self._ret("set_hash_extended"), "uint64_t")
+        self.assertEqual(self._ret("span_hash_extended"), "uint64_t")
+        self.assertIn("uint64_t", self._param_ctypes("set_hash_extended"))
+
     # ---- genuine-int controls (must NOT be rewritten) ----------------------
 
     def test_genuine_int_left_untouched(self):
