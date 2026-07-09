@@ -55,9 +55,9 @@ PINWT="$WORK/pin"; rm -rf "$PINWT"; git -C "$MDB" worktree add --detach "$PINWT"
 ( cd "$MEOSAPI" && MDB_SRC_ROOT="$PINWT" python3 run.py "$PINWT/meos/include" )
 export CATALOG="$MEOSAPI/output/meos-idl.json"
 # all-families libmeos (the runtime every binding loads); see generation-starts-from-building-so.
-# Each -D<FAMILY>=ON pulls that family's full dependency chain (RASTER -> GDAL, like H3 -> libh3).
-cmake -S "$PINWT" -B "$PINWT/build-allfam" -DMEOS=ON -DCBUFFER=ON -DJSON=ON -DNPOINT=ON \
-  -DPOSE=ON -DRGEO=ON -DQUADBIN=ON -DH3=ON -DRASTER=ON \
+# -DALL=ON is the standard MEOS mechanism to enable every optional family (present and future);
+# each family pulls its own dependency (RASTER -> GDAL, H3 -> libh3, POINTCLOUD -> pgpointcloud).
+cmake -S "$PINWT" -B "$PINWT/build-allfam" -DMEOS=ON -DALL=ON \
   -DH3_INCLUDE_DIR=/usr/include/h3 -DH3_LIBRARY=/usr/lib/x86_64-linux-gnu/libh3.so >/dev/null
 cmake --build "$PINWT/build-allfam" --target meos -j"$(nproc)"
 export LIBMEOS="$PINWT/build-allfam/libmeos.so"
