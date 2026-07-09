@@ -60,49 +60,89 @@ def _split_top_commas(s):
     return out
 
 
+_ARGMODE = re.compile(r"^(?:IN|OUT|INOUT|VARIADIC)\s+", re.I)
+
+
+def _bare_type(decl):
+    """A CREATE FUNCTION arg declaration with its argmode and DEFAULT / `= expr` clause
+    stripped — leaving `[argname] argtype`, argtype possibly multi-word (double precision)."""
+    a = _ARGMODE.sub("", decl.strip())
+    return re.split(r"\bDEFAULT\b|=", a, maxsplit=1, flags=re.I)[0].strip()
+
+
+def _arg_type(decl, vocab):
+    """The concrete SQL type of one argument, resolved MECHANICALLY (no hardcoded type
+    list). `vocab` is the .in.sql's own type surface, gathered from the unambiguous
+    positions (single-token bare args + every RETURNS clause). The type is the longest
+    trailing run of tokens that is in `vocab`; any leading tokens are the optional
+    argument NAME (`dist float` -> float, `lowerInc boolean` -> boolean)."""
+    a = _bare_type(decl)
+    if not a or a in vocab:
+        return a
+    toks = a.split()
+    for k in range(len(toks)):
+        cand = " ".join(toks[k:])
+        if cand in vocab:
+            return cand
+    return toks[-1] if toks else a
+
+
+def _create_fn_stmts(text):
+    """Yield (sqlName, [raw arg decls], returnType|None, wrapper|None) for every
+    CREATE FUNCTION in `text`, each parsed STATEMENT-BOUNDED (to its terminating `;`).
+    Bounding to the `;` is what stops a `LANGUAGE SQL` default-arg overload (whose own
+    `AS 'SELECT ...'` has no C symbol) from bleeding its RETURNS/AS across the boundary
+    into the next C-backed statement — the cross-statement mis-attribution that produced
+    garbage return types. wrapper is None for a LANGUAGE SQL / $$ body (no C symbol)."""
+    for m in _CREATE_FN.finditer(text):
+        sqlname = m.group(1)
+        i, depth, start = m.end(), 1, m.end()
+        while i < len(text) and depth:
+            depth += (text[i] == "(") - (text[i] == ")")
+            i += 1
+        arg_close = i - 1
+        semi = text.find(";", i)
+        tail = text[i:semi if semi != -1 else len(text)]        # ') RETURNS <t> AS ...'
+        wm = _AS_WRAPPER.search(tail)
+        wrapper = wm.group(1) if wm else None
+        rm = re.match(r"\s*RETURNS\s+(?:SETOF\s+)?(.+?)\s+AS\b", tail, re.I | re.S)
+        ret = " ".join(rm.group(1).split()) if rm else None
+        argdecls = [a for a in _split_top_commas(text[start:arg_close]) if a.strip()]
+        yield sqlname, argdecls, ret, wrapper
+
+
 def _wrapper_sql_sigs(sql_src):
-    """MobilityDB-C wrapper name -> (sqlArity, sqlArityMax, {sqlReturnType, ...}) from the
-    CREATE FUNCTION definitions. The SQL signature is the binding-facing arity, NOT the C
-    one: an arg with a DEFAULT clause is optional, and any trailing C param absent from the
-    SQL form is a C-only out-param (e.g. the `size_t *` of the *_as_hexwkb family). So a
-    generator binding the @sqlfn name must expose sqlArity..sqlArityMax args, NOT the full C
-    list. The RETURNS type is likewise binding-facing: the C signature loses the concrete SQL
-    subtype for polymorphic `Temporal *` returns. Across overloads of one wrapper, take
-    min-required / max-total arity and the UNION of return types."""
+    """MobilityDB-C wrapper name -> list of per-overload SQL signatures
+    {sqlName, args:[type,...], required, ret}, straight from the CREATE FUNCTION
+    statements. The .in.sql CREATE FUNCTION set IS the exact SQL registration surface,
+    so a binding emits ONE registration per signature over the concrete arg types with
+    NO type-scope heuristic — e.g. `minInstant` lands on exactly its four overloads
+    {tint,tbigint,tfloat,ttext}, never over tbool or the geo types. `required` counts the
+    non-DEFAULT args (args beyond it are SQL-optional); `ret` is the concrete SQL subtype
+    the polymorphic `Temporal *` C return loses. Two passes: gather the type vocabulary
+    from the unambiguous positions, then resolve every arg's type against it."""
     out = {}
     sql_src = Path(sql_src)
     if not sql_src.exists():
         return out
+    stmts, vocab = [], set()
     for sf in sorted(sql_src.rglob("*.sql")):
         text = sf.read_text(errors="ignore")
-        for m in _CREATE_FN.finditer(text):
-            i, depth, start = m.end(), 1, m.end()
-            while i < len(text) and depth:
-                depth += (text[i] == "(") - (text[i] == ")")
-                i += 1
-            wm = _AS_WRAPPER.search(text, i, i + 400)
-            if not wm:
-                continue  # SQL-language ($$...$$) wrapper has no C symbol — skip
-            wrapper = wm.group(1)
-            args = [a for a in _split_top_commas(text[start:i - 1]) if a.strip()]
-            required = sum(1 for a in args if not re.search(r"\bDEFAULT\b", a, re.I))
-            # The SQL return type sits between the arg-list close `)` and the `AS`
-            # clause (`) RETURNS <type> AS '...','<Wrapper>'`). It is the binding-facing
-            # SQL subtype, which the C signature does NOT carry for the polymorphic
-            # `Temporal *`-returning functions (getX -> tfloat, centroid -> tgeompoint):
-            # the C return is a bare `Temporal *`, so without this a generator cannot
-            # render the concrete SQL result type. The CREATE FUNCTION is the SoT.
-            rt = None
-            rm = re.match(r"RETURNS\s+(?:SETOF\s+)?(.+)$",
-                          text[i:wm.start()].strip(), re.I | re.S)
-            if rm:
-                rt = " ".join(rm.group(1).split())
-            prev = out.get(wrapper)
-            if prev:
-                rets = prev[2] | ({rt} if rt else set())
-                out[wrapper] = (min(prev[0], required), max(prev[1], len(args)), rets)
-            else:
-                out[wrapper] = (required, len(args), {rt} if rt else set())
+        for sqlname, argdecls, ret, wrapper in _create_fn_stmts(text):
+            stmts.append((sqlname, argdecls, ret, wrapper))
+            if ret:
+                vocab.add(ret)                                  # a RETURNS clause is always a type
+            for a in argdecls:
+                bt = _bare_type(a)
+                if bt and " " not in bt:
+                    vocab.add(bt)                               # a single-token arg is always a type
+    for sqlname, argdecls, ret, wrapper in stmts:
+        if wrapper is None:
+            continue                                            # LANGUAGE SQL / $$ body — no C symbol
+        args = [_arg_type(a, vocab) for a in argdecls]
+        required = sum(1 for a in argdecls if not re.search(r"\bDEFAULT\b", a, re.I))
+        out.setdefault(wrapper, []).append(
+            {"sqlName": sqlname, "args": args, "required": required, "ret": ret})
     return out
 
 
@@ -182,17 +222,29 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
         # The SQL-facing arity (required..total). Lets a generator expose the SQL
         # signature instead of the wider C one: args beyond sqlArity are SQL-optional
         # (DEFAULT), and C params beyond sqlArityMax are C-only out-params.
-        sig = w2sig.get(wrappers[0])
-        if sig:
-            f["sqlArity"], f["sqlArityMax"], rets = sig
+        sigs = w2sig.get(wrappers[0])
+        if sigs:
+            f["sqlArity"] = min(s["required"] for s in sigs)
+            f["sqlArityMax"] = max(len(s["args"]) for s in sigs)
             # The binding-facing SQL return type (the CREATE FUNCTION `RETURNS` clause).
             # Lets a generator render the concrete SQL subtype for a polymorphic
             # `Temporal *` C return (getX -> tfloat, centroid -> tgeompoint). One wrapper
             # normally has a single return type; record all if overloads disagree.
+            rets = {s["ret"] for s in sigs if s["ret"]}
             if len(rets) == 1:
                 f["sqlReturnType"] = next(iter(rets))
             elif len(rets) > 1:
                 f["sqlReturnTypeAll"] = sorted(rets)
+            # The EXACT per-overload SQL signatures for THIS @sqlfn name — the mechanical
+            # registration surface. A binding emits one registration per entry over the
+            # concrete arg types, with NO type-scope heuristic (minInstant lands on exactly
+            # its {tint,tbigint,tfloat,ttext} overloads). One wrapper backs several @sqlfn
+            # names (Temporal_to_tinstant <- tintInst/tgeometryInst/...), so keep only the
+            # overloads whose CREATE FUNCTION name is this function's @sqlfn.
+            own = [{"args": s["args"], "ret": s["ret"]} for s in sigs
+                   if s["sqlName"] == f["sqlfn"]]
+            if own:
+                f["sqlSignatures"] = own
         if pairs[0][1]:
             f["sqlop"] = pairs[0][1]
         # Shared wrapper OR ever/always pair exposing >1 SQL name: record them all.
