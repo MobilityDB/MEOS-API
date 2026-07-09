@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.portable import attach_portable_aliases
+from parser.portable import attach_portable_aliases, classify_backing_sqlfn
 
 MAP = ROOT / "meta" / "portable-aliases.json"
 SCHEMA = ROOT / "meta" / "portable-aliases.schema.json"
@@ -119,6 +119,34 @@ class AttachTests(unittest.TestCase):
     def test_missing_file_is_noop(self):
         idl = attach_portable_aliases({"x": 1}, ROOT / "nope.json")
         self.assertNotIn("portableAliases", idl)
+
+    def test_backing_sqlfn_classification(self):
+        # A bbox-topological function carries a shared `<op>_bbox` @sqlfn backing tag
+        # that is never deployed as a CREATE FUNCTION; its public name is the operator's
+        # bare alias. classify_backing_sqlfn must flag it and record publicSqlName.
+        idl = attach_portable_aliases({"functions": [
+            {"name": "Same_stbox_stbox",     "sqlfn": "same_bbox",     "sqlop": "~="},
+            {"name": "Contains_tbox_tnumber", "sqlfn": "contains_bbox", "sqlop": "@>"},
+            {"name": "Left_stbox_stbox",     "sqlfn": "temporal_left", "sqlop": "<<"},
+            {"name": "Tpoint_trajectory",    "sqlfn": "trajectory"},
+        ]}, MAP)
+        idl = classify_backing_sqlfn(idl)
+        by = {f["name"]: f for f in idl["functions"]}
+        # the two _bbox backing tags are flagged with the bare public name
+        self.assertTrue(by["Same_stbox_stbox"]["sqlfnBackingOnly"])
+        self.assertEqual(by["Same_stbox_stbox"]["publicSqlName"], "same")
+        self.assertTrue(by["Contains_tbox_tnumber"]["sqlfnBackingOnly"])
+        self.assertEqual(by["Contains_tbox_tnumber"]["publicSqlName"], "contains")
+        # a positional op whose @sqlfn IS the deployed name (temporal_left) is untouched
+        self.assertNotIn("sqlfnBackingOnly", by["Left_stbox_stbox"])
+        # a plain function with no operator is untouched
+        self.assertNotIn("sqlfnBackingOnly", by["Tpoint_trajectory"])
+
+    def test_backing_sqlfn_noop_without_aliases(self):
+        # No portableAliases attached -> nothing to classify, no crash.
+        idl = classify_backing_sqlfn({"functions": [
+            {"name": "X", "sqlfn": "same_bbox", "sqlop": "~="}]})
+        self.assertNotIn("sqlfnBackingOnly", idl["functions"][0])
 
     def test_duplicate_detection(self):
         bad = {"families": {"a": [{"operator": "&&", "bareName": "x"},
