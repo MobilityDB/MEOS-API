@@ -43,3 +43,34 @@ def attach_portable_aliases(idl: dict, path: Path) -> dict:
         "count": len(pairs),
     }
     return idl
+
+
+def classify_backing_sqlfn(idl: dict) -> dict:
+    """Mark the bounding-box topological BACKING ``@sqlfn`` tags.
+
+    MobilityDB backs the five topological operators (~=/@>/<@/-|-/&&) with a SHARED C
+    ``@sqlfn`` tag named ``<op>_bbox`` (same_bbox, contains_bbox, contained_bbox,
+    overlaps_bbox, adjacent_bbox). That tag is NEVER emitted as a ``CREATE FUNCTION`` —
+    the deployed, user-facing SQL name is the operator's bare portable alias
+    (same/contains/…). The raw ``sqlfn`` is therefore a backing name, not a public one;
+    a binding that registers it leaks a function MobilityDB does not expose. Flag those
+    records with ``sqlfnBackingOnly`` + the ``publicSqlName`` (the bare alias) so every
+    binding uniformly registers the bare name + operator and drops the ``_bbox`` tag.
+
+    Not a heuristic: grounded in two catalog-native facts — the ``_bbox`` shared-backing
+    convention AND the operator→bareName map. ``publicSqlName`` is always defined because
+    every ``_bbox`` sqlfn carries one of the five topological operators.
+
+    MUST run AFTER ``attach_sqlfn_map`` (sqlfn/sqlop) AND ``attach_portable_aliases``
+    (byOperator) — it reads all three.
+    """
+    by_operator = (idl.get("portableAliases") or {}).get("byOperator") or {}
+    if not by_operator:
+        return idl
+    for f in idl.get("functions", []):
+        sqlfn = f.get("sqlfn") or ""
+        op = f.get("sqlop") or ""
+        if sqlfn.endswith("_bbox") and op in by_operator:
+            f["sqlfnBackingOnly"] = True
+            f["publicSqlName"] = by_operator[op]
+    return idl

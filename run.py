@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from parser.parser import parse_all_headers, merge_meta
-from parser.portable import attach_portable_aliases
+from parser.portable import attach_portable_aliases, classify_backing_sqlfn
 from parser.covering import attach_temporal_covering
 from parser.typerecover import recover_collapsed_types
 from parser.header_types import reconcile
@@ -109,6 +109,15 @@ def main():
                   f"spelling at the MEOS-C source — binding-breaking otherwise):", file=sys.stderr)
             for _lo, spellings in case_bad:
                 print(f"        {' vs '.join(spellings)}", file=sys.stderr)
+
+        # Now that both the @sqlfn/@sqlop map (step 4) and the portable bare-name map
+        # (step 3) are attached, classify the shared bbox-topological BACKING tags
+        # (same_bbox/contains_bbox/…) so bindings register the bare public name, not the
+        # catalog-only backing tag.
+        idl = classify_backing_sqlfn(idl)
+        nbo = sum(1 for f in idl.get("functions", []) if f.get("sqlfnBackingOnly"))
+        print(f"      Flagged {nbo} bbox-topological backing @sqlfn tag(s) "
+              f"(sqlfnBackingOnly)", file=sys.stderr)
 
     # 5. Attach the doxygen module group (@ingroup) from the vendored source, so
     #    bindings organize their generated surface like the reference manual.
