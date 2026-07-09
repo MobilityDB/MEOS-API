@@ -30,6 +30,12 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
         "-std=c11",
         f"-I{include_dir}",
         "-DMEOS",
+        # Define the MEOS ``UNUSED`` attribute macro on the command line so it is
+        # always in scope: the amalgamated entry point may parse a header that
+        # uses ``UNUSED`` (e.g. ``Datum dist UNUSED``) before temporal.h defines
+        # it, and an undefined ``UNUSED`` makes clang error on the declarator and
+        # silently drop the remaining parameters of that prototype.
+        "-DUNUSED=__attribute__((unused))",
     ])
 
     # Collect all .h files belonging to the project
