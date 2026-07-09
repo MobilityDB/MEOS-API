@@ -10,6 +10,7 @@ from parser.typerecover import recover_collapsed_types
 from parser.header_types import reconcile
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
+from parser.outparam import merge_outparams
 from parser.enrich import enrich_idl
 from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
 from parser.doxygroup import attach_groups
@@ -60,6 +61,13 @@ def main():
     idl, nn = merge_nullable(idl, HEADERS_DIR.parent)
     print(f"      nullable params from Doxygen `may be NULL`: {nn}",
           file=sys.stderr)
+    idl, no, out_drift = merge_outparams(idl, HEADERS_DIR.parent)
+    print(f"      out params from Doxygen `@param[out]`: {no}", file=sys.stderr)
+    if out_drift:
+        print(f"      ⚠ {len(out_drift)} @param[out] tag(s) disagree with the C signature "
+              f"(manual-maintenance drift — clean at the MEOS source):", file=sys.stderr)
+        for fn, pn, reason in out_drift:
+            print(f"          {fn}({pn}) — {reason}", file=sys.stderr)
 
     # 1e. Derive service-projection metadata (category / encodings / network).
     #     Runs before the merge so manual annotations override the heuristics.
