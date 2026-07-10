@@ -6,7 +6,12 @@ import tempfile
 import os
 from pathlib import Path
 
-from parser.extractors import extract_function, extract_struct, extract_enum
+from parser.extractors import (
+    extract_function,
+    extract_struct,
+    extract_enum,
+    extract_macro,
+)
 from parser.type_resolver import resolve_idl_types
 
 
@@ -105,7 +110,11 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
         # it, and an undefined ``UNUSED`` makes clang error on the declarator and
         # silently drop the remaining parameters of that prototype.
         "-DUNUSED=__attribute__((unused))",
-    ] + _clang_extra_args())
+    ] + _clang_extra_args(),
+        # Record ``#define`` macro definitions as cursors so the public
+        # object-like integer macros (WKB / WKT variant flags, ``MEOS_FLAG_*``)
+        # can be extracted into the catalog — an ``enum`` walk never sees them.
+        options=clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
 
     # Collect all .h files belonging to the project
     own_files = {str(p.resolve()) for p in include_dir.glob("**/*.h")}
@@ -122,12 +131,18 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
             if m:
                 typedef_map[m.group(1)] = node.spelling
 
-    functions, structs, enums = [], [], []
+    functions, structs, enums, macros = [], [], [], []
 
     for node in tu.cursor.walk_preorder():
         loc = node.location.file
         if not loc or str(Path(loc.name).resolve()) not in own_files:
             continue  # skip stdlib, system headers, etc.
+
+        if node.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
+            macro = extract_macro(node)
+            if macro:
+                macros.append(macro)
+            continue
 
         if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
             functions.append(extract_function(node))
@@ -161,8 +176,10 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
     functions = _dedup(functions)
     structs   = _dedup(structs)
     enums     = _dedup(enums)
+    macros    = _dedup(macros)
 
-    idl = {"functions": functions, "structs": structs, "enums": enums}
+    idl = {"functions": functions, "structs": structs, "enums": enums,
+           "macros": macros}
 
     # Resolve types if the mappings file exists
     mappings_path = Path("./meta/type-mappings.json")

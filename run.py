@@ -166,6 +166,7 @@ def main():
           f"({exposable} stateless-exposable), "
           f"{len(idl['structs'])} structs, "
           f"{len(idl['enums'])} enums, "
+          f"{len(idl.get('macros', []))} macros, "
           f"{pa} portable bare-name aliases, "
           f"{cov} temporal covering types", file=sys.stderr)
     if om:
