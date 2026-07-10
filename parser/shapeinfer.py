@@ -14,6 +14,13 @@ read-only in-array — e.g. ``temporal_time_split(..., TimestampTz **time_bins,
 int *count)`` (out) versus ``tsequence_make(const TInstant **instants, int
 count, ...)`` (in).
 
+Alongside ``lengthFrom`` the primary array return also carries its ``element``
+type — the return with exactly one pointer level stripped, resolved as a
+first-class ``{c, canonical}`` object (mirroring ``returnType``/``params``).  A
+binding thus composes its native list/array over ``element.canonical`` through
+its EXISTING per-type marshaller, never re-parsing the return string — the
+zero-heuristic collection boundary (see binding-is-thin-io-shell-over-meos).
+
 This replaces the ``meta/meos-meta.json`` shape entries, which had drifted to a
 3-function stub and silently mis-classified every out-array as an input
 parameter, breaking the split / space-split / mvtgeom / normalize families in
@@ -47,6 +54,17 @@ def _is_written_back_array(p: dict) -> bool:
     return "**" in ct and not ct.lstrip().startswith("const")
 
 
+def _strip_one_ptr(ctype: str) -> str:
+    """Remove exactly one trailing ``*`` (with any surrounding space) — the
+    inverse of "an array of ``E`` is spelled ``E *``".  ``double *`` -> ``double``
+    (a by-value element); ``struct TInstant **`` -> ``struct TInstant *`` (an
+    array of element pointers).  Mechanical and canonical, NOT a heuristic."""
+    s = ctype.rstrip()
+    if s.endswith("*"):
+        s = s[:-1].rstrip()
+    return s
+
+
 def infer_shapes(idl: dict) -> tuple[dict, dict]:
     """Populate ``func['shape']`` with ``arrayReturn``/``outputArrays`` derived
     from the signatures.  Returns ``(idl, stats)``.  Idempotent and additive:
@@ -58,10 +76,22 @@ def infer_shapes(idl: dict) -> tuple[dict, dict]:
             continue  # not array-returning; nothing to infer
         shape = func.setdefault("shape", {})
         # The primary pointer return takes its length from the output count.
-        ret = func.get("returnType", {}).get("c", "")
+        rtype = func.get("returnType", {})
+        ret = rtype.get("c", "")
         if ret.rstrip().endswith("*"):
-            shape.setdefault("arrayReturn", {})["lengthFrom"] = {
-                "kind": "param", "name": count}
+            ar = shape.setdefault("arrayReturn", {})
+            ar["lengthFrom"] = {"kind": "param", "name": count}
+            # Element type = the return with exactly one pointer level stripped,
+            # resolved canonically so every binding reads a first-class
+            # ``{c, canonical}`` type object (mirroring ``returnType``/``params``)
+            # and routes it through its EXISTING per-type marshaller — never
+            # re-parsing the return string.  ``double *`` -> ``double`` (by-value);
+            # ``struct TInstant **`` -> ``struct TInstant *`` (array of pointers).
+            ar["element"] = {
+                "c": _strip_one_ptr(ret),
+                "canonical": _strip_one_ptr(
+                    rtype.get("canonical", ret)),
+            }
             n_arr += 1
         # Parallel written-back out-arrays (``TYPE **extra`` alongside count).
         out = [{"param": p["name"]} for p in func["params"]

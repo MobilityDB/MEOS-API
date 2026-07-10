@@ -7,7 +7,7 @@ hand-maintained meta stub.  The discriminator is the *count* parameter's form:
   fills the length) -> ``outputArrays`` + ``arrayReturn.lengthFrom``
 * a read-only in-array pairs with a by-value ``int count`` -> left untouched
 
-Plain unittest, no pytest dependency; fully synthetic IDL (no generated file).
+Plain unittest, no pytest dependency; fully synthetic IDL, no build artifacts.
 """
 import unittest
 
@@ -33,7 +33,23 @@ class ShapeInferTests(unittest.TestCase):
         self.assertEqual(sh["outputArrays"], [{"param": "time_bins"}])
         self.assertEqual(sh["arrayReturn"]["lengthFrom"],
                          {"kind": "param", "name": "count"})
+        # element = return with one pointer level stripped (array of pointers)
+        self.assertEqual(sh["arrayReturn"]["element"],
+                         {"c": "Temporal *", "canonical": "Temporal *"})
         self.assertEqual(stats["outputArrays"], 1)
+
+    def test_scalar_array_return_element_is_by_value(self):
+        # floatset_values-style: ``double *`` return + by-pointer count.  The
+        # element strips one pointer level to the by-value scalar ``double`` so a
+        # binding composes native-list-of-double with zero return-string parsing.
+        idl = {"functions": [_fn(
+            "floatset_values", "double *",
+            [("s", "const Set *"), ("count", "int *")])]}
+        idl, stats = infer_shapes(idl)
+        ar = idl["functions"][0]["shape"]["arrayReturn"]
+        self.assertEqual(ar["lengthFrom"], {"kind": "param", "name": "count"})
+        self.assertEqual(ar["element"], {"c": "double", "canonical": "double"})
+        self.assertEqual(stats["arrayReturn"], 1)
 
     def test_two_parallel_output_arrays(self):
         idl = {"functions": [_fn(
