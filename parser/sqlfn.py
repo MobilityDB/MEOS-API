@@ -63,6 +63,16 @@ def _split_top_commas(s):
 _ARGMODE = re.compile(r"^(?:IN|OUT|INOUT|VARIADIC)\s+", re.I)
 
 
+def _arg_default(decl):
+    """The literal default expression of an arg declaration, or None for a required arg.
+    Complement of `_bare_type` (same split, the other side): `integer DEFAULT 0` -> `0`,
+    `text DEFAULT NULL` -> `NULL`, `float` -> None. Kept verbatim from the SQL source
+    (no interpretation) so a consumer of an optional trailing arg has its omitted value."""
+    a = _ARGMODE.sub("", decl.strip())
+    parts = re.split(r"\bDEFAULT\b|=", a, maxsplit=1, flags=re.I)
+    return parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+
+
 def _bare_type(decl):
     """A CREATE FUNCTION arg declaration with its argmode and DEFAULT / `= expr` clause
     stripped — leaving `[argname] argtype`, argtype possibly multi-word (double precision)."""
@@ -140,9 +150,11 @@ def _wrapper_sql_sigs(sql_src):
         if wrapper is None:
             continue                                            # LANGUAGE SQL / $$ body — no C symbol
         args = [_arg_type(a, vocab) for a in argdecls]
+        arg_defaults = [_arg_default(a) for a in argdecls]
         required = sum(1 for a in argdecls if not re.search(r"\bDEFAULT\b", a, re.I))
         out.setdefault(wrapper, []).append(
-            {"sqlName": sqlname, "args": args, "required": required, "ret": ret})
+            {"sqlName": sqlname, "args": args, "required": required,
+             "argDefaults": arg_defaults, "ret": ret})
     return out
 
 
@@ -241,8 +253,18 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
             # its {tint,tbigint,tfloat,ttext} overloads). One wrapper backs several @sqlfn
             # names (Temporal_to_tinstant <- tintInst/tgeometryInst/...), so keep only the
             # overloads whose CREATE FUNCTION name is this function's @sqlfn.
-            own = [{"args": s["args"], "ret": s["ret"]} for s in sigs
-                   if s["sqlName"] == f["sqlfn"]]
+            # `argDefaults` (the per-arg literal SQL default, None for a required arg) is
+            # attached ONLY for a signature that actually has an optional arg, so a binding
+            # can render the shorter overload of a SQL-optional argument with its omitted
+            # value; default-free signatures stay {args, ret} unchanged.
+            own = []
+            for s in sigs:
+                if s["sqlName"] != f["sqlfn"]:
+                    continue
+                entry = {"args": s["args"], "ret": s["ret"]}
+                if any(d is not None for d in s["argDefaults"]):
+                    entry["argDefaults"] = s["argDefaults"]
+                own.append(entry)
             if own:
                 f["sqlSignatures"] = own
         if pairs[0][1]:
