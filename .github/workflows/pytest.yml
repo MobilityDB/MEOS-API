@@ -2,12 +2,11 @@ name: tests
 
 # Dogfoods the reusable provision-meos composite action, the single step every
 # binding uses to obtain the MEOS artifacts from one pinned MobilityDB commit.
-# Job 1 derives output/meos-idl.json through the action and runs the pytest
-# suite (type recovery + portable alias parity) against it — the same catalog
-# correctness signal master had before, now produced by the shared action.
-# Job 2 exercises the action's optional libmeos path (all families, incl.
-# pgPointCloud via PGDG PG17) so the whole action is validated before any
-# binding depends on it.
+# The action builds and installs all-families libmeos (incl. pgPointCloud via
+# PGDG PG17) and derives output/meos-idl.json from the installed, self-contained
+# headers, then the pytest suite (type recovery + struct layout + portable
+# alias parity) runs against that catalog — the same catalog correctness signal
+# master had before, now produced by the shared action and FFI-accurate.
 
 on:
   pull_request:
@@ -17,19 +16,26 @@ on:
 
 jobs:
   tests:
-    name: Regenerate catalog + pytest
+    name: Build libmeos + regenerate catalog + pytest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Derive output/meos-idl.json from MobilityDB master via the shared
-      # action — the exact step a downstream binding runs.
-      - name: Provision the MEOS catalog
+      # Build + install all-families libmeos and derive the catalog from the
+      # installed headers — the exact step a native/FFI binding runs.
+      - name: Provision the MEOS catalog and libmeos
         id: provision
         uses: ./.github/actions/provision-meos
         with:
           mobilitydb-ref: master
-          build-libmeos: "false"
+          build-libmeos: "true"
+
+      - name: Assert libmeos.so is installed and print the family summary
+        run: |
+          test -f "${{ steps.provision.outputs.libmeos-prefix }}/lib/libmeos.so"
+          echo "libmeos installed at ${{ steps.provision.outputs.libmeos-prefix }}/lib/libmeos.so"
+          echo "----- cmake family summary -----"
+          grep -E 'Including|Excluding' "$RUNNER_TEMP/cmake-configure.log" || true
 
       - name: Install pytest
         run: pip install pytest
@@ -48,24 +54,3 @@ jobs:
           name: meos-idl
           path: output/meos-idl.json
           if-no-files-found: error
-
-  native:
-    name: Build libmeos (all families)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Same action, optional libmeos path: build + install all families.
-      - name: Provision the MEOS catalog and libmeos
-        id: provision
-        uses: ./.github/actions/provision-meos
-        with:
-          mobilitydb-ref: master
-          build-libmeos: "true"
-
-      - name: Assert libmeos.so is installed and print the family summary
-        run: |
-          test -f "${{ steps.provision.outputs.libmeos-prefix }}/lib/libmeos.so"
-          echo "libmeos installed at ${{ steps.provision.outputs.libmeos-prefix }}/lib/libmeos.so"
-          echo "----- cmake family summary -----"
-          grep -E 'Including|Excluding' "$RUNNER_TEMP/cmake-configure.log" || true

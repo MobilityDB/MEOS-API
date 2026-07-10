@@ -64,16 +64,21 @@ def find_unlisted_foreign_structs(idl) -> list:
     return sorted(elaborated - bare - set(_EXTERNAL_OPAQUE_STRUCTS))
 
 
+def _bool_norm(spelling: str) -> str:
+    # Normalise clang's ``_Bool`` keyword to the ``bool`` spelling the catalog
+    # uses, token-wise so pointer/const forms (``_Bool *``, ``const _Bool *``)
+    # normalise too — clang spells the pointee's underlying keyword, not the
+    # ``bool`` macro.
+    return re.sub(r"\b_Bool\b", "bool", spelling)
+
+
 def _c_spelling(ty) -> str:
     # Return the declared C spelling, with ``_Bool`` normalised to ``"bool"``.
     # Two bool representations arise depending on which postgres_int_defs.h is
     # in play:
     # - PostgreSQL headers: ``typedef char bool``  -> spelling already ``"bool"``
     # - Stub header:        ``#define bool _Bool`` -> spelling is ``"_Bool"``
-    spelling = ty.spelling
-    if spelling == "_Bool":
-        return "bool"
-    return _demote_external_opaque(spelling)
+    return _demote_external_opaque(_bool_norm(ty.spelling))
 
 
 # Canonical spellings of plain C scalars/builtins.
@@ -131,8 +136,8 @@ def _canonical_c_spelling(ty) -> str:
         return "bool"
     preserved = _preserved_opaque(ty)
     if preserved is not None:
-        return _demote_external_opaque(preserved)
-    return _demote_external_opaque(_canonical_spelling(ty))
+        return _bool_norm(_demote_external_opaque(preserved))
+    return _bool_norm(_demote_external_opaque(_canonical_spelling(ty)))
 
 
 # -----------------------------------------------------------------------------
@@ -217,7 +222,7 @@ def extract_struct(node) -> dict:
         "fields": [
             {
                 "name": f.spelling,
-                "cType": f.type.spelling,
+                "cType": _c_spelling(f.type),
                 "offset_bits": node.type.get_offset(f.spelling),
             }
             for f in node.get_children()

@@ -1,12 +1,81 @@
 import re
 import clang.cindex
 import json
+import subprocess
 import tempfile
 import os
 from pathlib import Path
 
 from parser.extractors import extract_function, extract_struct, extract_enum
 from parser.type_resolver import resolve_idl_types
+
+
+def _compiler_system_includes() -> list[str]:
+    """The C compiler's system header search path (builtin resource dir,
+    ``/usr/local/include``, ``/usr/include/<triple>``, ``/usr/include``).
+
+    The pip ``libclang`` wheel ships the shared library but *not* a configured
+    system include path, so the amalgamation fails to find ``<stdbool.h>`` /
+    ``<setjmp.h>`` / ``size_t`` and every ``bool`` / ``uint8`` / ``Datum`` field
+    degrades to ``int`` with ``get_offset`` returning ``-1``. ``provision-meos``
+    installs ``clang``, so ask the installed compiler for its own search list
+    (``clang -E -v``) rather than guessing paths; every entry there is added as
+    ``-isystem`` so a real MEOS compile and this parse see the same headers.
+    """
+    for cc in ("clang", "cc", "gcc"):
+        try:
+            out = subprocess.run(
+                [cc, "-E", "-x", "c", "-v", os.devnull],
+                capture_output=True, text=True, check=True).stderr
+        except Exception:
+            continue
+        dirs, capture = [], False
+        for line in out.splitlines():
+            if line.startswith("#include <...> search starts here:"):
+                capture = True
+                continue
+            if line.startswith("End of search list."):
+                break
+            if capture:
+                d = line.strip()
+                if d and os.path.isdir(d):
+                    dirs.append(d)
+        if dirs:
+            return dirs
+    return []
+
+
+def _clang_extra_args() -> list[str]:
+    """Include paths clang needs to resolve MEOS types to their real C types.
+
+    Without a configured search path the MEOS headers' standard-library
+    includes (``<stdbool.h>`` / ``<stddef.h>`` / ``size_t``) fail, degrading
+    every struct field to ``int`` at offset ``-1`` — unusable for the FFI
+    bindings (``#[repr(C)]`` structs, cgo/cffi field access). Add the
+    compiler's own system search path, and the external family (H3 / GDAL /
+    PROJ) headers when present. ``size_t`` is force-included via
+    ``-include stddef.h`` because ``meos.h`` uses it without an explicit
+    ``#include``.
+
+    The catalog is derived from the *installed* MEOS headers (the generated
+    ``meos_export.h`` written by ``make install``), which splice
+    ``postgres_ext_defs.in.h`` in place of the source tree's
+    ``#include <postgres.h>`` — so they are self-contained and no PostgreSQL
+    server headers are needed here.
+    """
+    args: list[str] = []
+
+    for d in _compiler_system_includes():
+        args.append(f"-isystem{d}")
+    if args:
+        args += ["-include", "stddef.h"]
+
+    for d in ("/usr/include/h3", "/usr/include/gdal", "/usr/include/proj"):
+        if os.path.isdir(d):
+            args.append(f"-isystem{d}")
+
+    return args
+
 
 def merge_meta(idl: dict, meta_path: Path) -> dict:
     with open(meta_path) as f:
@@ -36,7 +105,7 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
         # it, and an undefined ``UNUSED`` makes clang error on the declarator and
         # silently drop the remaining parameters of that prototype.
         "-DUNUSED=__attribute__((unused))",
-    ])
+    ] + _clang_extra_args())
 
     # Collect all .h files belonging to the project
     own_files = {str(p.resolve()) for p in include_dir.glob("**/*.h")}
