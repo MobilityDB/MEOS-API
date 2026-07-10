@@ -245,3 +245,35 @@ def extract_enum(node) -> dict:
             if v.kind == clang.cindex.CursorKind.ENUM_CONSTANT_DECL
         ],
     }
+
+
+def extract_macro(node) -> dict | None:
+    """Extract a public object-like integer ``#define`` macro.
+
+    The MEOS public headers expose a handful of integer constants as
+    ``#define`` object-like macros rather than ``enum`` values — the WKB / WKT
+    output-variant flags (``WKB_NDR``, ``WKB_EXTENDED`` …), the ``MEOS_FLAG_*``
+    bit masks, and similar. They are part of the public API surface (a binding's
+    FFI must carry them: ``meos-rs`` uses ``WKB_EXTENDED`` / ``WKB_NDR`` /
+    ``WKB_XDR`` to select a WKB variant), but ``enum`` extraction never sees them
+    because they are preprocessor definitions.
+
+    Only object-like macros whose body is a single integer literal are
+    extracted (matching the constants a binding can project as a typed
+    constant); function-like macros and expression / string macros are skipped.
+    """
+    tokens = [t.spelling for t in node.get_tokens()]
+    # tokens[0] is the macro name; a function-like macro has "(" immediately after.
+    if len(tokens) < 2 or tokens[1] == "(":
+        return None
+    body = "".join(tokens[1:])
+    try:
+        value = int(body, 0)
+    except ValueError:
+        return None
+    return {
+        "name": node.spelling,
+        "file": Path(node.location.file.name).name,
+        "family": _family_of(node.location.file.name),
+        "value": value,
+    }
