@@ -1,0 +1,138 @@
+name: Provision MEOS artifacts
+description: >-
+  Derive the language-neutral MEOS artifacts from a single MobilityDB commit:
+  generate output/meos-idl.json via run.py and, optionally, build and install
+  libmeos with all families. Any binding consumes it from one pinned commit.
+
+inputs:
+  mobilitydb-ref:
+    description: MobilityDB git ref (SHA or branch) to derive the artifacts from.
+    required: true
+  build-libmeos:
+    description: Also build and install libmeos.so (all families by default).
+    required: false
+    default: "false"
+  families:
+    description: cmake family flags for the optional libmeos build.
+    required: false
+    default: "-DALL=ON"
+
+outputs:
+  catalog-path:
+    description: Absolute path to the generated meos-idl.json.
+    value: ${{ steps.catalog.outputs.catalog-path }}
+  libmeos-prefix:
+    description: Install prefix of libmeos when build-libmeos=true (else empty).
+    value: ${{ steps.libmeos.outputs.libmeos-prefix }}
+
+runs:
+  using: composite
+  steps:
+    # The MEOS headers + C sources the catalog is derived from. The whole
+    # repository is fetched (not just headers) so run.py can read meos/src,
+    # mobilitydb/src and mobilitydb/sql for the @sqlfn/@ingroup maps, and so
+    # the optional libmeos build below can configure it.
+    - name: Checkout MobilityDB @ ref
+      uses: actions/checkout@v4
+      with:
+        repository: MobilityDB/MobilityDB
+        ref: ${{ inputs.mobilitydb-ref }}
+        path: _mobilitydb_src
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    # libclang (Python wheel) needs the system C headers MEOS depends on so
+    # types like size_t / json_object * / GSERIALIZED * resolve to their real
+    # names instead of degrading to int / int *. Same install set as the
+    # pytest / OpenAPI-validate regenerate paths so every path agrees.
+    - name: Install dev headers for the libclang sysroot
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          clang libclang-dev \
+          libjson-c-dev libgsl-dev libproj-dev libgeos-dev \
+          postgresql-server-dev-16
+
+    # run.py + parser/ + meta/ + requirements.txt all live at the MEOS-API
+    # repo root. When this action is consumed cross-repo GitHub checks out the
+    # WHOLE MEOS-API repository under $GITHUB_ACTION_PATH, so the repo root is
+    # $GITHUB_ACTION_PATH/../../.. in both the local dogfood and cross-repo use.
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        python -m pip install --upgrade pip
+        pip install -r "$REPO_ROOT/requirements.txt"
+
+    # Generate the catalog exactly as a downstream consumer does: parse the
+    # pinned MobilityDB MEOS headers with libclang and emit output/meos-idl.json,
+    # pointing the @sqlfn/@ingroup extraction (MDB_SRC_ROOT) at the SAME pinned
+    # checkout so the catalog is reproducibly equivalent to that commit.
+    - name: Generate the catalog
+      id: catalog
+      shell: bash
+      run: |
+        REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        cd "$REPO_ROOT"
+        MDB_SRC_ROOT="$GITHUB_WORKSPACE/_mobilitydb_src" \
+          python3 run.py "$GITHUB_WORKSPACE/_mobilitydb_src/meos/include"
+        CATALOG="$REPO_ROOT/output/meos-idl.json"
+        if [ ! -s "$CATALOG" ]; then
+          echo "::error::catalog not generated or empty at $CATALOG"
+          exit 1
+        fi
+        echo "catalog-path=$CATALOG" >> "$GITHUB_OUTPUT"
+        echo "Catalog written: $CATALOG ($(wc -c < "$CATALOG") bytes)"
+
+    # Optional: build and install libmeos with all families. Mirrors the green
+    # all-families recipe (MobilityDB meos-arrow.yml + the four JVM bindings):
+    # purge the runner's preinstalled PostgreSQL and use apt.postgresql.org
+    # PG17 so the vendored pgPointCloud PGXS build finds clang-19.
+    - name: Remove preinstalled PostgreSQL [prefer apt.postgresql.org]
+      if: inputs.build-libmeos == 'true'
+      shell: bash
+      run: |
+        sudo service postgresql stop || true
+        sudo apt-get --purge remove postgresql* -y || true
+        sudo rm -rf /var/lib/postgresql/ /etc/postgresql/ /var/log/postgresql/ || true
+
+    - name: Add PostgreSQL APT repository (PGDG)
+      if: inputs.build-libmeos == 'true'
+      shell: bash
+      run: |
+        sudo apt-get install -y curl ca-certificates gnupg
+        curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ \
+          $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+
+    - name: Install libmeos build dependencies
+      if: inputs.build-libmeos == 'true'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libgeos-dev libproj-dev libjson-c-dev libgsl-dev \
+          libh3-dev libgdal-dev libxml2-dev \
+          autoconf automake libtool pkg-config \
+          postgresql-17 postgresql-server-dev-17
+
+    - name: Build and install libmeos
+      id: libmeos
+      if: inputs.build-libmeos == 'true'
+      shell: bash
+      run: |
+        cd "$GITHUB_WORKSPACE/_mobilitydb_src"
+        mkdir -p build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release -DMEOS=ON ${{ inputs.families }} \
+          -DH3_LIBRARY=/usr/lib/x86_64-linux-gnu/libh3.so \
+          -DH3_INCLUDE_DIR=/usr/include/h3 \
+          -DPOSTGRESQL_PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config \
+          .. 2>&1 | tee "$RUNNER_TEMP/cmake-configure.log"
+        make -j "$(nproc)"
+        sudo make install
+        echo "libmeos-prefix=/usr/local" >> "$GITHUB_OUTPUT"
+        echo "libmeos installed under /usr/local"
