@@ -1,14 +1,13 @@
 name: tests
 
-# Regenerates the catalog the same way a downstream consumer does — clone
-# MobilityDB master for the MEOS headers, parse with libclang, emit
-# output/meos-idl.json — then runs the pytest suite (type recovery + portable
-# alias parity) against it. Gives every PR a green signal on catalog
-# correctness; master itself has no other CI, so without this the
-# catalog-enrichment PRs show "no checks".
-#
-# The apt header set + libclang wheel match the OpenAPI-validate regenerate
-# path so both produce the same catalog.
+# Dogfoods the reusable provision-meos composite action, the single step every
+# binding uses to obtain the MEOS artifacts from one pinned MobilityDB commit.
+# Job 1 derives output/meos-idl.json through the action and runs the pytest
+# suite (type recovery + portable alias parity) against it — the same catalog
+# correctness signal master had before, now produced by the shared action.
+# Job 2 exercises the action's optional libmeos path (all families, incl.
+# pgPointCloud via PGDG PG17) so the whole action is validated before any
+# binding depends on it.
 
 on:
   pull_request:
@@ -23,40 +22,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # Derive output/meos-idl.json from MobilityDB master via the shared
+      # action — the exact step a downstream binding runs.
+      - name: Provision the MEOS catalog
+        id: provision
+        uses: ./.github/actions/provision-meos
         with:
-          python-version: "3.11"
+          mobilitydb-ref: master
+          build-libmeos: "false"
 
-      # libclang (Python wheel) needs the system C headers MEOS depends on so
-      # types like size_t / json_object * / GSERIALIZED * resolve to their real
-      # names instead of degrading to int / int *. Same install set as the
-      # OpenAPI-validate workflow so both regenerate paths agree.
-      - name: Install dev headers for libclang sysroot
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            clang libclang-dev \
-            libjson-c-dev libgsl-dev libproj-dev libgeos-dev \
-            postgresql-server-dev-16
+      - name: Install pytest
+        run: pip install pytest
 
-      - name: Clone MobilityDB master (MEOS headers source)
-        run: |
-          git clone --depth 1 https://github.com/MobilityDB/MobilityDB \
-            "$RUNNER_TEMP/mobilitydb"
-          echo "MOBILITYDB_HEADERS=$RUNNER_TEMP/mobilitydb/meos/include" \
-            >> "$GITHUB_ENV"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
-
-      - name: Regenerate the catalog
-        run: python3 run.py "$MOBILITYDB_HEADERS"
-
+      # The action wrote output/meos-idl.json at the repo root, exactly where
+      # the suite loads it from; assert the advertised path and run the tests.
       - name: Run the test suite
-        run: python3 -m pytest tests/ -v
+        run: |
+          test -s "${{ steps.provision.outputs.catalog-path }}"
+          python3 -m pytest tests/ -v
 
       - name: Upload meos-idl.json as artefact
         if: always()
@@ -65,3 +48,24 @@ jobs:
           name: meos-idl
           path: output/meos-idl.json
           if-no-files-found: error
+
+  native:
+    name: Build libmeos (all families)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same action, optional libmeos path: build + install all families.
+      - name: Provision the MEOS catalog and libmeos
+        id: provision
+        uses: ./.github/actions/provision-meos
+        with:
+          mobilitydb-ref: master
+          build-libmeos: "true"
+
+      - name: Assert libmeos.so is installed and print the family summary
+        run: |
+          test -f "${{ steps.provision.outputs.libmeos-prefix }}/lib/libmeos.so"
+          echo "libmeos installed at ${{ steps.provision.outputs.libmeos-prefix }}/lib/libmeos.so"
+          echo "----- cmake family summary -----"
+          grep -E 'Including|Excluding' "$RUNNER_TEMP/cmake-configure.log" || true
