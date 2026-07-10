@@ -45,3 +45,60 @@ recorded in its own `tools/pin/compose-order.txt`).
 The catalog is reproducible from a MobilityDB `ecosystem-pin-*`:
 `MDB_SRC_ROOT=<pin-worktree> python3 run.py <pin-worktree>/meos/include`. MEOS-API's own
 `tools/pin/compose-order.txt` governs *this repo's* enrichment/projection PR accumulate.
+
+## Consuming MEOS from a binding (provision-meos)
+
+A binding **never commits** `meos-idl.json` (or a `libmeos.so`). Both are derived artifacts of
+one MobilityDB commit, and a committed copy is drift waiting to happen. Instead a binding records
+the **MobilityDB commit it targets** and derives the catalog — and, for native/FFI bindings, an
+installed libmeos — in CI via the shared composite action
+`MobilityDB/MEOS-API/.github/actions/provision-meos@master`. One coordinate in, catalog *and*
+native library out: they are generated from the same ref every run, so they always match — zero
+drift.
+
+The action checks out `MobilityDB@<ref>`, runs `run.py` to emit `output/meos-idl.json`, and
+optionally builds and installs all-families libmeos. Its interface:
+
+- inputs: `mobilitydb-ref` (required — SHA or branch), `build-libmeos` (`"true"`/`"false"`,
+  default `"false"`), `families` (default `-DALL=ON`, for the optional libmeos build).
+- outputs: `catalog-path` (absolute path to the generated `meos-idl.json`) and `libmeos-prefix`
+  (`/usr/local` when `build-libmeos=true`, else empty).
+
+### Minimal CI recipe
+
+```yaml
+- name: Resolve the MEOS source commit
+  id: meos
+  run: echo "sha=$(tr -d '[:space:]' < tools/meos-source-commit.txt)" >> "$GITHUB_OUTPUT"
+- name: Provision MEOS
+  id: provision
+  uses: MobilityDB/MEOS-API/.github/actions/provision-meos@master
+  with:
+    mobilitydb-ref: ${{ steps.meos.outputs.sha }}
+    build-libmeos: "true"   # true for native/FFI bindings; false for pure-catalog codegen
+# catalog consumers then stage the derived catalog where their generator reads it, e.g.:
+#   cp "${{ steps.provision.outputs.catalog-path }}" <path/to/meos-idl.json>
+# then run the binding's own generator + tests.
+```
+
+`mobilitydb-ref` can be a **pinned SHA** — read from a tracked `meos-source-commit.txt` as above,
+which makes the run reproducible — or plain `master` to **track latest**. Either way there is no
+drift: the catalog (and libmeos) are regenerated from that same ref in the same run. Native/FFI
+bindings pass `build-libmeos: "true"` — libmeos installs under `/usr/local` (`libmeos-prefix`),
+and its install also stages `spatial_ref_sys.csv` so SRIDs resolve at runtime. Pure-catalog
+bindings leave `build-libmeos` at its default and consume only `catalog-path`.
+
+### Two archetypes
+
+- **Catalog-deriving** — the binding drops its committed `meos-idl.json` and derives it in CI,
+  copying `catalog-path` to where its generator reads it before generating sources:
+  MobilitySpark (`cp $catalog-path tools/meos-idl.json`, PR #37) and JMEOS (stages to
+  `codegen/input/meos-idl.json`, PR #44).
+- **libmeos-only** — the binding has no catalog of its own (its facades come from `javap` over
+  the JMEOS jar, not from a catalog) and uses the action purely to get libmeos installed with
+  `build-libmeos: "true"`: MobilityFlink (PR #41) and MobilityKafka (PR #21).
+
+### Adding a new binding
+
+(a) add the two CI steps above; (b) point your generator at `catalog-path` (or `cp` it into
+place); (c) `git rm` any committed `meos-idl.json` / `libmeos.so` and add them to `.gitignore`.
