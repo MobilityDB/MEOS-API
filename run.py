@@ -12,7 +12,8 @@ from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.outparam import merge_outparams
 from parser.enrich import enrich_idl
-from parser.sqlfn import attach_sqlfn_map, lint_ea_sqlfn, lint_sqlfn_case_collisions
+from parser.sqlfn import (attach_sqlfn_map, lint_ea_sqlfn, lint_positional_sqlfn,
+                          lint_sqlfn_case_collisions)
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
 from parser.object_model import attach_object_model, find_mobilitydb_src
@@ -117,6 +118,17 @@ def main():
                   f"spelling at the MEOS-C source — binding-breaking otherwise):", file=sys.stderr)
             for _lo, spellings in case_bad:
                 print(f"        {' vs '.join(spellings)}", file=sys.stderr)
+        # Guard: a relative-position function whose name prefix (before_/left_/...)
+        # disagrees with its resolved @sqlfn — a shared value/time position wrapper
+        # whose single @sqlfn mis-names the other axis (before_span_* -> left). The
+        # name prefix is the SoT; fix the @csqlfn / add a dedicated wrapper at source.
+        pos_bad = lint_positional_sqlfn(idl)
+        if pos_bad:
+            print(f"      ⚠ {len(pos_bad)} positional name/@sqlfn mismatch(es) (a time-axis "
+                  f"function resolved to the value name or vice versa — fix at source):",
+                  file=sys.stderr)
+            for cname, sf in pos_bad:
+                print(f"        {cname} -> @sqlfn {sf}", file=sys.stderr)
 
         # Now that both the @sqlfn/@sqlop map (step 4) and the portable bare-name map
         # (step 3) are attached, classify the shared bbox-topological BACKING tags
