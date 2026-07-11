@@ -121,7 +121,7 @@ def main():
     MDB_SRC = SRC_ROOT / "mobilitydb" / "src"
     SQL_SRC = SRC_ROOT / "mobilitydb" / "sql"
     if MEOS_SRC.exists() and MDB_SRC.exists():
-        idl, nsql = attach_sqlfn_map(idl, MEOS_SRC, MDB_SRC, SQL_SRC)
+        idl, nsql, sqlfn_multi = attach_sqlfn_map(idl, MEOS_SRC, MDB_SRC, SQL_SRC)
         print(f"[4/4] Attached {nsql} @sqlfn SQL names", file=sys.stderr)
         # Guard: a copy-paste @csqlfn in meos/src can point an ever/always function at
         # the opposite-prefix wrapper (eintersects_* tagged #Aintersects_*), flipping its
@@ -138,7 +138,7 @@ def main():
         # binding names — a case-insensitive engine (Spark SQL) registers both under
         # one UDF, so one silently shadows the other. Invisible in SQL; surface the
         # casing straggler here, to be fixed at the MEOS-C @sqlfn source.
-        case_bad = lint_sqlfn_case_collisions(idl)
+        case_bad = lint_sqlfn_case_collisions(idl, sqlfn_multi)
         if case_bad:
             print(f"      ⚠ {len(case_bad)} @sqlfn case-collision(s) (pick ONE canonical "
                   f"spelling at the MEOS-C source — binding-breaking otherwise):", file=sys.stderr)
