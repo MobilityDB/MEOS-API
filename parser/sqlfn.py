@@ -302,6 +302,35 @@ def lint_ea_sqlfn(idl):
     return bad
 
 
+# Relative-position MEOS-C functions are named <op>_...; their @csqlfn must point at
+# the <Op>_... wrapper carrying the matching @sqlfn. The same class of copy-paste as
+# lint_ea_sqlfn bites the time axis: a 1-D span reuses ONE value wrapper for both its
+# value axis (left/right) and its time axis (before/after), so a time function tagged
+# `@csqlfn #Left_span_value()` resolves to the value name `left` and the binding emits
+# `left(tstzspan,...)` instead of `before(...)`. The function-name prefix is the SoT.
+_POSITIONAL_OPS = {
+    "left", "right", "overleft", "overright",
+    "before", "after", "overbefore", "overafter",
+    "below", "above", "overbelow", "overabove",
+    "front", "back", "overfront", "overback",
+}
+_POSITIONAL_NAME = re.compile(
+    r"^(" + "|".join(sorted(_POSITIONAL_OPS, key=len, reverse=True)) + r")_")
+
+
+def lint_positional_sqlfn(idl):
+    """Return [(meos_c_name, sqlfn)] where a relative-position function's name prefix
+    (before_/left_/...) contradicts its resolved @sqlfn — a source @csqlfn mistag that
+    mis-names one axis of a shared value/time position wrapper."""
+    bad = []
+    for f in idl["functions"]:
+        sf = f.get("sqlfn")
+        m = _POSITIONAL_NAME.match(f["name"])
+        if sf and m and sf in _POSITIONAL_OPS and sf != m.group(1):
+            bad.append((f["name"], sf))
+    return bad
+
+
 def lint_sqlfn_case_collisions(idl):
     """Return [(lower, [spelling, ...])] for @sqlfn names that collide
     case-insensitively but differ in case (e.g. tDistance vs tdistance).
