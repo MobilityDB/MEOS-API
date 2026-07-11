@@ -215,6 +215,11 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
     d2s = _mdb_to_sql(mdb_src)
     w2sig = _wrapper_sql_sigs(sql_src) if sql_src else {}
     n = 0
+    # Transient map: MEOS function name -> every SQL name it resolves to, for the
+    # functions that fan out (a shared wrapper / ever-always pair). This is NOT
+    # catalog output — every binding reads only the primary `sqlfn` — it is working
+    # data handed to the case-collision lint, which must see every spelling.
+    multi = {}
     for f in idl["functions"]:
         wrappers = m2d.get(f["name"])
         if not wrappers:
@@ -269,13 +274,14 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
                 f["sqlSignatures"] = own
         if pairs[0][1]:
             f["sqlop"] = pairs[0][1]
-        # Shared wrapper OR ever/always pair exposing >1 SQL name: record them all.
+        # A shared wrapper / ever-always pair exposes >1 SQL name for this one MEOS
+        # function. That fan-out is transient lint input, not catalog output (every
+        # binding reads only the primary `sqlfn`), so collect it here and never write
+        # it to the catalog — the singular `sqlfn` is the one canonical name per entry.
         if len(pairs) > 1:
-            f["sqlfnAll"] = [s for s, _ in pairs]
-        if len(wrappers) > 1:
-            f["mdbCAll"] = wrappers
+            multi[f["name"]] = [s for s, _ in pairs]
         n += 1
-    return idl, n
+    return idl, n, multi
 
 
 # MEOS-C ever/always spatial-relationship functions are named <e|a><verb>_...; their
@@ -331,7 +337,7 @@ def lint_positional_sqlfn(idl):
     return bad
 
 
-def lint_sqlfn_case_collisions(idl):
+def lint_sqlfn_case_collisions(idl, multi=None):
     """Return [(lower, [spelling, ...])] for @sqlfn names that collide
     case-insensitively but differ in case (e.g. tDistance vs tdistance).
 
@@ -340,10 +346,15 @@ def lint_sqlfn_case_collisions(idl):
     binding name is taken case-SENSITIVELY, and case-insensitive engines (Spark
     SQL, …) register every spelling under one UDF — so one silently shadows the
     other. A canonical binding name must have exactly ONE spelling; surface a
-    casing straggler here before it reaches a binding."""
+    casing straggler here before it reaches a binding.
+
+    `multi` (from attach_sqlfn_map) maps a fan-out function to every SQL name it
+    resolves to, so a straggler that appears only as a secondary name is still
+    caught even though the catalog now stores only the primary `sqlfn`."""
+    multi = multi or {}
     by_lower = {}
     for f in idl["functions"]:
-        for sf in [f.get("sqlfn"), *f.get("sqlfnAll", [])]:
+        for sf in [f.get("sqlfn"), *multi.get(f["name"], [])]:
             if sf:
                 by_lower.setdefault(sf.lower(), set()).add(sf)
     return sorted((lo, sorted(sp)) for lo, sp in by_lower.items() if len(sp) > 1)
