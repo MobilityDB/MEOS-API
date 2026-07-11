@@ -176,15 +176,28 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
             enums.append(extract_enum(node))
 
 
-    # Deduplicate by name (keep first occurrence)
+    # Deduplicate by name. A public symbol may be declared in more than one
+    # header — its public umbrella ``meos_<family>.h`` AND a family-internal
+    # implementation header (cbuffer, pose, rgeo and h3 all do this). Each symbol
+    # is attributed to the PUBLIC umbrella header MobilityDB installs
+    # (meos/CMakeLists.txt) — the surface a binding ``#include``s — independent of
+    # amalgamation/sort order, so a binding keying on the umbrella never drops a
+    # function that also appears in an internal header. The top-level ``meos*.h``
+    # in ``include_dir`` are that installed public set; subdir headers are internal.
+    public_headers = {p.name for p in include_dir.glob("meos*.h")}
+
     def _dedup(items: list) -> list:
-        seen: set[str] = set()
-        result = []
+        by_name: dict[str, dict] = {}
+        order: list[str] = []
         for item in items:
-            if item["name"] not in seen:
-                seen.add(item["name"])
-                result.append(item)
-        return result
+            name = item["name"]
+            if name not in by_name:
+                by_name[name] = item
+                order.append(name)
+            elif (item.get("file") in public_headers
+                  and by_name[name].get("file") not in public_headers):
+                by_name[name] = item
+        return [by_name[name] for name in order]
 
     functions = _dedup(functions)
     structs   = _dedup(structs)
