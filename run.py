@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import subprocess
 from pathlib import Path
 
 from parser.parser import parse_all_headers, merge_meta
@@ -31,6 +32,31 @@ OUTPUT_DIR  = Path("./output")
 # Absent → honest source-unavailable signal, never a fabricated empty set.
 MOBILITYDB_SRC = (Path(sys.argv[2]) if len(sys.argv) > 2
                   else find_mobilitydb_src(HEADERS_DIR))
+
+
+def _source_commit():
+    """The MobilityDB commit these headers/sources were derived from, stamped into the catalog so
+    ANY consumer (a binding, or the non-stale gate) proves the artifact's freshness by comparing it
+    to live upstream master — never by inspecting the directory a vendored copy happens to sit in
+    (that proxy is blind to a catalog vendored inside an unrelated binding repo). Resolved from the
+    git checkout that actually provided the source; None if the source is not a git checkout (e.g. a
+    release tarball) — the consumer then treats freshness as unprovable, the correct safe default."""
+    cands = []
+    for base in (os.environ.get("MDB_SRC_ROOT"), str(HEADERS_DIR), str(MOBILITYDB_SRC)):
+        if not base:
+            continue
+        p = Path(base).resolve()
+        cands += [p, p.parent, p.parent.parent]
+    for d in cands:
+        try:
+            r = subprocess.run(["git", "-C", str(d), "rev-parse", "HEAD"],
+                               capture_output=True, text=True, timeout=10)
+        except Exception:
+            continue
+        sha = r.stdout.strip()
+        if r.returncode == 0 and len(sha) == 40 and all(c in "0123456789abcdef" for c in sha):
+            return sha
+    return None
 
 
 def main():
@@ -164,6 +190,14 @@ def main():
     print(f"[7/7] Deriving object model from {OBJMODEL_PATH} "
           f"(error scan: {MOBILITYDB_SRC})...", file=sys.stderr)
     idl = attach_object_model(idl, OBJMODEL_PATH, MOBILITYDB_SRC)
+
+    # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
+    # a consumer proves it is current by comparing sourceCommit to live upstream master, never by
+    # inspecting whatever directory a vendored copy sits in. None when the source is not a git
+    # checkout (freshness then unprovable — the consumer's correct safe default).
+    idl["sourceCommit"] = _source_commit()
+    print(f"      sourceCommit = {idl['sourceCommit'] or '(source not a git checkout — unstamped)'}",
+          file=sys.stderr)
 
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
