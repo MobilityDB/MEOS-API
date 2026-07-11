@@ -155,6 +155,73 @@ def _role(fn_name: str) -> str:
     return "accessor"
 
 
+# Acronym runs kept upper-case so a binding's case transform can render them
+# idiomatically (Python ``as_hex_wkb``, Go ``AsHexWKB``, JS ``asHexWKB``).
+_ACRONYMS = {"wkb", "ewkb", "hexwkb", "wkt", "ewkt", "mfjson", "mvt",
+             "geojson", "gml", "kml", "srid", "srs"}
+
+# Generic superclass / companion tokens a method may carry when its scope is
+# not the leaf class itself (``temporal_*`` on a concrete type, ``set_*`` on a
+# collection). Tried after the class's own token, longest first.
+_GENERIC_TOKENS = ("temporal", "tnumber", "tspatial", "tgeo", "tpoint",
+                   "spanset", "span", "set", "box")
+
+# Internal machinery that is classified to a class but is not a user-facing
+# method: SQL aggregate transition/final/combine functions.
+_OONAME_EXCLUDE_SUFFIXES = ("_transfn", "_finalfn", "_combinefn")
+
+# Editorial name fixes for the rare cases mechanical derivation gets wrong.
+# Deliberately minimal — the clean derived name is canonical, so legacy
+# binding spellings are not carried forward.
+_OONAME_OVERRIDES: dict[str, str] = {}
+
+
+def _strip_class_token(fn_name: str, cls: str) -> str:
+    """Drop the class prefix the function-name object model encodes, leaving
+    the bare member name. Tries the class's own lower-cased token first, then
+    the generic superclass tokens, longest match wins."""
+    tokens = sorted({cls.lower(), *_GENERIC_TOKENS}, key=len, reverse=True)
+    for tok in tokens:
+        if fn_name == tok:
+            return ""
+        if fn_name.startswith(tok + "_"):
+            return fn_name[len(tok) + 1:]
+    return fn_name
+
+
+def _camel(member: str) -> str:
+    """camelCase a snake member name, upper-casing whole acronym runs."""
+    parts = [p for p in member.split("_") if p]
+    out = []
+    for i, p in enumerate(parts):
+        if p in _ACRONYMS:
+            out.append(p.upper())
+        elif i == 0:
+            out.append(p)
+        else:
+            out.append(p[:1].upper() + p[1:])
+    return "".join(out)
+
+
+def _ooname(fn_name: str, cls: str) -> str:
+    """Canonical camelCase OO method name for a classified function."""
+    if fn_name in _OONAME_OVERRIDES:
+        return _OONAME_OVERRIDES[fn_name]
+    return _camel(_strip_class_token(fn_name, cls))
+
+
+def _oo_excluded(fn: dict, role: str) -> bool:
+    """True for functions classified to a class that are internal machinery,
+    not user OO methods: aggregate transition helpers, and comparators with no
+    SQL function (qsort / bound / min / max sort helpers)."""
+    name = fn["name"]
+    if any(name.endswith(s) for s in _OONAME_EXCLUDE_SUFFIXES):
+        return True
+    if role == "predicate" and not fn.get("sqlfn"):
+        return True
+    return False
+
+
 def _scan_errors(src_root: Path, public: set) -> dict:
     """Static scan: function → set of errorCode it can raise.
 
@@ -243,8 +310,21 @@ def attach_object_model(idl: dict, path: Path,
             continue
         cls = tgt["class"]
         rec = classes.setdefault(cls, {"methods": []})
-        method = {"function": name, "role": _role(name),
-                  "scope": tgt["scope"], "backing": name}
+        role = _role(name)
+        method = {"function": name, "role": role,
+                  "scope": tgt["scope"], "backing": name,
+                  "ooName": _ooname(name, cls)}
+        if _oo_excluded(fn, role):
+            method["ooExclude"] = True
+        sugar = []
+        if role == "predicate" and not method.get("ooExclude"):
+            sugar.append("operator")
+        if "_to_" in name:
+            sugar.append("cast")
+        if name.endswith("_in") or name.endswith("_out"):
+            sugar.append("io")
+        if sugar:
+            method["ooSugar"] = sugar
         rec["methods"].append(method)
         function_to_class[name] = {
             "class": cls, "scope": tgt["scope"], "axis": tgt["axis"],
@@ -301,6 +381,9 @@ def attach_object_model(idl: dict, path: Path,
                                   * 100 / len(functions), 1)
                             if functions else 0.0),
             "errorStatus": errors["status"],
+            "ooMethods": sum(len(c["methods"]) for c in classes.values()),
+            "ooExcluded": sum(1 for c in classes.values()
+                              for m in c["methods"] if m.get("ooExclude")),
         },
     }
     return idl
