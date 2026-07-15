@@ -91,9 +91,9 @@ runs:
         echo "Catalog written: $CATALOG ($(wc -c < "$CATALOG") bytes)"
 
     # Optional: build and install libmeos with all families. Mirrors the green
-    # all-families recipe (MobilityDB meos-arrow.yml + the four JVM bindings):
-    # purge the runner's preinstalled PostgreSQL and use apt.postgresql.org
-    # PG17 so the vendored pgPointCloud PGXS build finds clang-19.
+    # all-families recipe used by the JVM bindings: purge the runner's
+    # preinstalled PostgreSQL and use apt.postgresql.org PG17 so the vendored
+    # pgPointCloud PGXS build finds clang-19.
     - name: Remove preinstalled PostgreSQL [prefer apt.postgresql.org]
       if: inputs.build-libmeos == 'true'
       shell: bash

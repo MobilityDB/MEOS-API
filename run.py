@@ -171,14 +171,13 @@ def main():
         idl, ngrp = attach_groups(idl, MEOS_SRC)
         print(f"[5/5] Attached {ngrp} doxygen @ingroup groups", file=sys.stderr)
 
-    # Surface any forward-declared external ABI struct pointer not yet
-    # normalised to void * (see parser.extractors._EXTERNAL_OPAQUE_STRUCTS),
-    # so a new one is classified explicitly instead of diverging per binding.
+    # Surface any forward-declared external ABI struct pointer in the API, so a
+    # new one is classified explicitly instead of diverging per binding.
     unlisted = find_unlisted_foreign_structs(idl)
     if unlisted:
         print(f"      WARNING: unlisted external struct pointer(s) in the API: "
-              f"{', '.join(unlisted)} — add to _EXTERNAL_OPAQUE_STRUCTS to map "
-              f"them to void * uniformly across bindings", file=sys.stderr)
+              f"{', '.join(unlisted)} — classify them explicitly so bindings "
+              f"handle them uniformly", file=sys.stderr)
 
     # 6. Attach the temporal-covering descriptor (Parquet/Iceberg projection)
     print(f"      Attaching temporal covering from {COVERING_PATH}...",

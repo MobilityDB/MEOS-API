@@ -104,7 +104,7 @@ def merge_meta(idl: dict, meta_path: Path) -> dict:
 # headers themselves are unguarded, but a handful of core-header declarations
 # are gated. Kept in sync with MobilityDB CMakeLists.txt's ``if(ALL) foreach``.
 _ALL_FAMILIES = (
-    "ARROW", "CBUFFER", "H3", "JSON", "NPOINT", "POINTCLOUD", "POSE",
+    "CBUFFER", "H3", "JSON", "NPOINT", "POINTCLOUD", "POSE",
     "QUADBIN", "RASTER", "RGEO",
 )
 
