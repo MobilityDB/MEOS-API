@@ -19,37 +19,14 @@ def _canonical_spelling(ty) -> str:
 _BOOL_SPELLINGS = {"bool", "_Bool"}
 
 
-# External ABI structs that appear in the MEOS public API only at the FFI
-# boundary — the Arrow C Data Interface structs.  They are forward-declared
-# with no field layout and carry no MEOS semantics, so a pointer to one is
-# ABI-identical to ``void *``.  Emitting them as ``void *`` lets every binding's
-# opaque-pointer-family handling (JNR ``Pointer``, cffi ``_ffi.CData``, Go
-# ``unsafe.Pointer``, .NET ``IntPtr``, rust ``*mut c_void``) wrap them
-# uniformly.  The idiomatic Arrow bridge — allocating the struct and importing
-# it through the language's Arrow library — lives in each binding's hand-written
-# layer, keyed off the ``*_to_arrow`` / ``*_from_arrow`` function name, as with
-# any other opaque-pointer-family value.
-_EXTERNAL_OPAQUE_STRUCTS = ("ArrowSchema", "ArrowArray")
-
-
-def _demote_external_opaque(spelling: str) -> str:
-    # Map a pointer to an external, layout-less ABI struct to the equivalent
-    # ``void``-pointer spelling, preserving const qualifiers and pointer depth.
-    for name in _EXTERNAL_OPAQUE_STRUCTS:
-        spelling = re.sub(rf"\bstruct\s+{name}\b", "void", spelling)
-        spelling = re.sub(rf"\b{name}\b", "void", spelling)
-    return spelling
-
-
 def find_unlisted_foreign_structs(idl) -> list:
     # A MEOS type is typedef'd, so its declared ``cType`` appears bare (``Pose
     # *``) in at least one signature; a foreign, forward-declared ABI struct is
-    # never typedef'd, so it only ever appears elaborated (``struct ArrowSchema
-    # *``).  Any base name seen only in the elaborated form, and not already
-    # normalised to ``void *`` by ``_EXTERNAL_OPAQUE_STRUCTS``, is an external
-    # type the bindings handle divergently (permissive ones map it to a raw
-    # pointer, conservative ones skip it).  Surface it so it is classified
-    # explicitly instead of silently diverging per binding.
+    # never typedef'd, so it only ever appears elaborated (``struct Foo *``).
+    # Any base name seen only in the elaborated form is an external type the
+    # bindings handle divergently (permissive ones map it to a raw pointer,
+    # conservative ones skip it).  Surface it so it is classified explicitly
+    # instead of silently diverging per binding.
     elaborated, bare = set(), set()
     for fn in idl.get("functions", []):
         spellings = [p.get("cType") for p in fn.get("params", [])]
@@ -61,7 +38,7 @@ def find_unlisted_foreign_structs(idl) -> list:
             if not base:
                 continue
             (elaborated if re.search(r"\bstruct\b", sp) else bare).add(base)
-    return sorted(elaborated - bare - set(_EXTERNAL_OPAQUE_STRUCTS))
+    return sorted(elaborated - bare)
 
 
 def _bool_norm(spelling: str) -> str:
@@ -78,7 +55,7 @@ def _c_spelling(ty) -> str:
     # in play:
     # - PostgreSQL headers: ``typedef char bool``  -> spelling already ``"bool"``
     # - Stub header:        ``#define bool _Bool`` -> spelling is ``"_Bool"``
-    return _demote_external_opaque(_bool_norm(ty.spelling))
+    return _bool_norm(ty.spelling)
 
 
 # Canonical spellings of plain C scalars/builtins.
@@ -136,8 +113,8 @@ def _canonical_c_spelling(ty) -> str:
         return "bool"
     preserved = _preserved_opaque(ty)
     if preserved is not None:
-        return _bool_norm(_demote_external_opaque(preserved))
-    return _bool_norm(_demote_external_opaque(_canonical_spelling(ty)))
+        return _bool_norm(preserved)
+    return _bool_norm(_canonical_spelling(ty))
 
 
 # -----------------------------------------------------------------------------
@@ -174,7 +151,6 @@ _TOPLEVEL_FAMILY = {
     "meos_quadbin.h": "QUADBIN",
     "meos_pointcloud.h": "POINTCLOUD",
     "meos_json.h": "JSON",
-    "meos_arrow.h": "ARROW",
     "meos_raster.h": "RASTER",
 }
 

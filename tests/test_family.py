@@ -22,7 +22,7 @@ IDL = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
 
 OPTIONAL_FAMILIES = {
     "CBUFFER", "NPOINT", "POSE", "RGEO", "H3",
-    "QUADBIN", "POINTCLOUD", "JSON", "ARROW", "RASTER",
+    "QUADBIN", "POINTCLOUD", "JSON", "RASTER",
 }
 
 
@@ -66,7 +66,7 @@ class FamilyClassificationTests(unittest.TestCase):
         # Hard guard: a healthy full-surface IDL populates every optional family;
         # an empty one means the header layout or the classifier regressed.
         present = {f["family"] for f in self.functions}
-        for family in OPTIONAL_FAMILIES - {"ARROW", "RASTER"}:
+        for family in OPTIONAL_FAMILIES - {"RASTER"}:
             self.assertIn(family, present, f"{family} unpopulated — classifier regression?")
 
     def test_families_are_known_labels(self):
