@@ -25,6 +25,14 @@ from pathlib import Path
 _CSQLFN = re.compile(r"@csqlfn\b")
 _CSQLFN_REF = re.compile(r"#(\w+)\s*\(\)")
 _CSQLFN_END = re.compile(r"@\w|\*/")
+# @csqlaggfn names the SQL AGGREGATE(s) a transition/combine/final function
+# implements, following the standard PostgreSQL aggregate model
+# (<aggregate>Transition / Combine / Final). Unlike @csqlfn — which points at a PG
+# wrapper that then carries the @sqlfn (two hops) — @csqlaggfn is ONE hop: the
+# #Name() reference IS the SQL aggregate-role name (#setUnionTransition()). A member
+# shared by two aggregates (the spanset union finalfn) carries both, so collect all
+# references (reusing _CSQLFN_REF / _CSQLFN_END, the same value grammar).
+_CSQLAGGFN = re.compile(r"@csqlaggfn\b")
 # After the doxygen close, the MEOS-C definition. The return type may sit on its
 # own line (`bool\nleft_tpcbox_tpcbox(`) OR on the same line as the name
 # (`bool tpcbox_eq(const TPCBox *box1, ...)`, the one-line predicate style). Match
@@ -185,6 +193,32 @@ def _meos_to_mdb(meos_src):
     return out
 
 
+def _meos_agg_names(meos_src):
+    """MEOS-C aggregate function name -> ordered list of SQL aggregate-role names
+    (from @csqlaggfn). One hop: the #Name() references ARE the SQL names
+    (#setUnionTransition()), so there is no wrapper indirection to resolve — unlike
+    _meos_to_mdb, whose #Wrapper() references need a second _mdb_to_sql hop. A member
+    shared by two aggregates (spanset_union_finalfn) carries several names."""
+    out = {}
+    for cf in Path(meos_src).rglob("*.c"):
+        text = cf.read_text(errors="ignore")
+        for m in _CSQLAGGFN.finditer(text):
+            tail = text[m.end():]
+            end = _CSQLFN_END.search(tail)
+            value = tail[:end.start()] if end else tail
+            names = _CSQLFN_REF.findall(value)
+            if not names:
+                continue
+            fm = _FNDEF.search(text, m.end())
+            if not fm:
+                continue
+            lst = out.setdefault(fm.group(1), [])
+            for nm in names:
+                if nm not in lst:
+                    lst.append(nm)
+    return out
+
+
 def _mdb_to_sql(mdb_src):
     """MobilityDB-C wrapper name -> ordered list of (sqlfn, sqlop).
 
@@ -282,6 +316,25 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
             multi[f["name"]] = [s for s, _ in pairs]
         n += 1
     return idl, n, multi
+
+
+def attach_aggfn_map(idl, meos_src):
+    """Attach `sqlAgg` — the SQL aggregate-role name(s) each aggregate function
+    implements, read faithfully from @csqlaggfn in meos/src. This gives an
+    aggregate member its own catalog identity (setUnionTransition, spanUnionFinal)
+    distinct from the identically named binary set/span union FUNCTION, and lets a
+    binding reconstruct the standard PostgreSQL aggregate model (a <aggregate> with
+    its Transition / Combine / Final members) instead of guessing from name
+    suffixes. A member shared by two aggregates (spanset_union_finalfn) carries a
+    list. Faithful reader: the name is recorded verbatim, no derivation."""
+    a2n = _meos_agg_names(meos_src)
+    n = 0
+    for f in idl["functions"]:
+        names = a2n.get(f["name"])
+        if names:
+            f["sqlAgg"] = names
+            n += 1
+    return idl, n
 
 
 # MEOS-C ever/always spatial-relationship functions are named <e|a><verb>_...; their
