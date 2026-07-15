@@ -86,9 +86,11 @@
       ],
       "temptypes": [
         "T_TBOOL",
-        "T_TINT",
-        "T_TFLOAT",
         "T_TTEXT",
+        "T_TJSONB",
+        "T_TINT",
+        "T_TBIGINT",
+        "T_TFLOAT",
         "T_TGEOMPOINT",
         "T_TGEOGPOINT",
         "T_TGEOMETRY",
@@ -96,7 +98,11 @@
         "T_TCBUFFER",
         "T_TNPOINT",
         "T_TPOSE",
-        "T_TRGEOMETRY"
+        "T_TRGEOMETRY",
+        "T_TH3INDEX",
+        "T_TQUADBIN",
+        "T_TPCPOINT",
+        "T_TPCPATCH"
       ],
       "doc": "Superclass of every temporal type; temporal_* functions are late-bound over `subtype` and `temptype`."
     },
@@ -109,7 +115,8 @@
       ],
       "temptypes": [
         "T_TBOOL",
-        "T_TTEXT"
+        "T_TTEXT",
+        "T_TJSONB"
       ],
       "doc": "Non-numeric, non-spatial temporal types (step/discrete interpolation only). A real MEOS grouping (talpha_type) with no user-facing class name in PyMEOS — see corrections."
     },
@@ -137,6 +144,18 @@
       ],
       "cBaseType": "T_TEXT"
     },
+    "TJsonb": {
+      "kind": "leaf",
+      "parent": "TAlpha",
+      "predicate": null,
+      "prefixes": [
+        "tjsonb"
+      ],
+      "temptypes": [
+        "T_TJSONB"
+      ],
+      "cBaseType": "T_JSONB"
+    },
     "TNumber": {
       "kind": "abstract",
       "parent": "Temporal",
@@ -146,6 +165,7 @@
       ],
       "temptypes": [
         "T_TINT",
+        "T_TBIGINT",
         "T_TFLOAT"
       ],
       "basePredicate": "tnumber_basetype",
@@ -162,6 +182,18 @@
         "T_TINT"
       ],
       "cBaseType": "T_INT4"
+    },
+    "TBigint": {
+      "kind": "leaf",
+      "parent": "TNumber",
+      "predicate": null,
+      "prefixes": [
+        "tbigint"
+      ],
+      "temptypes": [
+        "T_TBIGINT"
+      ],
+      "cBaseType": "T_INT8"
     },
     "TFloat": {
       "kind": "leaf",
@@ -190,7 +222,9 @@
         "T_TCBUFFER",
         "T_TNPOINT",
         "T_TPOSE",
-        "T_TRGEOMETRY"
+        "T_TRGEOMETRY",
+        "T_TH3INDEX",
+        "T_TQUADBIN"
       ],
       "doc": "Temporal types carrying an STBox spatial bounding box."
     },
@@ -363,9 +397,10 @@
       "predicate": "tgeodetic_type",
       "temptypes": [
         "T_TGEOGPOINT",
-        "T_TGEOGRAPHY"
+        "T_TGEOGRAPHY",
+        "T_TH3INDEX"
       ],
-      "doc": "Ellipsoidal base — geography."
+      "doc": "Ellipsoidal base — geography; also the H3 DGGS cells (geodetic, SRID 4326)."
     }
   },
   "prefixMap": {
@@ -384,7 +419,9 @@
     "exact": [
       "tbool",
       "ttext",
+      "tjsonb",
       "tint",
+      "tbigint",
       "tfloat",
       "tgeompoint",
       "tgeogpoint",
