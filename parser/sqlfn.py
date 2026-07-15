@@ -286,23 +286,34 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
                 f["sqlReturnType"] = next(iter(rets))
             elif len(rets) > 1:
                 f["sqlReturnTypeAll"] = sorted(rets)
-            # The EXACT per-overload SQL signatures for THIS @sqlfn name — the mechanical
-            # registration surface. A binding emits one registration per entry over the
-            # concrete arg types, with NO type-scope heuristic (minInstant lands on exactly
-            # its {tint,tbigint,tfloat,ttext} overloads). One wrapper backs several @sqlfn
-            # names (Temporal_to_tinstant <- tintInst/tgeometryInst/...), so keep only the
-            # overloads whose CREATE FUNCTION name is this function's @sqlfn.
+            # The EXACT per-overload SQL signatures — the mechanical registration surface.
+            # A binding emits one registration per entry over the concrete arg types, with
+            # NO type-scope heuristic (minInstant lands on exactly its {tint,tbigint,tfloat,
+            # ttext} overloads), under the entry's own SQL name.
+            # One C wrapper very commonly backs a per-type NAME FAMILY: Temporal_to_tinstant
+            # is exposed as tintInst/tbigintInst/.../ttextInst — one CREATE FUNCTION per base
+            # type, all resolving to the one wrapper — and likewise the constructor, I/O
+            # (From{Binary,HexWKB,MFJSON}, _in/_out/_recv/_send) and transform families. The
+            # single @sqlfn doxygen tag names only ONE representative, so keep EVERY overload
+            # and stamp it with `sqlName` when the wrapper backs more than one distinct name;
+            # a binding registers each `<T>Inst`/`<T>Seq`/... by its own name rather than
+            # hand-writing the non-representative types. Single-name wrappers stay {args,ret}
+            # unchanged (their name is the function's `sqlfn`), so the common case is a no-op.
             # `argDefaults` (the per-arg literal SQL default, None for a required arg) is
             # attached ONLY for a signature that actually has an optional arg, so a binding
             # can render the shorter overload of a SQL-optional argument with its omitted
             # value; default-free signatures stay {args, ret} unchanged.
+            fam_names = {s["sqlName"] for s in sigs}
+            multiname = len(fam_names) > 1
             own = []
             for s in sigs:
-                if s["sqlName"] != f["sqlfn"]:
+                if not multiname and s["sqlName"] != f["sqlfn"]:
                     continue
                 entry = {"args": s["args"], "ret": s["ret"]}
                 if any(d is not None for d in s["argDefaults"]):
                     entry["argDefaults"] = s["argDefaults"]
+                if multiname:
+                    entry["sqlName"] = s["sqlName"]
                 own.append(entry)
             if own:
                 f["sqlSignatures"] = own
