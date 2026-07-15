@@ -13,8 +13,8 @@ from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.outparam import merge_outparams
 from parser.enrich import enrich_idl
-from parser.sqlfn import (attach_sqlfn_map, lint_ea_sqlfn, lint_positional_sqlfn,
-                          lint_sqlfn_case_collisions)
+from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, lint_ea_sqlfn,
+                          lint_positional_sqlfn, lint_sqlfn_case_collisions)
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
 from parser.object_model import attach_object_model, find_mobilitydb_src
@@ -132,6 +132,12 @@ def main():
     if MEOS_SRC.exists() and MDB_SRC.exists():
         idl, nsql, sqlfn_multi = attach_sqlfn_map(idl, MEOS_SRC, MDB_SRC, SQL_SRC)
         print(f"[4/4] Attached {nsql} @sqlfn SQL names", file=sys.stderr)
+        # Aggregate identity: @csqlaggfn names the SQL aggregate (setUnion /
+        # spanUnion / spansetUnion) each transition/combine/final function
+        # implements, so an aggregate member is distinguishable from the identically
+        # named binary set/span union function. One-hop, faithful to the source tag.
+        idl, nagg = attach_aggfn_map(idl, MEOS_SRC)
+        print(f"      Attached {nagg} @csqlaggfn aggregate names", file=sys.stderr)
         # Guard: a copy-paste @csqlfn in meos/src can point an ever/always function at
         # the opposite-prefix wrapper (eintersects_* tagged #Aintersects_*), flipping its
         # SQL name and breaking the binding overload dispatch. The parser is faithful, so
