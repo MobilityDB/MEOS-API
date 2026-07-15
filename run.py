@@ -85,10 +85,19 @@ def main():
     idl, sh = infer_shapes(idl)
     print(f"      inferred shape: {sh['arrayReturn']} array returns, "
           f"{sh['outputArrays']} output arrays", file=sys.stderr)
-    idl, nn = merge_nullable(idl, HEADERS_DIR.parent)
+    # The `may be NULL` / `@param[out]` Doxygen tags live in the MEOS C *source*
+    # (meos/src/**/*.c), not the parsed header tree. On the build-libmeos path
+    # HEADERS_DIR is the INSTALLED headers (generated meos_export.h, no src/), so
+    # scan from the source checkout (MDB_SRC_ROOT/meos) — the same root the
+    # @sqlfn/@ingroup maps use — and fall back to the header tree's parent when
+    # the headers are themselves a source checkout (no MDB_SRC_ROOT).
+    _src_root = (Path(os.environ["MDB_SRC_ROOT"]) / "meos"
+                 if os.environ.get("MDB_SRC_ROOT") else HEADERS_DIR.parent)
+    _doxy_root = _src_root if (_src_root / "src").is_dir() else HEADERS_DIR.parent
+    idl, nn = merge_nullable(idl, _doxy_root)
     print(f"      nullable params from Doxygen `may be NULL`: {nn}",
           file=sys.stderr)
-    idl, no, out_drift = merge_outparams(idl, HEADERS_DIR.parent)
+    idl, no, out_drift = merge_outparams(idl, _doxy_root)
     print(f"      out params from Doxygen `@param[out]`: {no}", file=sys.stderr)
     if out_drift:
         print(f"      ⚠ {len(out_drift)} @param[out] tag(s) disagree with the C signature "
