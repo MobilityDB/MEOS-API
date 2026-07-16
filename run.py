@@ -12,6 +12,7 @@ from parser.header_types import reconcile
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.outparam import merge_outparams
+from parser.boundargs import merge_boundargs
 from parser.enrich import enrich_idl
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, lint_ea_sqlfn,
                           lint_positional_sqlfn, lint_sqlfn_case_collisions)
@@ -190,6 +191,20 @@ def main():
         nbo = sum(1 for f in idl.get("functions", []) if f.get("sqlfnBackingOnly"))
         print(f"      Flagged {nbo} bbox-topological backing @sqlfn tag(s) "
               f"(sqlfnBackingOnly)", file=sys.stderr)
+
+        # A PG wrapper can BIND a MEOS input to a fixed literal instead of exposing
+        # it as a SQL argument (valueAtTimestamp hides `strict=true`). Capture those
+        # bound literals from the wrapper body as `shape.boundArgs`, the input-side
+        # sibling of `shape.outParams`, so a binding emits the literal it can no
+        # longer read off the (narrower) SQL signature. Needs `mdbC` (step 4).
+        idl, nba, ba_drift = merge_boundargs(idl, MDB_SRC)
+        print(f"      Bound-literal args from PG wrappers `shape.boundArgs`: {nba}",
+              file=sys.stderr)
+        if ba_drift:
+            print(f"      ⚠ {len(ba_drift)} wrapper call arg(s) unclassified "
+                  f"(neither caller arg, out-param, nor literal — inspect):", file=sys.stderr)
+            for fn, pn, reason in ba_drift:
+                print(f"          {fn}({pn}) — {reason}", file=sys.stderr)
 
     # 5. Attach the doxygen module group (@ingroup) from the vendored source, so
     #    bindings organize their generated surface like the reference manual.
