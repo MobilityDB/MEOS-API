@@ -145,6 +145,26 @@ class TypeRecoverTests(unittest.TestCase):
             self.assertEqual(rt["c"], "uint64_t", f"{name} c")
             self.assertEqual(rt["canonical"], "uint64_t", f"{name} canonical")
 
+    def test_typedef_canonical_not_platform_resolved(self):
+        # ``canonical`` is the MEOS typedef its ``cType`` names, never libclang's
+        # fully-resolved platform type. On the self-contained (installed-header)
+        # parse ``TimestampTz`` resolves to ``long`` and ``Jsonb *`` / ``JsonPath
+        # *`` to ``varlena *`` while ``cType`` keeps the typedef; normalize_canonical
+        # re-derives ``canonical`` from the faithful ``cType`` so a binding
+        # generator (which keys on ``canonical``) marshals the semantic type
+        # instead of dropping the function — a guard on that pass.
+        def canon(name, pname):
+            self.assertIn(name, self.by_name, f"{name} missing from IDL")
+            p = next(p for p in self.by_name[name]["params"] if p["name"] == pname)
+            return (p["cType"], p["canonical"])
+        self.assertEqual(canon("tint_value_at_timestamptz", "t"),
+                         ("TimestampTz", "TimestampTz"))
+        if "jsonb_path_exists" in self.by_name:  # JSON=ON-conditional surface
+            self.assertEqual(canon("jsonb_path_exists", "jb"),
+                             ("const Jsonb *", "const Jsonb *"))
+            self.assertEqual(canon("jsonb_path_exists", "jp"),
+                             ("const JsonPath *", "const JsonPath *"))
+
     # ---- genuine-int controls (must NOT be rewritten) ----------------------
 
     def test_genuine_int_left_untouched(self):
