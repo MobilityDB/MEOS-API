@@ -133,6 +133,18 @@ class TypeRecoverTests(unittest.TestCase):
         self.assertEqual(self._ret("span_hash_extended"), "uint64_t")
         self.assertIn("uint64_t", self._param_ctypes("set_hash_extended"))
 
+    def test_cell_id_canonical_normalized_uniform(self):
+        # H3Index (libh3's typedef, whose fully-resolved canonical is the platform
+        # "unsigned long") and Quadbin (MobilityDB's typedef, recovered to "uint64_t")
+        # are BOTH uint64 cell ids; as Tcell<T> subtypes they must be spelled identically.
+        # The ``canonical`` field must normalize to "uint64_t" for both, not leave H3Index
+        # at "unsigned long" — a guard on the _CANON_ALIAS canonical-normalization pass.
+        for name in ("th3index_start_value", "th3index_end_value",
+                     "tquadbin_start_value", "tquadbin_end_value", "h3index_in"):
+            rt = self.by_name[name]["returnType"]
+            self.assertEqual(rt["c"], "uint64_t", f"{name} c")
+            self.assertEqual(rt["canonical"], "uint64_t", f"{name} canonical")
+
     # ---- genuine-int controls (must NOT be rewritten) ----------------------
 
     def test_genuine_int_left_untouched(self):

@@ -50,6 +50,17 @@ _TYPE_MAP = {
     "JsonPath": "JsonPath",
 }
 
+# libclang renders a fixed-width integer typedef's fully-resolved `canonical` as the
+# platform builtin spelling (uint64_t -> "unsigned long" on LP64). When the c-field is the
+# typedef but `canonical` is that platform alias, normalize `canonical` too, so the same
+# underlying type is spelled identically catalog-wide -- e.g. the Tcell<T> cell-id accessors
+# th3index_start_value (H3Index, from libh3) and tquadbin_start_value (Quadbin) BOTH read
+# uint64_t, not one "unsigned long" and the other "uint64_t".
+_CANON_ALIAS = {
+    "uint64_t": {"unsignedlong", "longunsignedint", "unsignedlonglong"},
+    "int64_t": {"long", "longint", "longlong"},
+}
+
 _NAMES = "|".join(sorted(_TYPE_MAP, key=len, reverse=True))
 # optional const, a recoverable base, optional pointer stars, optional identifier
 _DECL_RE = re.compile(
@@ -135,12 +146,20 @@ def recover_collapsed_types(idl, headers_dir):
         # canonical collapses (slot spells `original`, e.g. a MobilityDB typedef
         # such as Quadbin whose uint64 underlying type was the part that erased).
         recoverable = (_nospace(collapsed), _nospace(original))
-        if _nospace(slot.get(key)) not in recoverable:
+        cur = _nospace(slot.get(key))
+        # `cur in recoverable`: the base name collapsed to int, or survived as the typedef.
+        # `cur == recovered`: libclang already rendered the c-field as the typedef's immediate
+        # underlying type (e.g. H3Index -> uint64_t) while leaving `canonical` at the fully
+        # resolved platform spelling ("unsigned long") -> fall through to normalize canonical.
+        if cur not in recoverable and cur != _nospace(recovered):
             return 0
+        rewrote = slot.get(key) != recovered
         slot[key] = recovered
-        if _nospace(slot.get("canonical")) in recoverable:
+        canon = _nospace(slot.get("canonical"))
+        if canon in recoverable or canon in _CANON_ALIAS.get(_nospace(recovered), ()):
+            rewrote = rewrote or slot.get("canonical") != recovered
             slot["canonical"] = recovered
-        return 1
+        return 1 if rewrote else 0
 
     def patch(fn):
         rec = decls.get(fn.get("name"))
