@@ -123,8 +123,43 @@ def _literal(arg: str) -> str | None:
     return None
 
 
+def _wrapper_bound(body: str, func: dict, drift: list) -> dict[str, str]:
+    """The literals wrapper ``body`` binds in its call to ``func['name']``, keyed by
+    ``func``'s parameter name. Empty if the wrapper does not call ``func`` by name."""
+    args = _call_args(body, func["name"])
+    if not args:
+        return {}
+    assigned = {m.group("var") for m in _ASSIGNED.finditer(body)}
+    params = func.get("params", [])
+    bound: dict[str, str] = {}
+    for i, a in enumerate(args):
+        if i >= len(params):
+            break
+        pname = params[i].get("name")
+        if not pname:
+            continue
+        if a.startswith("&") or "PG_GETARG" in a or a in assigned:
+            continue  # out-param or caller-sourced local
+        lit = _literal(a)
+        if lit is not None:
+            bound[pname] = lit
+        elif _IDENT.match(a):
+            # a bare identifier that is not caller-sourced and not a literal —
+            # cannot be trusted as a bound value; report for a look.
+            drift.append((func["name"], pname, "unclassified-arg: " + a))
+    return bound
+
+
 def merge_boundargs(idl: dict, mdb_src: str | Path) -> tuple[dict, int, list]:
     """Fold wrapper-bound literals into each function's ``shape.boundArgs``.
+
+    Functions are grouped by the PG wrapper they share (``mdbC``). Every function in a
+    group has the SAME SQL contract, so a literal the wrapper binds (keyed by parameter
+    name) applies to ALL of them — crucially the per-base-type collapse siblings
+    (``tbool``/``tint``/… ``_value_at_timestamptz``) that a binding dispatches to for a
+    typed result but that the wrapper never calls by name (it calls the generic
+    ``temporal_value_at_timestamptz``). Only members that actually own a parameter of that
+    name receive the literal.
 
     Returns ``(idl, count, drift)`` where ``drift`` lists
     ``(function, param, reason)`` call arguments the pass could not classify as a
@@ -133,35 +168,27 @@ def merge_boundargs(idl: dict, mdb_src: str | Path) -> tuple[dict, int, list]:
     wrappers = extract_wrappers(mdb_src)
     n = 0
     drift: list[tuple[str, str, str]] = []
+    groups: dict[str, list] = {}
     for func in idl["functions"]:
-        wname = func.get("mdbC")
-        if not wname:
-            continue
+        w = func.get("mdbC")
+        if w:
+            groups.setdefault(w, []).append(func)
+    for wname, group in groups.items():
         body = wrappers.get(wname)
         if body is None:
             continue
-        args = _call_args(body, func["name"])
-        if not args:
+        # the wrapper's bound literals, keyed by param name, from whichever group member(s)
+        # the wrapper calls by name (branches — e.g. the RGEO ternary — agree, first wins)
+        wbound: dict[str, str] = {}
+        for func in group:
+            for k, v in _wrapper_bound(body, func, drift).items():
+                wbound.setdefault(k, v)
+        if not wbound:
             continue
-        assigned = {m.group("var") for m in _ASSIGNED.finditer(body)}
-        params = func.get("params", [])
-        bound: dict[str, str] = {}
-        for i, a in enumerate(args):
-            if i >= len(params):
-                break
-            pname = params[i].get("name")
-            if not pname:
-                continue
-            if a.startswith("&") or "PG_GETARG" in a or a in assigned:
-                continue  # out-param or caller-sourced local
-            lit = _literal(a)
-            if lit is not None:
-                bound[pname] = lit
-            elif _IDENT.match(a):
-                # a bare identifier that is not caller-sourced and not a literal —
-                # cannot be trusted as a bound value; report for a look.
-                drift.append((func["name"], pname, "unclassified-arg: " + a))
-        if bound:
-            func.setdefault("shape", {})["boundArgs"] = bound
-            n += len(bound)
+        for func in group:
+            pnames = {p.get("name") for p in func.get("params", [])}
+            bound = {k: v for k, v in wbound.items() if k in pnames}
+            if bound:
+                func.setdefault("shape", {})["boundArgs"] = bound
+                n += len(bound)
     return idl, n, drift
