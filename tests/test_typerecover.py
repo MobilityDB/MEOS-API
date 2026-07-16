@@ -133,6 +133,21 @@ class TypeRecoverTests(unittest.TestCase):
         self.assertEqual(self._ret("span_hash_extended"), "uint64_t")
         self.assertIn("uint64_t", self._param_ctypes("set_hash_extended"))
 
+    def test_uint32_recovered(self):
+        # The bare PG ``uint32`` typedef collapses to ``int`` and must recover
+        # to ``uint32_t`` (like ``uint64`` -> ``uint64_t``), else the unsigned
+        # 32-bit hash return renders as a signed ``int`` in every generated
+        # binding (values >= 2**31 flip sign). Every MEOS ``*_hash`` returns the
+        # bare ``uint32`` typedef, so they recover only when the ``uint32`` map
+        # entry is present — a guard against dropping it, the sibling of the
+        # recurrently-lost ``uint64`` entry above.
+        for name in ("set_hash", "span_hash", "spanset_hash",
+                     "tbox_hash", "temporal_hash"):
+            self.assertEqual(self._ret(name), "uint32_t", name)
+        # Genuine ``int`` returns (e.g. numValues) must stay untouched: the
+        # recovery only fires where the header text spells ``uint32``.
+        self.assertEqual(self._ret("set_num_values"), "int")
+
     def test_cell_id_canonical_normalized_uniform(self):
         # H3Index (libh3's typedef, whose fully-resolved canonical is the platform
         # "unsigned long") and Quadbin (MobilityDB's typedef, recovered to "uint64_t")
