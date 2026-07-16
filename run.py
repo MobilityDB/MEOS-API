@@ -207,9 +207,13 @@ def main():
                 print(f"          {fn}({pn}) — {reason}", file=sys.stderr)
 
     # 5. Attach the doxygen module group (@ingroup) from the vendored source, so
-    #    bindings organize their generated surface like the reference manual.
+    #    bindings organize their generated surface like the reference manual. The
+    #    exported base-type functions (text_out, date_in, timestamp_cmp_internal,
+    #    …) live in the vendored `pgtypes/` tree at the repo root and carry
+    #    `@ingroup meos_base_*` there, so scan it alongside meos/src.
+    PGTYPES_SRC = SRC_ROOT / "pgtypes"
     if MEOS_SRC.exists():
-        idl, ngrp = attach_groups(idl, MEOS_SRC)
+        idl, ngrp = attach_groups(idl, MEOS_SRC, PGTYPES_SRC)
         print(f"[5/5] Attached {ngrp} doxygen @ingroup groups", file=sys.stderr)
 
     # Surface any forward-declared external ABI struct pointer in the API, so a
