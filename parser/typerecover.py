@@ -184,3 +184,58 @@ def recover_collapsed_types(idl, headers_dir):
 
     walk(idl)
     return idl, fixed
+
+
+# Strip const/struct qualifiers and pointer stars to the bare base name.
+_BASE_RE = re.compile(r"\b(?:const|struct|volatile)\b|\*")
+
+
+def _base_name(t):
+    return _BASE_RE.sub(" ", t or "").strip()
+
+
+def normalize_canonical(idl):
+    """Re-derive each type slot's ``canonical`` from its ``cType`` typedef.
+
+    ``canonical`` is the MEOS/PG typedef the public API exposes (``_TYPE_MAP``),
+    not libclang's fully-resolved platform type. The self-contained (installed)
+    header parse resolves ``TimestampTz`` -> ``long`` and ``Jsonb *`` -> ``struct
+    varlena *`` while ``cType`` keeps the faithful typedef, so re-derive
+    ``canonical`` from ``cType`` -- a binding generator keys on ``canonical`` and
+    must see the semantic type (a timestamp, a jsonb), never its platform width.
+    Idempotent; a no-op on the source parse (``canonical`` already equals the
+    typedef) and on non-typedef slots (``Temporal *``, ``int *``). Complements
+    ``recover_collapsed_types``: that recovers a ``cType`` the preprocessor erased
+    to ``int``; this trusts a faithful ``cType`` and only re-spells ``canonical``.
+    """
+    fixed = 0
+
+    def want(ctype):
+        mapped = _TYPE_MAP.get(_base_name(ctype))
+        if not mapped:
+            return None
+        const = "const " if re.search(r"\bconst\b", ctype) else ""
+        stars = "".join(c for c in ctype if c == "*")
+        return f"{const}{mapped}{(' ' + stars) if stars else ''}"
+
+    def fix(slot):
+        nonlocal fixed
+        if not (isinstance(slot, dict) and "canonical" in slot):
+            return
+        ctype = slot.get("cType") or slot.get("c")
+        w = want(ctype) if ctype else None
+        if w and _nospace(slot["canonical"]) != _nospace(w):
+            slot["canonical"] = w
+            fixed += 1
+
+    def walk(o):
+        if isinstance(o, dict):
+            fix(o)
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(idl)
+    return idl, fixed

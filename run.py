@@ -7,7 +7,7 @@ from pathlib import Path
 from parser.parser import parse_all_headers, merge_meta
 from parser.portable import attach_portable_aliases, classify_backing_sqlfn
 from parser.covering import attach_temporal_covering
-from parser.typerecover import recover_collapsed_types
+from parser.typerecover import recover_collapsed_types, normalize_canonical
 from parser.header_types import reconcile
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
@@ -78,6 +78,17 @@ def main():
     #     from the header source. Scalar typedefs already resolved by
     #     recover_collapsed_types (H3Index/Quadbin -> uint64_t) are left intact.
     idl = reconcile(idl, HEADERS_DIR)
+
+    # 1d. Re-spell each slot's `canonical` as the MEOS typedef its `cType` names,
+    #     not libclang's platform resolution. The self-contained (installed)
+    #     header parse resolves TimestampTz -> long and Jsonb * -> varlena *; the
+    #     source parse leaves them as the typedef. Deriving canonical from the
+    #     faithful cType makes both parses agree, so a binding generator (which
+    #     keys on canonical) marshals timestamps/jsonb rather than dropping them.
+    idl, ncanon = normalize_canonical(idl)
+    if ncanon:
+        print(f"      normalized {ncanon} canonical spellings to the cType typedef",
+              file=sys.stderr)
 
     # 1d. Generate the codegen `shape` from the signatures + Doxygen, replacing
     #     the hand-maintained meta stub.  outputArrays/arrayReturn come from the
