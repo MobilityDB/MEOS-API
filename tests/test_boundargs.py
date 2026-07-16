@@ -83,6 +83,10 @@ def _idl():
                     {"name": "maxdist"}, {"name": "maxt"}, {"name": "expand"}]},
         # a function with no wrapper mapping -> untouched
         {"name": "orphan_fn", "params": [{"name": "x"}]},
+        # a per-base-type collapse sibling: SHARES the wrapper (mdbC) with the generic
+        # but the wrapper never calls it by name -> inherits {strict:true} by param name
+        {"name": "tbool_value_at_timestamptz", "mdbC": "Temporal_value_at_timestamptz",
+         "params": [{"name": "temp"}, {"name": "t"}, {"name": "strict"}, {"name": "value"}]},
     ]}
 
 
@@ -128,11 +132,20 @@ class BoundArgsTests(unittest.TestCase):
         # `interp` (a derived enum local) is not recorded as a literal
         self.assertNotIn("interp", app["shape"]["boundArgs"])
 
+    def test_base_type_sibling_inherits_bound_literal(self):
+        # tbool_value_at_timestamptz shares the wrapper but is never called by name; it
+        # still inherits {strict:true} (its out-param `value` is not a bound literal)
+        idl, n, drift = merge_boundargs(_idl(), self.tmp.name)
+        sib = idl["functions"][5]
+        self.assertEqual(sib["name"], "tbool_value_at_timestamptz")
+        self.assertEqual(sib["shape"]["boundArgs"], {"strict": "true"})
+
     def test_orphan_and_count(self):
         idl, n, drift = merge_boundargs(_idl(), self.tmp.name)
-        # orphan (no mdbC) untouched; total = strict + 3 append literals = 4
+        # orphan (no mdbC) untouched; total = generic strict + 3 append literals +
+        # sibling strict = 5
         self.assertNotIn("shape", idl["functions"][4])
-        self.assertEqual(n, 4)
+        self.assertEqual(n, 5)
 
 
 if __name__ == "__main__":
