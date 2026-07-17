@@ -20,6 +20,9 @@ def fn(name, ret, *params):
     return {
         "name": name,
         "file": "meos.h",
+        # A public doxygen group: api derives from @ingroup, so a fixture
+        # function is public unless given a meos_internal_* group (or none).
+        "group": "meos_temporal",
         "returnType": {"c": ret, "canonical": ret},
         "params": [{"name": n, "cType": t, "canonical": t} for t, n in params],
     }
@@ -59,10 +62,10 @@ FUNCTIONS = [
        ("const struct Box *", "box"), ("int", "maxdd")),
     fn("weird_in", "struct Weird *",
        ("const char *", "str"), ("int", "basetype")),
-    # An otherwise-exposable function living in the internal header: it must
-    # be policy-excluded (api=internal), like the programmer Datum API.
+    # An otherwise-exposable function carrying an internal doxygen group: it
+    # must be policy-excluded (api=internal), like the programmer Datum API.
     dict(fn("internal_op", "struct Temporal *", (T, "temp")),
-         file="meos_internal.h"),
+         file="meos_internal.h", group="meos_internal_temporal"),
     # Scalar out-parameter accessor: bool f(.., int *result) — the value is
     # returned through the trailing out-param, the bool is a presence flag.
     fn("setspan_value_n", "int",
@@ -226,6 +229,17 @@ class ApiClassificationTests(unittest.TestCase):
     def test_public_default(self):
         self.assertEqual(self.fns["temporal_eq"]["api"], "public")
         self.assertTrue(self.fns["temporal_eq"]["network"]["exposable"])
+
+    def test_no_group_is_internal(self):
+        # A function with no doxygen @ingroup is internal (not documented,
+        # not part of the public surface), even in a public header.
+        idl = enrich_idl({
+            "functions": [{k: v for k, v in fn("ungrouped_op", "int",
+                                               (T, "temp")).items()
+                           if k != "group"}],
+            "structs": [dict(s) for s in STRUCTS], "enums": [],
+        })
+        self.assertEqual(idl["functions"][0]["api"], "internal")
 
     def test_scalar_outparam_projected_as_result(self):
         f = self.fns["setspan_value_n"]

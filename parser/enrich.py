@@ -283,11 +283,12 @@ def classify_category(fn: dict) -> str:
     return "transformation"
 
 
-# MEOS splits its API: the public *user* surface (meos.h + the public type
-# headers) and the *internal* programmer surface. The latter is type-erased
-# (``Datum``-generic), undocumented for end users, and must not be projected
-# onto a network service — it is policy-excluded, like lifecycle/index.
-_INTERNAL_FILES = {"meos_internal.h", "meos_internal_geo.h"}
+# MEOS splits its API into a public *user* surface and an *internal* programmer
+# surface. The single authored signal for that split is the doxygen `@ingroup`:
+# a function is public iff it carries a group that is not `meos_internal_*`; a
+# function with no group, or a `meos_internal_*` group, is internal. This ties
+# the binding/network surface to the reference manual — the two derive from one
+# human-authored tag and cannot drift.
 
 
 def _outparam(fn: dict, enums: set, type_encodings: dict):
@@ -517,7 +518,9 @@ def enrich_idl(idl: dict) -> dict:
     type_encodings = build_type_encodings(functions, opaque_names)
 
     for fn in functions:
-        fn["api"] = ("internal" if fn.get("file") in _INTERNAL_FILES
+        group = fn.get("group")
+        fn["api"] = ("internal"
+                     if (not group or group.startswith("meos_internal_"))
                      else "public")
         fn["category"] = classify_category(fn)
         network, wire = assess(fn, type_encodings, enum_names)

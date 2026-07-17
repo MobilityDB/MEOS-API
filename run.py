@@ -117,7 +117,17 @@ def main():
         for fn, pn, reason in out_drift:
             print(f"          {fn}({pn}) — {reason}", file=sys.stderr)
 
-    # 1e. Derive service-projection metadata (category / encodings / network).
+    # 1e. Attach the doxygen @ingroup groups BEFORE enrich: the catalog `api`
+    #     field derives from the group (public unless the group is
+    #     `meos_internal_*` or absent), so the group must already be attached when
+    #     enrich computes api and the api-dependent network projection.
+    _grp_root = Path(os.environ.get("MDB_SRC_ROOT", "./_mobilitydb"))
+    if (_grp_root / "meos" / "src").exists():
+        idl, ngrp = attach_groups(idl, _grp_root / "meos" / "src",
+                                  _grp_root / "pgtypes")
+        print(f"      attached {ngrp} doxygen @ingroup groups", file=sys.stderr)
+
+    # 1f. Derive service-projection metadata (category / encodings / network).
     #     Runs before the merge so manual annotations override the heuristics.
     idl = enrich_idl(idl)
 
@@ -206,15 +216,6 @@ def main():
             for fn, pn, reason in ba_drift:
                 print(f"          {fn}({pn}) — {reason}", file=sys.stderr)
 
-    # 5. Attach the doxygen module group (@ingroup) from the vendored source, so
-    #    bindings organize their generated surface like the reference manual. The
-    #    exported base-type functions (text_out, date_in, timestamp_cmp_internal,
-    #    …) live in the vendored `pgtypes/` tree at the repo root and carry
-    #    `@ingroup meos_base_*` there, so scan it alongside meos/src.
-    PGTYPES_SRC = SRC_ROOT / "pgtypes"
-    if MEOS_SRC.exists():
-        idl, ngrp = attach_groups(idl, MEOS_SRC, PGTYPES_SRC)
-        print(f"[5/5] Attached {ngrp} doxygen @ingroup groups", file=sys.stderr)
 
     # Surface any forward-declared external ABI struct pointer in the API, so a
     # new one is classified explicitly instead of diverging per binding.
