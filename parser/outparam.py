@@ -29,6 +29,35 @@ _FUNC = re.compile(
     re.S)
 # One @param[out] entry: capture the (possibly comma-separated) parameter names.
 _POUT = re.compile(r'@param\[out\]\s+(?P<names>\w+(?:\s*,\s*\w+)*)', re.S)
+# Any @param entry, whatever the direction (``[in]``/``[out]``/``[in,out]``) or none:
+# capture every DOCUMENTED parameter name.
+_PANY = re.compile(r'@param(?:\[[^\]]*\])?\s+(?P<names>\w+(?:\s*,\s*\w+)*)', re.S)
+
+
+def extract_param_names(meos_root: str | Path) -> dict[str, set]:
+    """Return ``{function: {every @param-documented parameter name}}`` from the MEOS C
+    Doxygen (scans both ``src`` and ``include``).
+
+    Whichever direction a parameter carries, an ``@param`` entry names a parameter the
+    function's documentation OWNS.  A wrapper argument bound to such a parameter is a
+    value the wrapper reads from the caller or DERIVES — an array length
+    (``@param[in] count``), an aggregate state (``@param[in,out] state``), an out buffer
+    — never a hard-coded literal.  ``boundargs`` consumes this set to skip those
+    systematically, so a bare-identifier argument only drifts when its parameter is
+    UNDOCUMENTED (the exceptional manual gap worth inspecting)."""
+    root = Path(meos_root)
+    out: dict[str, set] = {}
+    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
+    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
+    for f in files:
+        txt = Path(f).read_text(errors="ignore")
+        for m in _FUNC.finditer(txt):
+            name = m.group("name")
+            for pm in _PANY.finditer(m.group("doc")):
+                for p in (n.strip() for n in pm.group("names").split(",")):
+                    if p:
+                        out.setdefault(name, set()).add(p)
+    return out
 
 
 def extract_outparams(meos_root: str | Path) -> dict[str, list[str]]:
