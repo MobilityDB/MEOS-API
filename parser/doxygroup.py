@@ -24,18 +24,22 @@ _INGROUP = re.compile(r"@ingroup\s+(meos_\w+)")
 # After the doxygen close `*/`, the function definition can be separated from the
 # comment by preprocessor directives (`#if MEOS` … `#endif`) and/or ordinary C
 # comments — the vendored pgtypes files guard the MEOS-build twin of a symbol
-# that way. Skip any run of such lines, then an optional return-type line (no
-# parens/braces/;/=), then `name(`. DOTALL lets a multi-line `/* … */` comment
-# be skipped as one unit.
+# that way. Skip any run of such lines, then capture the signature head up to the
+# first `(`; the function name is the LAST identifier in that head. This handles
+# the return type on its OWN line (`Pcpatch *\npcpatch_copy(`) AND inline on the
+# name's line (`bool pcpatch_eq(`) — the latter otherwise slips through and the
+# `@ingroup` mis-binds to the next own-line definition. DOTALL lets a multi-line
+# `/* … */` comment be skipped as one unit.
 # A skippable line is blank or holds only a preprocessor directive / comment
 # (the directive/comment part is optional so a blank line matches too). `[^\S\n]`
 # is horizontal whitespace only — it matches `\r` so CRLF sources work, without
 # letting a unit swallow the following return-type or name line.
 _SKIP = r"(?:[^\S\n]*(?:\#[^\n]*|//[^\n]*|/\*.*?\*/)?[^\S\n]*\n)*"
-_FNDEF = re.compile(
-    r"\*/[^\S\n]*\n" + _SKIP + r"(?:[^\n(){};=]+\n)?(\w+)\s*\(",
+_FNHEAD = re.compile(
+    r"\*/[^\S\n]*\n" + _SKIP + r"([^(){};=]*?)\(",
     re.DOTALL,
 )
+_WORD = re.compile(r"[A-Za-z_]\w*")
 
 
 def _name_to_group(*srcs):
@@ -51,9 +55,11 @@ def _name_to_group(*srcs):
             text = cf.read_text(errors="ignore")
             for m in _INGROUP.finditer(text):
                 grp = m.group(1)
-                fm = _FNDEF.search(text, m.end())
+                fm = _FNHEAD.search(text, m.end())
                 if fm:
-                    out.setdefault(fm.group(1), grp)
+                    words = _WORD.findall(fm.group(1))
+                    if words:
+                        out.setdefault(words[-1], grp)
     return out
 
 
