@@ -123,13 +123,22 @@ def _literal(arg: str) -> str | None:
     return None
 
 
-def _wrapper_bound(body: str, func: dict, drift: list) -> dict[str, str]:
+def _wrapper_bound(body: str, func: dict, drift: list,
+                   documented: dict[str, set]) -> dict[str, str]:
     """The literals wrapper ``body`` binds in its call to ``func['name']``, keyed by
-    ``func``'s parameter name. Empty if the wrapper does not call ``func`` by name."""
+    ``func``'s parameter name. Empty if the wrapper does not call ``func`` by name.
+
+    ``documented`` maps a MEOS function to the set of its ``@param``-documented parameter
+    names (``parser.outparam.extract_param_names``). A bare-identifier argument bound to a
+    documented parameter is a value the wrapper reads from the caller or derives — an
+    array length (``@param[in] count``), an aggregate state (``@param[in,out] state``) —
+    never a hard-coded literal, so it is skipped systematically. Only a bare identifier
+    for an UNDOCUMENTED parameter is reported as drift (the exceptional manual gap)."""
     args = _call_args(body, func["name"])
     if not args:
         return {}
     assigned = {m.group("var") for m in _ASSIGNED.finditer(body)}
+    doc_params = documented.get(func["name"], frozenset())
     params = func.get("params", [])
     bound: dict[str, str] = {}
     for i, a in enumerate(args):
@@ -143,14 +152,15 @@ def _wrapper_bound(body: str, func: dict, drift: list) -> dict[str, str]:
         lit = _literal(a)
         if lit is not None:
             bound[pname] = lit
-        elif _IDENT.match(a):
-            # a bare identifier that is not caller-sourced and not a literal —
-            # cannot be trusted as a bound value; report for a look.
+        elif _IDENT.match(a) and pname not in doc_params:
+            # a bare identifier that is not caller-sourced, not a literal, and not a
+            # documented @param (caller-read / derived value) — report for a look.
             drift.append((func["name"], pname, "unclassified-arg: " + a))
     return bound
 
 
-def merge_boundargs(idl: dict, mdb_src: str | Path) -> tuple[dict, int, list]:
+def merge_boundargs(idl: dict, mdb_src: str | Path,
+                    documented: dict[str, set] | None = None) -> tuple[dict, int, list]:
     """Fold wrapper-bound literals into each function's ``shape.boundArgs``.
 
     Functions are grouped by the PG wrapper they share (``mdbC``). Every function in a
@@ -164,7 +174,13 @@ def merge_boundargs(idl: dict, mdb_src: str | Path) -> tuple[dict, int, list]:
     Returns ``(idl, count, drift)`` where ``drift`` lists
     ``(function, param, reason)`` call arguments the pass could not classify as a
     caller arg / out-param / literal (a bare identifier that is neither) — a
-    signal to inspect, never trusted as a bound value."""
+    signal to inspect, never trusted as a bound value.
+
+    ``documented`` (from ``parser.outparam.extract_param_names``) maps a MEOS function to
+    its ``@param``-documented parameter names; a bare identifier bound to one of those is a
+    caller-read / derived value and is skipped, so drift is confined to genuinely
+    undocumented parameters."""
+    documented = documented or {}
     wrappers = extract_wrappers(mdb_src)
     n = 0
     drift: list[tuple[str, str, str]] = []
@@ -181,7 +197,7 @@ def merge_boundargs(idl: dict, mdb_src: str | Path) -> tuple[dict, int, list]:
         # the wrapper calls by name (branches — e.g. the RGEO ternary — agree, first wins)
         wbound: dict[str, str] = {}
         for func in group:
-            for k, v in _wrapper_bound(body, func, drift).items():
+            for k, v in _wrapper_bound(body, func, drift, documented).items():
                 wbound.setdefault(k, v)
         if not wbound:
             continue

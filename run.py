@@ -11,7 +11,7 @@ from parser.typerecover import recover_collapsed_types, normalize_canonical
 from parser.header_types import reconcile
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
-from parser.outparam import merge_outparams
+from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import merge_boundargs
 from parser.enrich import enrich_idl
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, lint_ea_sqlfn,
@@ -207,7 +207,8 @@ def main():
         # bound literals from the wrapper body as `shape.boundArgs`, the input-side
         # sibling of `shape.outParams`, so a binding emits the literal it can no
         # longer read off the (narrower) SQL signature. Needs `mdbC` (step 4).
-        idl, nba, ba_drift = merge_boundargs(idl, MDB_SRC)
+        idl, nba, ba_drift = merge_boundargs(idl, MDB_SRC,
+                                             extract_param_names(_doxy_root))
         print(f"      Bound-literal args from PG wrappers `shape.boundArgs`: {nba}",
               file=sys.stderr)
         if ba_drift:

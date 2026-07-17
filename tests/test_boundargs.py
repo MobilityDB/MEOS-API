@@ -67,6 +67,19 @@ Temporal_append_tinstant(PG_FUNCTION_ARGS)
   Temporal *result = temporal_append_tinstant(temp, inst, interp, 0.0, NULL, false);
   PG_RETURN_TEMPORAL_P(result);
 }
+
+/**
+ * @sqlfn fooFromArray()
+ */
+Datum
+Foo_from_array(PG_FUNCTION_ARGS)
+{
+  ArrayType *array = PG_GETARG_ARRAYTYPE_P(0);
+  int count;
+  Temporal **arr = temparr_extract(array, &count);
+  Temporal *result = foo_from_array(arr, count);
+  PG_RETURN_TEMPORAL_P(result);
+}
 '''
 
 
@@ -87,6 +100,11 @@ def _idl():
         # but the wrapper never calls it by name -> inherits {strict:true} by param name
         {"name": "tbool_value_at_timestamptz", "mdbC": "Temporal_value_at_timestamptz",
          "params": [{"name": "temp"}, {"name": "t"}, {"name": "strict"}, {"name": "value"}]},
+        # `count` is a declared local filled by reference (`temparr_extract(array, &count)`),
+        # so the `=`-assignment heuristic does not see it; it is classified by its
+        # @param documentation instead of drifting.
+        {"name": "foo_from_array", "mdbC": "Foo_from_array",
+         "params": [{"name": "arr"}, {"name": "count"}]},
     ]}
 
 
@@ -146,6 +164,21 @@ class BoundArgsTests(unittest.TestCase):
         # sibling strict = 5
         self.assertNotIn("shape", idl["functions"][4])
         self.assertEqual(n, 5)
+
+    def test_documented_param_is_not_drift(self):
+        # `count` (declared, filled via &count) is a documented @param -> caller-derived,
+        # skipped systematically: no boundArg, no drift.
+        idl, n, drift = merge_boundargs(_idl(), self.tmp.name,
+                                        {"foo_from_array": {"arr", "count"}})
+        self.assertFalse([d for d in drift if d[0] == "foo_from_array"])
+        foo = next(f for f in idl["functions"] if f["name"] == "foo_from_array")
+        self.assertNotIn("shape", foo)
+
+    def test_undocumented_param_drifts(self):
+        # with NO @param documentation for the parameter, the same bare identifier is
+        # the exceptional gap worth inspecting -> reported as drift.
+        idl, n, drift = merge_boundargs(_idl(), self.tmp.name)
+        self.assertIn(("foo_from_array", "count", "unclassified-arg: count"), drift)
 
 
 if __name__ == "__main__":
