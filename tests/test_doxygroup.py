@@ -90,6 +90,31 @@ CRLF = (
     "}\r\n"
 )
 
+# Inline return type: the type and the name share one line (terse comparison
+# one-liners such as `bool pcpatch_eq(...)`). The name is the last identifier
+# before `(`; without this the @ingroup mis-binds to the next own-line
+# definition. This fixture also pins that correction: the `_comp` group labels
+# the inline `pcpatch_eq`, and the following own-line `pcpatch_copy` keeps its
+# own `_constructor` group rather than being swallowed by `_comp`.
+INLINE = """\
+/**
+ * @ingroup meos_pointcloud_comp
+ * @brief doc
+ */
+bool pcpatch_eq(const Pcpatch *pa1, const Pcpatch *pa2)
+{ return pcpatch_cmp(pa1, pa2) == 0; }
+
+/**
+ * @ingroup meos_pointcloud_constructor
+ * @brief doc
+ */
+Pcpatch *
+pcpatch_copy(const Pcpatch *pa)
+{
+  return NULL;
+}
+"""
+
 
 class TestFndefRobustness(unittest.TestCase):
     def setUp(self):
@@ -120,6 +145,14 @@ class TestFndefRobustness(unittest.TestCase):
         _write(self.root, "meos/src/json/jsonbset.c", CRLF)
         self.assertEqual(
             self._map().get("jsonbset_value_n"), "meos_json_set_accessor")
+
+    def test_inline_return_type(self):
+        _write(self.root, "meos/src/pointcloud/pcpatch.c", INLINE)
+        m = self._map()
+        # The inline `bool pcpatch_eq(...)` is captured under its own group ...
+        self.assertEqual(m.get("pcpatch_eq"), "meos_pointcloud_comp")
+        # ... and does not steal the following own-line definition's group.
+        self.assertEqual(m.get("pcpatch_copy"), "meos_pointcloud_constructor")
 
 
 class TestMultiRootScan(unittest.TestCase):
