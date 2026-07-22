@@ -109,12 +109,15 @@ _ALL_FAMILIES = (
 )
 
 
-def parse_meos(entry: Path, include_dir: Path) -> dict:
+def parse_meos(entry: Path, include_dir: Path,
+               extra_headers: tuple[Path, ...] = ()) -> dict:
     index = clang.cindex.Index.create()
+    extra_dirs = sorted({h.parent.resolve() for h in extra_headers})
     tu = index.parse(str(entry), args=[
         "-x", "c",
         "-std=c11",
         f"-I{include_dir}",
+        *(f"-I{d}" for d in extra_dirs),
         "-DMEOS",
         # Define the MEOS ``UNUSED`` attribute macro on the command line so it is
         # always in scope: the amalgamated entry point may parse a header that
@@ -131,6 +134,7 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
 
     # Collect all .h files belonging to the project
     own_files = {str(p.resolve()) for p in include_dir.glob("**/*.h")}
+    own_files.update(str(h.resolve()) for h in extra_headers)
 
     # First pass: build a mapping "anonymous struct location -> typedef name"
     typedef_map: dict[str, str] = {}
@@ -199,21 +203,25 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
     return resolve_idl_types(idl, mappings_path)
 
 
-def build_entry_point(headers_dir: Path) -> str:
+def build_entry_point(headers_dir: Path,
+                      extra_headers: tuple[Path, ...] = ()) -> str:
     lines = []
     for h in sorted(headers_dir.glob("**/*.h")):
+        lines.append(f'#include "{h.resolve()}"')
+    for h in extra_headers:
         lines.append(f'#include "{h.resolve()}"')
     return "\n".join(lines)
 
 
-def parse_all_headers(headers_dir: Path) -> dict:
-    entry_src = build_entry_point(headers_dir)
+def parse_all_headers(headers_dir: Path,
+                      extra_headers: tuple[Path, ...] = ()) -> dict:
+    entry_src = build_entry_point(headers_dir, extra_headers)
 
     with tempfile.NamedTemporaryFile(suffix=".h", mode="w", delete=False) as f:
         f.write(entry_src)
         tmp_path = f.name
 
     try:
-        return parse_meos(Path(tmp_path), headers_dir)
+        return parse_meos(Path(tmp_path), headers_dir, extra_headers)
     finally:
         os.unlink(tmp_path)
