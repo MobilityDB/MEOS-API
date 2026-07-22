@@ -31,20 +31,52 @@ MobilityDB pin
        -> GoMEOS / MEOS.NET / meos-rs / MobilityDuck / MobilityNebula
 ```
 
-## Turnkey: regenerate the whole ecosystem from a pin
+## Producing the catalog by hand
 
-`tools/ecosystem-generate.sh <PIN>` runs the chain in dependency order: build the catalog
-(`run.py`) + `libmeos.so` from the pin, then invoke each binding's own
-`tools/regen-from-pin.sh` in the order above (the JVM consumers after the JMEOS jar; PyMEOS
-after PyMEOS-CFFI). Each binding owns its regeneration; this script only sequences them. See
-the script header for the repo + frontier-branch table it drives (each binding's frontier is
-recorded in its own `tools/pin/compose-order.txt`).
+The catalog is one `run.py` invocation over a set of MEOS headers. Two header sources give
+different fidelity, and the choice matters:
 
-## Pinning
+- the **installed** headers (`cmake --install` output) are self-contained — `meos.h` is the
+  generated `meos_export.h`, with `postgres_ext_defs.in.h` spliced in place of the source
+  tree's `#include <postgres.h>` — so libclang resolves every struct field to its real C type
+  and byte offset. FFI bindings need this.
+- the **source** tree headers (`<checkout>/meos/include`) parse without a build, but wrap the
+  PostgreSQL types in stubs, so struct layouts are approximate.
 
-The catalog is reproducible from a MobilityDB `ecosystem-pin-*`:
-`MDB_SRC_ROOT=<pin-worktree> python3 run.py <pin-worktree>/meos/include`. MEOS-API's own
-`tools/pin/compose-order.txt` governs *this repo's* enrichment/projection PR accumulate.
+Either way `MDB_SRC_ROOT` must point at the MobilityDB *source* checkout, because the Doxygen
+`@ingroup` groups and the `@sqlfn` SQL-name map are read from `meos/src`, `mobilitydb/src` and
+`mobilitydb/sql`.
+
+```bash
+MDB=~/src/MobilityDB          # a checkout at the commit you are deriving from
+MEOSAPI=~/src/MEOS-API
+pip install -r "$MEOSAPI/requirements.txt"
+
+# Full fidelity: build and install libmeos first, then parse the installed headers.
+cmake -S "$MDB" -B "$MDB/build" -DCMAKE_BUILD_TYPE=Release -DMEOS=ON -DALL=ON
+cmake --build "$MDB/build" -j"$(nproc)"
+cmake --install "$MDB/build" --prefix "$MDB/.prefix"
+cd "$MEOSAPI" && MDB_SRC_ROOT="$MDB" python3 run.py "$MDB/.prefix/include"
+
+# Headers only, no build (approximate struct layouts):
+cd "$MEOSAPI" && MDB_SRC_ROOT="$MDB" python3 run.py "$MDB/meos/include"
+```
+
+Both write `output/meos-idl.json`, which is what every binding consumes. `-DALL=ON` enables
+each optional family, so the catalog covers the whole surface; a narrower family set yields a
+correspondingly narrower catalog.
+
+Each binding then regenerates from that file through its own entry point — for the JVM
+substrate, `JMEOS/tools/regen-from-catalog.sh <catalog>`, which also builds the jar the JVM
+consumers bind. See each repo's `GENERATION.md`.
+
+## Sequencing several bindings
+
+`tools/ecosystem-generate.sh <PIN>` builds the catalog and `libmeos.so` from one MobilityDB
+ref and then walks the bindings in dependency order. It invokes each binding's own
+`tools/regen-from-pin.sh`, and reports and skips any binding that does not have one — JMEOS
+regenerates through `tools/regen-from-catalog.sh` and is skipped by this script, so run it
+directly as above.
 
 ## Consuming MEOS from a binding (provision-meos)
 
