@@ -148,6 +148,24 @@ class TypeRecoverTests(unittest.TestCase):
         # recovery only fires where the header text spells ``uint32``.
         self.assertEqual(self._ret("set_num_values"), "int")
 
+    def test_uint32_canonical_normalized(self):
+        # A uint32_t slot's fully-resolved ``canonical`` is the platform builtin
+        # "unsigned int" (libclang) while ``cType`` keeps the typedef. It must
+        # normalize to "uint32_t" so the width is spelled identically catalog-wide
+        # and bindings (which key on ``canonical``) keep the *_hash surface instead
+        # of dropping it -- the uint32 sibling of the uint64 canonical guard below.
+        for name in ("temporal_hash", "set_hash", "span_hash", "tbox_hash"):
+            rt = self.by_name[name]["returnType"]
+            self.assertEqual(rt["c"], "uint32_t", f"{name} c")
+            self.assertEqual(rt["canonical"], "uint32_t", f"{name} canonical")
+        # No uint32 typedef slot is left as the platform "unsigned int" (genuine
+        # ``unsigned int`` params such as PG ``Oid`` keep cType "unsigned int").
+        bad = [f["name"] for f in self.by_name.values()
+               for t in [f["returnType"]] + f.get("params", [])
+               if t.get("canonical") == "unsigned int"
+               and (t.get("c") or t.get("cType")) in ("uint32_t", "uint32")]
+        self.assertEqual(bad, [], f"uint32 typedefs left as 'unsigned int': {bad}")
+
     def test_cell_id_canonical_normalized_uniform(self):
         # H3Index (libh3's typedef, whose fully-resolved canonical is the platform
         # "unsigned long") and Quadbin (MobilityDB's typedef, recovered to "uint64_t")
