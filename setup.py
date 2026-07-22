@@ -14,7 +14,8 @@ from pathlib import Path
 REPO_URL         = "https://github.com/MobilityDB/MobilityDB"
 CLONE_DIR        = Path("_mobilitydb")
 MEOS_INCLUDE_SRC = CLONE_DIR / "meos" / "include"
-POSTGRES_SRC     = CLONE_DIR / "postgres"
+# PostgreSQL 18 base headers live in MobilityDB's vendored `pgtypes/` library.
+POSTGRES_SRC     = CLONE_DIR / "pgtypes"
 MEOS_INCLUDE_DST = Path("meos") / "include"
 POSTGRES_LINK    = Path("meos") / "postgres"
 
@@ -47,7 +48,7 @@ def step_clone(branch: str) -> None:
     # MEOS_TEMPTYPE_CATALOG. Applied idempotently so existing clones pick
     # it up on update too.
     run(["git", "-C", str(CLONE_DIR), "sparse-checkout", "set",
-         "meos/include", "meos/src", "postgres"])
+         "meos/include", "meos/src", "pgtypes"])
     print(f"      Done.")
 
 
