@@ -122,6 +122,14 @@ def parse_meos(entry: Path, include_dir: Path) -> dict:
         # it, and an undefined ``UNUSED`` makes clang error on the declarator and
         # silently drop the remaining parameters of that prototype.
         "-DUNUSED=__attribute__((unused))",
+        # The released libmeos is a Release build, where ``NDEBUG`` compiles out
+        # the assert-only catalog predicates (``meos_basetype``,
+        # ``temptype_subtype``, …): their declarations sit behind ``#ifndef
+        # NDEBUG`` and the shipped library exports no such symbol. Parsing with
+        # ``NDEBUG`` defined keeps the catalog a description of the library
+        # bindings actually link against, so no binding declares a symbol that
+        # resolves only in a debug build.
+        "-DNDEBUG",
         *(f"-D{family}=1" for family in _ALL_FAMILIES),
     ] + _clang_extra_args(),
         # Record ``#define`` macro definitions as cursors so the public
