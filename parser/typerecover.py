@@ -34,6 +34,12 @@ _TYPE_MAP = {
     "int64": "int64_t",
     "uint32": "uint32_t",
     "uint64": "uint64_t",
+    # The fixed-width typedef spelled as itself: libclang resolves a uint32_t slot's
+    # `canonical` to the platform builtin "unsigned int" (while `cType` keeps the
+    # typedef). Mapping the typedef to itself lets normalize_canonical re-spell
+    # `canonical` back to `uint32_t`, so the width is spelled identically catalog-wide
+    # (every *_hash returns uint32_t, not one "unsigned int") — bindings key on canonical.
+    "uint32_t": "uint32_t",
     "Timestamp": "Timestamp",
     "TimestampTz": "TimestampTz",
     "H3Index": "uint64_t",
