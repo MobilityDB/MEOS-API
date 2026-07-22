@@ -60,12 +60,39 @@ def _source_commit():
     return None
 
 
+def _public_pgtypes_headers() -> tuple[Path, ...]:
+    """MobilityDB's vendored PostgreSQL base-type headers, when they sit outside HEADERS_DIR.
+
+    MobilityDB keeps the PostgreSQL 18 base types in a `pgtypes/` library at the repo root and
+    installs `pgtypes.h` and the `pg_*.h` set into the include prefix, so they are as public as
+    `meos.h`. Reading an INSTALLED prefix therefore already covers them and this adds nothing;
+    reading the source tree points at `meos/include`, which does not contain them, and without
+    this the catalog silently loses the whole base-type surface (`interval_make`, the base I/O
+    functions, …) — the same ref then yields two different catalogs depending on the header root.
+    """
+    root = Path(os.environ.get("MDB_SRC_ROOT", "./_mobilitydb")) / "pgtypes"
+    if not root.is_dir():
+        return ()
+    seen = {p.name for p in HEADERS_DIR.glob("**/*.h")}
+    candidates = sorted(root.glob("pg_*.h")) + [root / "pgtypes.h"]
+    headers = [h for h in candidates
+               # pg_config*.h carry PostgreSQL's build configuration, not API; the
+               # install set leaves them behind and so does the catalog.
+               if h.is_file() and not h.name.startswith("pg_config")
+               and h.name not in seen]
+    return tuple(headers)
+
+
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. Parse C headers
     print(f"[1/4] Parsing {HEADERS_DIR}...", file=sys.stderr)
-    idl = parse_all_headers(HEADERS_DIR)
+    pgtypes = _public_pgtypes_headers()
+    if pgtypes:
+        print(f"      + {len(pgtypes)} vendored pgtypes headers from "
+              f"{pgtypes[0].parent}", file=sys.stderr)
+    idl = parse_all_headers(HEADERS_DIR, pgtypes)
 
     # 1b. Recover PG-vendored C types the preprocessor collapsed to int
     #     (bool / int64 / Timestamp(Tz) / H3Index) from the header text.
