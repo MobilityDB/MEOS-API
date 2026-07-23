@@ -13,6 +13,7 @@ collection type of a value-domain result — ``SpanSet<float>`` is ``floatspanse
 — with no hand-coding: every binding is a projection of the catalog, so the
 mapping belongs in the catalog rather than in each generator.
 """
+import os
 import re
 from pathlib import Path
 
@@ -32,16 +33,34 @@ def _pairs(text: str, array: str) -> list:
     return _PAIR_RE.findall(m.group(1)) if m else []
 
 
+def _locate_catalog(src_root: Path | None) -> Path | None:
+    """The ``meos_catalog.c`` path from the resolved source root, or the ``MDB_SRC_ROOT`` checkout.
+
+    The object-model resolver returns the ``meos/src`` directory when it can, but on the
+    installed-headers build path it cannot (the headers carry no source tree), while the provisioning
+    still checks out the full repository under ``MDB_SRC_ROOT``. Consulting that env var too keeps the
+    registry present in both build paths.
+    """
+    candidates = []
+    if src_root is not None:
+        candidates.append(Path(src_root) / "temporal" / "meos_catalog.c")
+    mdb = os.environ.get("MDB_SRC_ROOT")
+    if mdb:
+        candidates.append(Path(mdb) / "meos" / "src" / "temporal" / "meos_catalog.c")
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
     """Attach ``idl["typeRelations"]`` from the ``meos_catalog.c`` arrays.
 
     Degrades to no attachment — never a fabricated map — when the source tree is
     not available, mirroring the honest-signal contract of the object-model scan.
     """
-    if src_root is None:
-        return idl
-    catalog = Path(src_root) / "temporal" / "meos_catalog.c"
-    if not catalog.exists():
+    catalog = _locate_catalog(src_root)
+    if catalog is None:
         return idl
 
     text = re.sub(r"//.*", "", catalog.read_text(errors="ignore"))
