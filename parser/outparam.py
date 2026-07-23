@@ -21,8 +21,19 @@ import re
 from pathlib import Path
 
 # Doxygen block immediately followed by a function definition (mirrors nullable.py).
+# The doxygen block and the function it labels can be separated by preprocessor
+# guards (`#if MEOS` … `#endif`) and blank lines — the shape the vendored pgtypes
+# base sources use to guard the MEOS-build twin of a symbol (e.g.
+# `json_array_elements` in pgtypes/utils/jsonfuncs.c). Skip any run of such lines
+# before the optional return-type line. `[^\S\n]` is horizontal whitespace only
+# (matches `\r`, so CRLF sources work). This is a line-based subset of
+# doxygroup.py._SKIP: the multi-line `/* … */` alternative is deliberately omitted
+# here because, combined with this module's whole-doc-block `_FUNC` match, a DOTALL
+# `.*?` inside the skip run backtracks catastrophically (doxygroup runs a bounded
+# two-step search, so it can afford it); no vendored out-param carrier needs it.
+_SKIP = r"(?:[^\S\n]*(?:\#[^\n]*|//[^\n]*)?[^\S\n]*\n)*"
 _FUNC = re.compile(
-    r'/\*\*(?P<doc>.*?)\*/\s*\n'
+    r'/\*\*(?P<doc>.*?)\*/[^\S\n]*\n' + _SKIP +
     r'(?:[A-Za-z_][\w\s\*]*?\n)?'          # optional return-type line
     r'(?P<name>[a-z][a-z0-9_]*)\s*\('
     r'(?P<params>[^;{]*?)\)\s*\{',
@@ -49,6 +60,10 @@ def extract_param_names(meos_root: str | Path) -> dict[str, set]:
     out: dict[str, set] = {}
     files = glob.glob(str(root / "src/**/*.c"), recursive=True)
     files += glob.glob(str(root / "include/**/*.h"), recursive=True)
+    # The vendored PostgreSQL base-type layer (json, date/interval, …) lives in the
+    # sibling `pgtypes/` tree, outside meos/, and carries its `@param[out]` tags on
+    # the `.c` definitions there — scan them too (mirrors doxygroup/run.py pgtypes).
+    files += glob.glob(str(root.parent / "pgtypes/**/*.c"), recursive=True)
     for f in files:
         txt = Path(f).read_text(errors="ignore")
         for m in _FUNC.finditer(txt):
@@ -67,6 +82,10 @@ def extract_outparams(meos_root: str | Path) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     files = glob.glob(str(root / "src/**/*.c"), recursive=True)
     files += glob.glob(str(root / "include/**/*.h"), recursive=True)
+    # The vendored PostgreSQL base-type layer (json, date/interval, …) lives in the
+    # sibling `pgtypes/` tree, outside meos/, and carries its `@param[out]` tags on
+    # the `.c` definitions there — scan them too (mirrors doxygroup/run.py pgtypes).
+    files += glob.glob(str(root.parent / "pgtypes/**/*.c"), recursive=True)
     for f in files:
         txt = Path(f).read_text(errors="ignore")
         for m in _FUNC.finditer(txt):
