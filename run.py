@@ -19,6 +19,7 @@ from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, lint_ea_sqlfn,
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
 from parser.object_model import attach_object_model, find_mobilitydb_src
+from parser.typerelations import attach_type_relations
 
 
 HEADERS_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./meos/include")
@@ -263,6 +264,11 @@ def main():
     print(f"[7/7] Deriving object model from {OBJMODEL_PATH} "
           f"(error scan: {MOBILITYDB_SRC})...", file=sys.stderr)
     idl = attach_object_model(idl, OBJMODEL_PATH, MOBILITYDB_SRC)
+
+    # Attach the base-to-collection type-relation registry (a base T to its set, span, span set
+    # and temporal types), derived from the meos_catalog.c positional arrays. A binding projects
+    # the concrete collection type of a value-domain result from this, never hard-coding it.
+    idl = attach_type_relations(idl, MOBILITYDB_SRC)
 
     # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
     # a consumer proves it is current by comparing sourceCommit to live upstream master, never by
