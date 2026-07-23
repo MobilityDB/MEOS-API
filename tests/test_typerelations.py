@@ -6,6 +6,7 @@ A hermetic fixture exercises the parse and the inversion; a source check
 asserts the canonical numeric mappings against the live MobilityDB tree when it
 is available (skipped, never fabricated, when it is not).
 """
+import os
 import sys
 import tempfile
 import unittest
@@ -71,8 +72,31 @@ class TypeRelationsParseTest(unittest.TestCase):
         self.assertEqual(by_base["text"], {"temporal": "ttext", "set": "textset"})
 
     def test_absent_source_degrades_without_fabricating(self):
-        self.assertNotIn("typeRelations", attach_type_relations({}, None))
-        self.assertNotIn("typeRelations", attach_type_relations({}, Path("/no/such/tree")))
+        saved = os.environ.pop("MDB_SRC_ROOT", None)
+        try:
+            self.assertNotIn("typeRelations", attach_type_relations({}, None))
+            self.assertNotIn("typeRelations", attach_type_relations({}, Path("/no/such/tree")))
+        finally:
+            if saved is not None:
+                os.environ["MDB_SRC_ROOT"] = saved
+
+    def test_mdb_src_root_resolves_when_object_model_root_is_absent(self):
+        # The installed-headers build path resolves no meos/src root, but MDB_SRC_ROOT points at the
+        # full checkout; the registry must still attach from there.
+        with tempfile.TemporaryDirectory() as d:
+            catalog = Path(d) / "meos" / "src" / "temporal"
+            catalog.mkdir(parents=True)
+            (catalog / "meos_catalog.c").write_text(_FIXTURE)
+            saved = os.environ.get("MDB_SRC_ROOT")
+            os.environ["MDB_SRC_ROOT"] = d
+            try:
+                by_base = attach_type_relations({}, None)["typeRelations"]["byBase"]
+            finally:
+                if saved is None:
+                    os.environ.pop("MDB_SRC_ROOT", None)
+                else:
+                    os.environ["MDB_SRC_ROOT"] = saved
+        self.assertEqual(by_base["float8"]["spanset"], "floatspanset")
 
 
 class TypeRelationsSourceTest(unittest.TestCase):
