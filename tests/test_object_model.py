@@ -156,6 +156,19 @@ class AttachTests(unittest.TestCase):
         self.assertIsNone(ftc["add_int_int"]["class"])
         self.assertIn("no-prefix-match", ftc["add_int_int"]["reason"])
 
+    def test_internal_api_methods_are_excluded(self):
+        # A function the catalog marks internal is classified to its class (so
+        # the reverse index stays complete) but flagged ooExclude, so a binding
+        # generating from classes[*].methods keeps only the public surface.
+        idl = attach_object_model({"functions": [
+            {"name": "temporal_num_instants", "api": "public"},
+            {"name": "temporal_inst_n", "api": "internal"},
+        ]}, MODEL, None)
+        meths = {m["backing"]: m
+                 for m in idl["objectModel"]["classes"]["Temporal"]["methods"]}
+        self.assertNotIn("ooExclude", meths["temporal_num_instants"])
+        self.assertTrue(meths["temporal_inst_n"].get("ooExclude"))
+
     def test_tree_derived(self):
         om = self._attach(["temporal_merge"])["objectModel"]
         lat = om["lattice"]
