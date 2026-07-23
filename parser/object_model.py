@@ -212,9 +212,19 @@ def _ooname(fn_name: str, cls: str) -> str:
 
 def _oo_excluded(fn: dict, role: str) -> bool:
     """True for functions classified to a class that are internal machinery,
-    not user OO methods: aggregate transition helpers, and comparators with no
-    SQL function (qsort / bound / min / max sort helpers)."""
+    not user OO methods: functions the catalog marks internal (the ``_p`` peeks,
+    the bbox / skiplist plumbing, ``*_in`` / ``*_out``), aggregate transition
+    helpers, and comparators with no SQL function (qsort / bound / min / max sort
+    helpers).
+
+    The internal-API check is the load-bearing one for a binding that generates
+    its object layer from ``classes[*].methods``: without it that list mixes the
+    public surface with functions a binding cannot call, so every binding would
+    re-derive the split. The catalog carries ``api`` per function, so the method
+    carries the exclusion and a binding keeps only ``not m['ooExclude']``."""
     name = fn["name"]
+    if fn.get("api") != "public":
+        return True
     if any(name.endswith(s) for s in _OONAME_EXCLUDE_SUFFIXES):
         return True
     if role == "predicate" and not fn.get("sqlfn"):
