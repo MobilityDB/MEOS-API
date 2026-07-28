@@ -71,30 +71,33 @@ Each binding then regenerates from that file through its own entry point — for
 substrate, `JMEOS/tools/regen-from-catalog.sh <catalog>`, which also builds the jar the JVM
 consumers bind. See each repo's `GENERATION.md`.
 
-## Refreshing a JVM consumer end to end
+## Refreshing a binding end to end
 
-`tools/refresh-jvm-chain.sh` runs the whole JVM chain from one command, so a MobilityFlink,
-MobilitySpark or MobilityKafka developer refreshes their facades against the latest MEOS API
-without walking the four repos by hand:
+`tools/refresh-binding.sh` runs the whole chain for **any** binding from one command, so a
+GoMEOS, meos-rs, PyMEOS, MEOS.NET or JVM developer refreshes their generated surface against the
+latest MEOS API without walking the repos by hand:
 
 ```
-MobilityDB  ->  provision-meos.sh (catalog + libmeos)  ->  JMEOS jar  ->  consumer facades
+MobilityDB  ->  provision-meos.sh (catalog [+ libmeos])  ->  the binding's generate + build
 ```
 
-It composes the per-leg scripts above — `provision-meos.sh`, then `JMEOS/regen-from-catalog.sh`,
-then the consumer's own Maven build — and adds no derivation of its own, only the sequencing and
-the sibling checkouts. Each consumer carries the tiny wrapper `tools/refresh-from-master.sh` that
-locates this script and calls it, so the developer only ever runs, from their checkout:
+It composes the per-leg scripts above — `provision-meos.sh`, then the binding's own generator and
+build — and adds no derivation of its own, only the sequencing and the sibling checkouts. Each
+binding carries the tiny wrapper `tools/refresh-from-master.sh` that locates this script and calls
+it, so the developer only ever runs, from their checkout:
 
 ```bash
 tools/refresh-from-master.sh
 ```
 
-Siblings default to their latest upstream default branch; `--mdb <path>` / `--jmeos <path>` (or
-`$MDB` / `$JMEOS`) point at an existing checkout on any branch instead, to refresh against
-a MEOS branch still under development. The consumer's last leg is a few lines in its
-`tools/refresh.conf` — `ENGINE`, the Maven `BUILD_DIR`, the `JMEOS_COORDS` the build resolves the
-jar as, and the `BUILD_CMD`; `refresh-jvm-chain.sh --help` documents the contract.
+MobilityDB defaults to its latest master; `--mdb <path>` (or `$MDB`) points at an existing checkout
+on any branch instead, to refresh against a MEOS branch still under development, and a binding that
+pins a MEOS ref sets `MDB_REF` in its config. The binding's last leg is a few lines in its
+`tools/refresh.conf` — `ENGINE`, `BUILD_DIR`, `BUILD_LIBMEOS` (native/FFI bindings build libmeos;
+pure-catalog ones do not), `CATALOG_DEST`, the JVM-only `JMEOS_COORDS`, and the `BUILD_CMD`;
+`refresh-binding.sh --help` documents the contract. The JVM consumers are the special case whose
+config sets `JMEOS_COORDS`, which inserts the JMEOS-jar leg; `refresh-jvm-chain.sh` is a thin
+compatibility alias for `refresh-binding.sh`.
 
 ## Sequencing several bindings
 
