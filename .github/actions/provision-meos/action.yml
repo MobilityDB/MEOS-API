@@ -4,6 +4,11 @@ description: >-
   generate output/meos-idl.json via run.py and, optionally, build and install
   libmeos with all families. Any binding consumes it from one pinned commit.
 
+  The derivation itself (configure, build, install, parse) is tools/provision-meos.sh,
+  the one recipe this action and a local refresh both call, so CI and by-hand cannot
+  drift. This action adds only the runner bootstrapping around it: checkout, Python, and
+  the apt packages.
+
 inputs:
   mobilitydb-ref:
     description: MobilityDB git ref (SHA or branch) to derive the artifacts from.
@@ -20,10 +25,10 @@ inputs:
 outputs:
   catalog-path:
     description: Absolute path to the generated meos-idl.json.
-    value: ${{ steps.catalog.outputs.catalog-path || steps.catalog_installed.outputs.catalog-path }}
+    value: ${{ steps.catalog.outputs.catalog-path || steps.provision.outputs.catalog-path }}
   libmeos-prefix:
     description: Install prefix of libmeos when build-libmeos=true (else empty).
-    value: ${{ steps.libmeos.outputs.libmeos-prefix }}
+    value: ${{ steps.provision.outputs.libmeos-prefix }}
 
 runs:
   using: composite
@@ -56,10 +61,11 @@ runs:
           libjson-c-dev libgsl-dev libproj-dev libgeos-dev \
           postgresql-server-dev-16
 
-    # run.py + parser/ + meta/ + requirements.txt all live at the MEOS-API
-    # repo root. When this action is consumed cross-repo GitHub checks out the
-    # WHOLE MEOS-API repository under $GITHUB_ACTION_PATH, so the repo root is
-    # $GITHUB_ACTION_PATH/../../.. in both the local dogfood and cross-repo use.
+    # run.py + parser/ + meta/ + requirements.txt + tools/provision-meos.sh all
+    # live at the MEOS-API repo root. When this action is consumed cross-repo
+    # GitHub checks out the WHOLE MEOS-API repository under $GITHUB_ACTION_PATH,
+    # so the repo root is $GITHUB_ACTION_PATH/../../.. in both the local dogfood
+    # and cross-repo use.
     - name: Install Python dependencies
       shell: bash
       run: |
@@ -67,28 +73,18 @@ runs:
         python -m pip install --upgrade pip
         pip install -r "$REPO_ROOT/requirements.txt"
 
-    # Catalog-only path (no libmeos build): parse the pinned MobilityDB MEOS
-    # source headers with libclang and emit output/meos-idl.json, pointing the
-    # @sqlfn/@ingroup extraction (MDB_SRC_ROOT) at the SAME pinned checkout so
-    # the catalog is reproducibly equivalent to that commit. The source-tree
-    # headers wrap PostgreSQL types in stubs conditionally, so struct field
-    # layouts are approximate here; the build path below derives them exactly.
+    # Catalog-only path (no libmeos build): provision-meos.sh parses the source
+    # MobilityDB MEOS headers with libclang and emits output/meos-idl.json,
+    # pointing the @sqlfn/@ingroup extraction (MDB_SRC_ROOT) at the SAME checkout.
+    # The source-tree headers wrap PostgreSQL types in stubs conditionally, so
+    # struct field layouts are approximate here; the build path below is exact.
     - name: Generate the catalog
       id: catalog
       if: inputs.build-libmeos != 'true'
       shell: bash
       run: |
         REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
-        cd "$REPO_ROOT"
-        MDB_SRC_ROOT="$GITHUB_WORKSPACE/_mobilitydb_src" \
-          python3 run.py "$GITHUB_WORKSPACE/_mobilitydb_src/meos/include"
-        CATALOG="$REPO_ROOT/output/meos-idl.json"
-        if [ ! -s "$CATALOG" ]; then
-          echo "::error::catalog not generated or empty at $CATALOG"
-          exit 1
-        fi
-        echo "catalog-path=$CATALOG" >> "$GITHUB_OUTPUT"
-        echo "Catalog written: $CATALOG ($(wc -c < "$CATALOG") bytes)"
+        "$REPO_ROOT/tools/provision-meos.sh" --mdb-src "$GITHUB_WORKSPACE/_mobilitydb_src"
 
     # Optional: build and install libmeos with all families. Mirrors the green
     # all-families recipe used by the JVM bindings: purge the runner's
@@ -122,52 +118,23 @@ runs:
           autoconf automake libtool pkg-config \
           postgresql-17 postgresql-server-dev-17
 
-    - name: Build and install libmeos
-      id: libmeos
-      if: inputs.build-libmeos == 'true'
-      shell: bash
-      run: |
-        cd "$GITHUB_WORKSPACE/_mobilitydb_src"
-        mkdir -p build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DMEOS=ON ${{ inputs.families }} \
-          -DH3_LIBRARY=/usr/lib/x86_64-linux-gnu/libh3.so \
-          -DH3_INCLUDE_DIR=/usr/include/h3 \
-          -DPOSTGRESQL_PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config \
-          .. 2>&1 | tee "$RUNNER_TEMP/cmake-configure.log"
-        make -j "$(nproc)"
-        # Stage the MEOS headers alone into a clean prefix for the catalog parse
-        # BEFORE the shared install: /usr/local/include on the runner carries
-        # unrelated system headers (OpenSSL, PostgreSQL, …) that run.py's header
-        # glob would otherwise pull into the catalog; this prefix holds only MEOS
-        # headers. Runs before `sudo make install` so the build directory (where
-        # cmake writes install_manifest.txt) is still writable by the runner.
-        cmake --install . --prefix "$RUNNER_TEMP/meos-headers"
-        echo "installed MEOS headers under $RUNNER_TEMP/meos-headers/include"
-        sudo make install
-        echo "libmeos-prefix=/usr/local" >> "$GITHUB_OUTPUT"
-        echo "libmeos installed under /usr/local"
-
-    # Build path: derive the catalog from the INSTALLED headers. `make install`
-    # writes the generated, self-contained headers (meos_export.h spliced with
-    # postgres_ext_defs.in.h in place of the source's `#include <postgres.h>`),
-    # so libclang resolves every struct field to its real C type and byte
-    # offset — the FFI-accurate layout the native bindings' `#[repr(C)]` structs
-    # and cgo/cffi field access require. MDB_SRC_ROOT stays the source checkout
-    # for the @sqlfn/@ingroup maps.
-    - name: Generate the catalog from installed headers
-      id: catalog_installed
+    # Build path: provision-meos.sh builds libmeos, stages a clean MEOS-only
+    # header prefix ($RUNNER_TEMP/meos-headers) that the parse reads, and installs
+    # the runtime library under /usr/local for the consumer builds. It derives the
+    # catalog from the INSTALLED headers: `make install` writes the generated,
+    # self-contained headers (meos_export.h spliced with postgres_ext_defs.in.h in
+    # place of the source's `#include <postgres.h>`), so libclang resolves every
+    # struct field to its real C type and byte offset — the FFI-accurate layout the
+    # native bindings need. MDB_SRC_ROOT stays the source checkout for @sqlfn/@ingroup.
+    - name: Build libmeos and generate the catalog from installed headers
+      id: provision
       if: inputs.build-libmeos == 'true'
       shell: bash
       run: |
         REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
-        cd "$REPO_ROOT"
-        MDB_SRC_ROOT="$GITHUB_WORKSPACE/_mobilitydb_src" \
-          python3 run.py "$RUNNER_TEMP/meos-headers/include"
-        CATALOG="$REPO_ROOT/output/meos-idl.json"
-        if [ ! -s "$CATALOG" ]; then
-          echo "::error::catalog not generated or empty at $CATALOG"
-          exit 1
-        fi
-        echo "catalog-path=$CATALOG" >> "$GITHUB_OUTPUT"
-        echo "Catalog written from installed headers: $CATALOG ($(wc -c < "$CATALOG") bytes)"
+        "$REPO_ROOT/tools/provision-meos.sh" \
+          --mdb-src "$GITHUB_WORKSPACE/_mobilitydb_src" \
+          --build-libmeos \
+          --families "${{ inputs.families }}" \
+          --parse-prefix "$RUNNER_TEMP/meos-headers" \
+          --runtime-prefix /usr/local
