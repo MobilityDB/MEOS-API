@@ -11,13 +11,15 @@ truth cannot silently drift away from MEOS.
 import json
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.object_model import attach_object_model, find_mobilitydb_src
+from parser.object_model import (
+    _scan_errors, attach_object_model, find_mobilitydb_src)
 
 MODEL = ROOT / "meta" / "object-model.json"
 _INTERNAL = {"T_TDOUBLE2", "T_TDOUBLE3", "T_TDOUBLE4"}  # not public classes
@@ -197,6 +199,24 @@ class AttachTests(unittest.TestCase):
         self.assertEqual(om["errors"]["status"], "source-unavailable")
         self.assertEqual(om["errors"]["raises"], {})       # not fabricated
         self.assertEqual(len(om["errors"]["codes"]), 21)
+
+    def test_scanned_errors_are_sorted_for_reproducibility(self):
+        # The raises map is keyed by the public function set; iterating a set is
+        # hash-seed dependent, so the keys are sorted to keep the emitted catalog
+        # byte-identical across runs.
+        src = (
+            'Datum zzz_fn(int x) {\n'
+            '  meos_error(ERROR, MEOS_ERR_INVALID_ARG_VALUE, "bad");\n}\n'
+            'Datum aaa_fn(int y) {\n'
+            '  meos_error(ERROR, MEOS_ERR_INVALID_ARG_TYPE, "bad");\n}\n'
+            'Datum mmm_fn(int z) {\n'
+            '  meos_error(ERROR, MEOS_ERR_INVALID_ARG_VALUE, "bad");\n}\n'
+        )
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "x.c").write_text(src)
+            result = _scan_errors(Path(d), {"zzz_fn", "aaa_fn", "mmm_fn"})
+        self.assertEqual(list(result), ["aaa_fn", "mmm_fn", "zzz_fn"])
+        self.assertEqual(list(result), sorted(result))
 
 
 # ---------------------------------------------------------------------------

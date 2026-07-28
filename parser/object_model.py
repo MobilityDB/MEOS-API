@@ -270,7 +270,7 @@ def _scan_errors(src_root: Path, public: set) -> dict:
     ensure_codes = {f: v["direct"] for f, v in raw.items()
                     if f.startswith("ensure_")}
     result = {}
-    for fn in public:
+    for fn in sorted(public):
         rec = raw.get(fn)
         if not rec:
             continue
