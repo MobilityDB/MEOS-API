@@ -43,27 +43,28 @@ different fidelity, and the choice matters:
 - the **source** tree headers (`<checkout>/meos/include`) parse without a build, but wrap the
   PostgreSQL types in stubs, so struct layouts are approximate.
 
-Either way `MDB_SRC_ROOT` must point at the MobilityDB *source* checkout, because the Doxygen
-`@ingroup` groups and the `@sqlfn` SQL-name map are read from `meos/src`, `mobilitydb/src` and
-`mobilitydb/sql`.
+Either way the Doxygen `@ingroup` groups and the `@sqlfn` SQL-name map are read from the
+MobilityDB *source* checkout (`meos/src`, `mobilitydb/src`, `mobilitydb/sql`).
+
+`tools/provision-meos.sh` is that recipe — configure, build, install, parse — in one script.
+The `provision-meos` GitHub action calls it too, so the by-hand catalog and the CI catalog are
+produced the same way and cannot drift. On Ubuntu, with the build/parse dependencies installed
+(`pip install -r requirements.txt`, plus the packages the action's apt steps list):
 
 ```bash
 MDB=~/src/MobilityDB          # a checkout at the commit you are deriving from
-MEOSAPI=~/src/MEOS-API
-pip install -r "$MEOSAPI/requirements.txt"
 
-# Full fidelity: build and install libmeos first, then parse the installed headers.
-cmake -S "$MDB" -B "$MDB/build" -DCMAKE_BUILD_TYPE=Release -DMEOS=ON -DALL=ON
-cmake --build "$MDB/build" -j"$(nproc)"
-cmake --install "$MDB/build" --prefix "$MDB/.prefix"
-cd "$MEOSAPI" && MDB_SRC_ROOT="$MDB" python3 run.py "$MDB/.prefix/include"
+# Full fidelity: build and install libmeos, then parse the installed headers.
+tools/provision-meos.sh --mdb-src "$MDB" --build-libmeos --parse-prefix "$MDB/.prefix"
 
 # Headers only, no build (approximate struct layouts):
-cd "$MEOSAPI" && MDB_SRC_ROOT="$MDB" python3 run.py "$MDB/meos/include"
+tools/provision-meos.sh --mdb-src "$MDB"
 ```
 
-Both write `output/meos-idl.json`, which is what every binding consumes. `-DALL=ON` enables
-each optional family, so the catalog covers the whole surface; a narrower family set yields a
+Both write `output/meos-idl.json`, which is what every binding consumes; the script sets
+`MDB_SRC_ROOT` and picks the header source for you (`--help` lists every option). `--build-libmeos`
+also installs libmeos into `--parse-prefix` (default `<mdb-src>/.prefix`). Families default to
+`-DALL=ON`, so the catalog covers the whole surface; a narrower `--families` set yields a
 correspondingly narrower catalog.
 
 Each binding then regenerates from that file through its own entry point — for the JVM
