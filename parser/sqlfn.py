@@ -244,10 +244,46 @@ def _mdb_to_sql(mdb_src):
     return out
 
 
+_DOXY_BLOCK = re.compile(r"/\*\*.*?\*/", re.S)
+
+
+def _meos_direct_sql(meos_src):
+    """MEOS-C function name -> (sqlfn|None, sqlop|None) from a DIRECT @sqlfn /
+    @sqlop tag in meos/src — one hop, mirroring @csqlaggfn. This is the tag form
+    for a surface whose PostgreSQL registration is DEFERRED to a host extension
+    (the h3index scalar functions defer to h3-pg), so no PG wrapper exists to
+    carry the tag: the canonical SQL name lives with the MEOS function itself.
+    A block that also carries @csqlfn keeps the two-hop wrapper chain (skipped
+    here), and attach_sqlfn_map consults this map ONLY for functions the wrapper
+    chain did not resolve — fill-only, never an override."""
+    out = {}
+    for cf in Path(meos_src).rglob("*.c"):
+        text = cf.read_text(errors="ignore")
+        for bm in _DOXY_BLOCK.finditer(text):
+            block = bm.group(0)
+            if "@csqlfn" in block or "@csqlaggfn" in block:
+                continue
+            # Anchor on @sqlfn exactly as the wrapper-side scan does (_mdb_to_sql):
+            # an @sqlop-only block carries no SQL NAME and stays out of the map on
+            # both sides, so the fallback restores names without inventing new
+            # operator-only attributions.
+            sm = _SQLFN.search(block)
+            if not sm:
+                continue
+            om = _SQLOP.search(block)
+            fm = _FNDEF.search(text, bm.end() - 2)
+            if not fm:
+                continue
+            out.setdefault(fm.group(1),
+                           (sm.group(1), om.group(1) if om else None))
+    return out
+
+
 def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
     m2d = _meos_to_mdb(meos_src)
     d2s = _mdb_to_sql(mdb_src)
     w2sig = _wrapper_sql_sigs(sql_src) if sql_src else {}
+    direct = _meos_direct_sql(meos_src)
     n = 0
     # Transient map: MEOS function name -> every SQL name it resolves to, for the
     # functions that fan out (a shared wrapper / ever-always pair). This is NOT
@@ -256,17 +292,27 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
     multi = {}
     for f in idl["functions"]:
         wrappers = m2d.get(f["name"])
-        if not wrappers:
-            continue
         # A MEOS function can back several wrappers (the ever/always pair), each
         # carrying its own @sqlfn; collect the (sqlfn, sqlop) pairs across all of
         # them in order, keeping the primary (first) wrapper for back-compat.
         pairs = []
-        for w in wrappers:
+        for w in wrappers or []:
             for entry in d2s.get(w, []):
                 if entry not in pairs:
                     pairs.append(entry)
         if not pairs:
+            # Fill-only fallback: a direct @sqlfn / @sqlop on the MEOS function
+            # itself (no PG wrapper — the PG registration is deferred to a host
+            # extension). Never reached when the wrapper chain resolves.
+            dsql = direct.get(f["name"])
+            if not dsql:
+                continue
+            sqlfn, sqlop = dsql
+            if sqlfn:
+                f["sqlfn"] = sqlfn
+            if sqlop:
+                f["sqlop"] = sqlop
+            n += 1
             continue
         f["mdbC"] = wrappers[0]
         f["sqlfn"] = pairs[0][0]
