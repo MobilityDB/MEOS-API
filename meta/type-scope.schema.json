@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "type-scope.schema.json",
+  "title": "MEOS function type scopes",
+  "description": "Declared SQL type scopes for MEOS functions whose scope MEOS itself does not state. Consumed by parser/typescope.py, which fails generation on any underivable claimant absent from this file.",
+  "type": "object",
+  "required": ["scopes"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "scopes": {
+      "type": "object",
+      "description": "Keyed by MEOS function name.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["types", "note"],
+        "additionalProperties": false,
+        "properties": {
+          "types": {
+            "description": "The SQL types the function serves: a list of type names, or \"*\" when it serves every overload its wrapper declares. An empty list means it serves none of them, which is what a mistagged @csqlfn looks like.",
+            "oneOf": [
+              { "type": "string", "const": "*" },
+              {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                "uniqueItems": true
+              }
+            ]
+          },
+          "note": {
+            "type": "string",
+            "description": "Why the scope is what it is, and why MEOS does not state it.",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

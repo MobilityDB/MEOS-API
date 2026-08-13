@@ -1,0 +1,126 @@
+{
+  "$schema": "./type-scope.schema.json",
+  "description": "The SQL type scope of MEOS functions whose scope MEOS itself does not state. A function sharing a PG wrapper with others receives only the wrapper's signatures that its scope covers; parser/typescope.py derives that scope from a VALIDATE_* macro, MeosType literals, a class predicate or the C parameter types, and every claimant it cannot derive must be declared here. A scope of \"*\" means the function genuinely serves every overload its wrapper declares.",
+  "scopes": {
+    "temporal_append_tinstant": {
+      "types": "*",
+      "note": "Generic over Temporal *: appends to any temporal type."
+    },
+    "temporal_at_values": {
+      "types": "*",
+      "note": "Generic over Temporal *: restricts any temporal type to a value set."
+    },
+    "temporal_minus_values": {
+      "types": "*",
+      "note": "Generic over Temporal *: the complement of temporal_at_values."
+    },
+    "temporal_end_instant": {
+      "types": "*",
+      "note": "Generic over Temporal *: accessor on any temporal type."
+    },
+    "temporal_start_instant": {
+      "types": "*",
+      "note": "Generic over Temporal *: accessor on any temporal type."
+    },
+    "temporal_end_sequence": {
+      "types": "*",
+      "note": "Generic over Temporal *: accessor on any temporal type."
+    },
+    "temporal_start_sequence": {
+      "types": "*",
+      "note": "Generic over Temporal *: accessor on any temporal type."
+    },
+    "temporal_set_interp": {
+      "types": "*",
+      "note": "Generic over Temporal *: sets the interpolation of any temporal type."
+    },
+    "temporal_shift_time": {
+      "types": "*",
+      "note": "Generic over Temporal *: shifts the time of any temporal type."
+    },
+    "temporal_shift_scale_time": {
+      "types": "*",
+      "note": "Generic over Temporal *: shifts and scales the time of any temporal type."
+    },
+    "spanset_span": {
+      "types": "*",
+      "note": "Generic over SpanSet *: returns the bounding span of any spanset type."
+    },
+    "span_lower_inc": {
+      "types": "*",
+      "note": "Generic over Span *: reports whether the lower bound of any span type is inclusive."
+    },
+    "span_upper_inc": {
+      "types": "*",
+      "note": "Generic over Span *: reports whether the upper bound of any span type is inclusive."
+    },
+
+    "trgeometry_at_values": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone. It states no validity check of its own, so the scope cannot be read from the body — see the rgeo restrict functions, which delegate without validating."
+    },
+    "trgeometry_minus_values": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; states no validity check."
+    },
+    "trgeometry_at_tstzspan": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; states no validity check."
+    },
+    "trgeometry_at_tstzset": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; states no validity check."
+    },
+    "trgeometry_at_tstzspanset": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; states no validity check."
+    },
+    "trgeometry_minus_tstzspan": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; states no validity check."
+    },
+    "trgeometry_minus_tstzset": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; states no validity check."
+    },
+    "trgeometry_minus_tstzspanset": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; states no validity check."
+    },
+
+    "tintbox_shift_scale": {
+      "types": ["tbox"],
+      "note": "Shifts and scales a tbox. Its body names the value span it moves (T_INTSPAN), so the span is what a body-read derives — the type it serves is the box."
+    },
+    "tbigintbox_shift_scale": {
+      "types": ["tbox"],
+      "note": "Shifts and scales a tbox; the body names its value span, not the box."
+    },
+    "tfloatbox_shift_scale": {
+      "types": ["tbox"],
+      "note": "Shifts and scales a tbox; the body names its value span, not the box."
+    },
+
+    "nad_tint_tbox": {
+      "types": ["tint"],
+      "note": "The tint arm of the tnumber/tbox nearest-approach pair."
+    },
+    "nad_tfloat_tbox": {
+      "types": ["tfloat"],
+      "note": "The tfloat arm of the tnumber/tbox nearest-approach pair."
+    },
+    "nad_tcbuffer_stbox": {
+      "types": ["tcbuffer"],
+      "note": "Serves tcbuffer. Its @csqlfn names NAD_tcbuffer_geo, the wrapper of nad_tcbuffer_geo; the stbox form has its own wrapper NAD_tcbuffer_stbox. Upstream tag fix, recorded here so generation stays deterministic meanwhile."
+    },
+
+    "span_to_spanset": {
+      "types": [],
+      "note": "Converts span to spanset, while its @csqlfn names Spanset_to_span — the wrapper of the opposite conversion, whose overloads are all spanset-argument. No overload of that wrapper is served, hence the empty scope. Upstream tag fix."
+    },
+    "contained_span_span": {
+      "types": [],
+      "note": "Compares span with span, while its @csqlfn names Contained_value_span, whose overloads all take a base value. No overload of that wrapper is served. Upstream tag fix."
+    }
+  }
+}
