@@ -108,19 +108,6 @@
     "nad_tfloat_tbox": {
       "types": ["tfloat"],
       "note": "The tfloat arm of the tnumber/tbox nearest-approach pair."
-    },
-    "nad_tcbuffer_stbox": {
-      "types": ["tcbuffer"],
-      "note": "Serves tcbuffer. Its @csqlfn names NAD_tcbuffer_geo, the wrapper of nad_tcbuffer_geo; the stbox form has its own wrapper NAD_tcbuffer_stbox. Upstream tag fix, recorded here so generation stays deterministic meanwhile."
-    },
-
-    "span_to_spanset": {
-      "types": [],
-      "note": "Converts span to spanset, while its @csqlfn names Spanset_to_span — the wrapper of the opposite conversion, whose overloads are all spanset-argument. No overload of that wrapper is served, hence the empty scope. Upstream tag fix."
-    },
-    "contained_span_span": {
-      "types": [],
-      "note": "Compares span with span, while its @csqlfn names Contained_value_span, whose overloads all take a base value. No overload of that wrapper is served. Upstream tag fix."
     }
   }
 }
