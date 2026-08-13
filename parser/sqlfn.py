@@ -17,6 +17,9 @@ Adds per function (when the chain resolves): `sqlfn`, `sqlop`, `mdbC`.
 import re
 from pathlib import Path
 
+from parser.typescope import (TypeFacts, declared_scopes, read_bodies,
+                              require_scopes, resolve_scope, signatures_for)
+
 # A @csqlfn tag carries one OR MORE #Wrapper() references — comma- or
 # space-separated, and possibly continued across doxygen lines — because a single
 # MEOS function can back several wrappers (the ever/always pair eDisjoint/aDisjoint
@@ -285,6 +288,32 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
     w2sig = _wrapper_sql_sigs(sql_src) if sql_src else {}
     direct = _meos_direct_sql(meos_src)
     n = 0
+    # One wrapper commonly backs a whole per-type family — `Set_values` is the body
+    # behind getValues(intset), getValues(cbufferset) and fourteen more — so a
+    # wrapper's signature list is the union over its claimants, not the surface of
+    # any one of them. Each function therefore keeps only the signatures its own
+    # TYPE SCOPE covers; scopes MEOS does not state are declared in
+    # meta/type-scope.json, and an underivable claimant fails generation rather
+    # than silently taking the union or nothing.
+    scope_facts = scope_bodies = scope_params = None
+    declared = {}
+    shared_wrappers = set()
+    if w2sig:
+        meos_root = Path(meos_src).parent
+        scope_facts = TypeFacts(meos_root)
+        scope_bodies, scope_params = read_bodies(meos_root)
+        declared = declared_scopes()
+        claimed = {}
+        for f in idl["functions"]:
+            if f.get("api") != "public":
+                continue
+            for w in m2d.get(f["name"]) or ():
+                claimed.setdefault(w, []).append(f["name"])
+                break
+        shared_wrappers = {w for w, names in claimed.items()
+                           if len(names) > 1 and len(w2sig.get(w) or ()) > 1}
+        require_scopes([n for w in shared_wrappers for n in claimed[w]],
+                       scope_facts, scope_bodies, scope_params, declared)
     # Transient map: MEOS function name -> every SQL name it resolves to, for the
     # functions that fan out (a shared wrapper / ever-always pair). This is NOT
     # catalog output — every binding reads only the primary `sqlfn` — it is working
@@ -320,6 +349,16 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
         # signature instead of the wider C one: args beyond sqlArity are SQL-optional
         # (DEFAULT), and C params beyond sqlArityMax are C-only out-params.
         sigs = w2sig.get(wrappers[0])
+        # Only a public claimant of a shared wrapper is filtered: those are the
+        # functions a binding projects, and the ones require_scopes has proven a
+        # scope for. An internal function is not part of any binding surface.
+        scoped = False
+        if sigs and wrappers[0] in shared_wrappers and f.get("api") == "public":
+            scope, _ = resolve_scope(f["name"], scope_facts, scope_bodies,
+                                     scope_params, declared)
+            if scope is not None:
+                sigs = signatures_for(f["name"], sigs, scope)
+                scoped = True
         if sigs:
             f["sqlArity"] = min(s["required"] for s in sigs)
             f["sqlArityMax"] = max(len(s["args"]) for s in sigs)
@@ -349,8 +388,14 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
             # attached ONLY for a signature that actually has an optional arg, so a binding
             # can render the shorter overload of a SQL-optional argument with its omitted
             # value; default-free signatures stay {args, ret} unchanged.
+            # Scope filtering already reduced `sigs` to the overloads this function
+            # serves, and a per-type function's own overload carries its OWN SQL name
+            # (`bigintset_in`), not the representative the @sqlfn tag names
+            # (`intset_in`). Dropping a name that differs from `sqlfn` would discard
+            # exactly the signature the filter just proved belongs here, so a filtered
+            # function keeps all of them and stamps the name whenever it differs.
             fam_names = {s["sqlName"] for s in sigs}
-            multiname = len(fam_names) > 1
+            multiname = len(fam_names) > 1 or (scoped and fam_names != {f["sqlfn"]})
             own = []
             for s in sigs:
                 if not multiname and s["sqlName"] != f["sqlfn"]:
