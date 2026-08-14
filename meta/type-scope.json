@@ -107,11 +107,15 @@
 
     "nad_tint_tbox": {
       "types": ["tint"],
-      "note": "The tint arm of the tnumber/tbox nearest-approach pair."
+      "note": "The tint arm of the tnumber/tbox nearest-approach set."
+    },
+    "nad_tbigint_tbox": {
+      "types": ["tbigint"],
+      "note": "The tbigint arm of the tnumber/tbox nearest-approach set."
     },
     "nad_tfloat_tbox": {
       "types": ["tfloat"],
-      "note": "The tfloat arm of the tnumber/tbox nearest-approach pair."
+      "note": "The tfloat arm of the tnumber/tbox nearest-approach set."
     }
   }
 }
