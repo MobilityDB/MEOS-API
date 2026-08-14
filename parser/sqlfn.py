@@ -52,6 +52,10 @@ _DATUM = re.compile(r"Datum\s+(\w+)\s*\(\s*PG_FUNCTION_ARGS")
 # binds is in the trailing `AS 'MODULE_PATHNAME', '<Wrapper>'`.
 _CREATE_FN = re.compile(r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(\w+)\s*\(", re.I)
 _AS_WRAPPER = re.compile(r"AS\s+'[^']*'\s*,\s*'(\w+)'", re.I)
+# A CREATE FUNCTION attribute that may follow RETURNS <type> before the body.
+_RET_ATTR = re.compile(
+    r"\b(?:SUPPORT|LANGUAGE|WINDOW|IMMUTABLE|STABLE|VOLATILE|LEAKPROOF|CALLED|RETURNS\s+NULL|"
+    r"STRICT|SECURITY|PARALLEL|COST|ROWS|TRANSFORM|SET)\b", re.I)
 
 
 def _split_top_commas(s):
@@ -128,6 +132,13 @@ def _create_fn_stmts(text):
         wrapper = wm.group(1) if wm else None
         rm = re.match(r"\s*RETURNS\s+(?:SETOF\s+)?(.+?)\s+AS\b", tail, re.I | re.S)
         ret = " ".join(rm.group(1).split()) if rm else None
+        if ret:
+            # PostgreSQL lets the function attributes come in any order, so an
+            # attribute may sit between RETURNS and AS rather than after the body.
+            # MobilityDB writes SUPPORT after `AS 'MODULE_PATHNAME'` everywhere but
+            # `aTouches(tcbuffer, cbuffer)`, which puts it first and so parsed as the
+            # return type `boolean SUPPORT tspatial_supportfn`. Keep only the type.
+            ret = _RET_ATTR.split(ret, maxsplit=1)[0].strip() or ret
         argdecls = [a for a in _split_top_commas(text[start:arg_close]) if a.strip()]
         yield sqlname, argdecls, ret, wrapper
 
@@ -307,9 +318,13 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
         for f in idl["functions"]:
             if f.get("api") != "public":
                 continue
+            # EVERY wrapper the function claims, not just the first: a wrapper is
+            # shared whenever two functions name it, in whatever position. Reading
+            # only the first left a wrapper claimed second by everyone (Numset_scale,
+            # named after Numset_shift by all five numeric set types) out of
+            # `shared_wrappers`, so its signatures went unfiltered.
             for w in m2d.get(f["name"]) or ():
                 claimed.setdefault(w, []).append(f["name"])
-                break
         shared_wrappers = {w for w, names in claimed.items()
                            if len(names) > 1 and len(w2sig.get(w) or ()) > 1}
         require_scopes([n for w in shared_wrappers for n in claimed[w]],
@@ -348,17 +363,42 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
         # The SQL-facing arity (required..total). Lets a generator expose the SQL
         # signature instead of the wider C one: args beyond sqlArity are SQL-optional
         # (DEFAULT), and C params beyond sqlArityMax are C-only out-params.
-        sigs = w2sig.get(wrappers[0])
-        # Only a public claimant of a shared wrapper is filtered: those are the
-        # functions a binding projects, and the ones require_scopes has proven a
-        # scope for. An internal function is not part of any binding surface.
+        # The registration surface is the union over EVERY wrapper the function
+        # claims, not the first one's alone. One MEOS function commonly backs a
+        # whole SET of wrappers — the ever/always pair (eDwithin + aDwithin over
+        # one `ea_dwithin_*`), the shift/scale/shiftScale trio over one
+        # `*_shift_scale`, send + asBinary over one `*_as_wkb` — and each wrapper
+        # registers its OWN CREATE FUNCTION overloads. Keeping only `wrappers[0]`
+        # dropped every sibling wrapper's overloads, so half of each ever/always
+        # pair and two thirds of each shift/scale trio were invisible to bindings.
+        # It is also what made a COMMUTED wrapper unrepresentable: `NAD_stbox_tgeo`
+        # is a second wrapper over the one `nad_tgeo_stbox`, so even a correct
+        # `@csqlfn #NAD_tgeo_stbox() #NAD_stbox_tgeo()` could not have carried the
+        # argument-swapped overload through.
+        # Each wrapper is scope-filtered on its own — a scope answers "which types
+        # does this function serve", which is per wrapper — and the union is
+        # de-duplicated, since two wrappers may legitimately register the same
+        # overload under the same name.
         scoped = False
-        if sigs and wrappers[0] in shared_wrappers and f.get("api") == "public":
-            scope, _ = resolve_scope(f["name"], scope_facts, scope_bodies,
-                                     scope_params, declared)
-            if scope is not None:
-                sigs = signatures_for(f["name"], sigs, scope)
-                scoped = True
+        sigs, seen = [], set()
+        for w in wrappers:
+            wsigs = w2sig.get(w)
+            if not wsigs:
+                continue
+            # Only a public claimant of a shared wrapper is filtered: those are the
+            # functions a binding projects, and the ones require_scopes has proven a
+            # scope for. An internal function is not part of any binding surface.
+            if w in shared_wrappers and f.get("api") == "public":
+                scope, _ = resolve_scope(f["name"], scope_facts, scope_bodies,
+                                         scope_params, declared)
+                if scope is not None:
+                    wsigs = signatures_for(f["name"], wsigs, scope)
+                    scoped = True
+            for s in wsigs:
+                key = (s["sqlName"], tuple(s["args"]), s["ret"])
+                if key not in seen:
+                    seen.add(key)
+                    sigs.append(s)
         if sigs:
             f["sqlArity"] = min(s["required"] for s in sigs)
             f["sqlArityMax"] = max(len(s["args"]) for s in sigs)
