@@ -34,6 +34,10 @@
       "types": "*",
       "note": "Generic over Temporal *: sets the interpolation of any temporal type."
     },
+    "temporal_scale_time": {
+      "types": "*",
+      "note": "Generic over Temporal *: scales the time of any temporal type."
+    },
     "temporal_shift_time": {
       "types": "*",
       "note": "Generic over Temporal *: shifts the time of any temporal type."
