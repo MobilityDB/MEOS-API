@@ -106,8 +106,10 @@ resolve_repo() {  # name url ref existing_path -> echoes absolute path
     git -C "$dir" fetch --quiet "$url" "$ref"
     git -C "$dir" checkout --quiet FETCH_HEAD
   else
+    # --branch takes a branch or a tag, so a pinned binding's commit SHA falls through to a
+    # full clone -- which lands on the default branch and must still be moved onto the ref.
     git clone --quiet --depth 1 --branch "$ref" "$url" "$dir" 2>/dev/null \
-      || git clone --quiet "$url" "$dir"  # fall back to full clone for a non-branch ref
+      || { git clone --quiet "$url" "$dir" && git -C "$dir" checkout --quiet "$ref"; }
   fi
   (cd "$dir" && pwd)
 }
