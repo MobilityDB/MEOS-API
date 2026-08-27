@@ -124,8 +124,44 @@ CATALOG="$WORK_DIR/meos-idl.json"
 LIBMEOS="$PREFIX/lib/libmeos.so"
 STAMP="$WORK_DIR/.mdb-commit"
 
+# What the parse needs is that the requirements are INSTALLED, not that pip ran: a plain
+# `pip install` aborts with `error: externally-managed-environment` on the Debian/Ubuntu system
+# interpreter (PEP 668), which failed the refresh on a machine that already had every requirement.
+# So check the distributions first and install only what is missing, into the user site PEP 668
+# does allow when the interpreter refuses a system-wide write.
+missing_python_reqs() {
+  python3 - "$MEOSAPI/requirements.txt" <<'PYREQ'
+import re, sys
+from importlib.metadata import PackageNotFoundError, version
+
+missing = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    spec = line.split("#")[0].strip()
+    if not spec:
+        continue
+    name = re.split(r"[<>=!~;\[]", spec, maxsplit=1)[0].strip()
+    try:
+        version(name)
+    except PackageNotFoundError:
+        missing.append(name)
+print(" ".join(missing))
+PYREQ
+}
+
 step "Python dependencies for the catalog parse"
-python3 -m pip install --quiet -r "$MEOSAPI/requirements.txt"
+reqs_missing="$(missing_python_reqs)"
+if [ -z "$reqs_missing" ]; then
+  echo "every requirement in $MEOSAPI/requirements.txt is already installed" >&2
+else
+  echo "installing missing Python requirement(s): $reqs_missing" >&2
+  python3 -m pip install --quiet -r "$MEOSAPI/requirements.txt" \
+    || python3 -m pip install --quiet --user -r "$MEOSAPI/requirements.txt"
+  reqs_missing="$(missing_python_reqs)"
+  [ -z "$reqs_missing" ] || {
+    echo "refresh-binding.sh: Python requirement(s) still missing after install: $reqs_missing" >&2
+    exit 1
+  }
+fi
 
 # The catalog (and, for native/FFI bindings, libmeos) — the slow leg. Skip it when the commit,
 # the family flags and the build-libmeos choice are all already current, unless --force.
