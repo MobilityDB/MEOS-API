@@ -20,8 +20,18 @@ of the ``<meos_fn>(...)`` call inside the wrapper: an argument sourced from
 ``PG_GETARG_*`` (directly, or via a local so-assigned) is a CALLER arg and is
 skipped; ``&name`` is an out-param (already in ``outParams``) and is skipped;
 only a genuine LITERAL (``true``/``false``, a number, ``NULL`` or an UPPERCASE
-enum/macro) is recorded.  A wrapper that does not call the MEOS function by name
-(it delegates to a shared helper) yields no ``boundArgs``.
+enum/macro) is recorded.
+
+A wrapper that does not call the MEOS function by name delegates to a shared
+helper, and the literal it binds sits at the DELEGATION rather than at the MEOS
+call: ``Tjsonb_object_field`` is ``return Tjsonb_object_field_common(fcinfo,
+false)`` and the helper calls ``tjsonb_object_field(temp, key, astext,
+null_handle)``.  Such a wrapper is followed one hop: the literals it passes are
+matched to the helper's parameters by position, and an argument of the MEOS call
+naming one of those parameters resolves to the literal behind it.  Two wrappers
+sharing a helper (``…_object_field`` and ``…_object_field_text``) bind the same
+parameter to different literals, so the pair is read as the one SQL surface each
+wrapper names rather than merged.
 """
 from __future__ import annotations
 
@@ -41,6 +51,11 @@ _FALSE = re.compile(r"^(?:false|FALSE)$")
 _NUMBER = re.compile(r"^-?\d+(?:\.\d+)?$")
 _ENUM = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _IDENT = re.compile(r"^\w+$")
+# A shared helper takes the call info plus the parameters the wrappers bind.
+_HELPER = re.compile(r"Datum\s+(?P<name>\w+)\s*\(\s*FunctionCallInfo\s+\w+"
+                     r"(?P<rest>[^)]*)\)\s*\{")
+# ... and a wrapper delegates to it by passing that same call info straight through.
+_DELEG = re.compile(r"\b(?P<name>\w+)\s*\(\s*fcinfo\s*(?P<args>,[^;]*?)?\)\s*;")
 
 
 def _body(text: str, brace_pos: int) -> str:
@@ -112,6 +127,44 @@ def extract_wrappers(mdb_src: str | Path) -> dict[str, str]:
     return out
 
 
+def extract_helpers(mdb_src: str | Path) -> dict[str, tuple[str, list[str]]]:
+    """``{helper_name: (body_text, [param names after the call info])}`` for every shared
+    wrapper helper under ``mdb_src``."""
+    out: dict[str, tuple[str, list[str]]] = {}
+    for cf in Path(mdb_src).rglob("*.c"):
+        text = cf.read_text(errors="ignore")
+        for m in _HELPER.finditer(text):
+            rest = (m.group("rest") or "").strip()
+            names: list[str] = []
+            if rest.startswith(","):
+                for decl in _split_args(rest[1:]):
+                    tok = decl.replace("*", " ").split()
+                    if tok:
+                        names.append(tok[-1])
+            out[m.group("name")] = (_body(text, m.end() - 1), names)
+    return out
+
+
+def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
+    """``(helper_body, {helper_param: literal})`` when ``body`` delegates to a shared
+    helper, passing the call info through and binding the rest to literals."""
+    for m in _DELEG.finditer(body):
+        entry = helpers.get(m.group("name"))
+        if entry is None:
+            continue
+        hbody, hparams = entry
+        raw = (m.group("args") or "").strip()
+        vals = _split_args(raw[1:]) if raw.startswith(",") else []
+        subst = {}
+        for pname, val in zip(hparams, vals):
+            lit = _literal(val)
+            if lit is not None:
+                subst[pname] = lit
+        if subst:
+            return hbody, subst
+    return None, {}
+
+
 def _literal(arg: str) -> str | None:
     """Normalise a call argument to the literal to record, or None if not a literal."""
     if _TRUE.match(arg):
@@ -124,7 +177,8 @@ def _literal(arg: str) -> str | None:
 
 
 def _wrapper_bound(body: str, func: dict, drift: list,
-                   documented: dict[str, set]) -> dict[str, str]:
+                   documented: dict[str, set],
+                   subst: dict[str, str] | None = None) -> dict[str, str]:
     """The literals wrapper ``body`` binds in its call to ``func['name']``, keyed by
     ``func``'s parameter name. Empty if the wrapper does not call ``func`` by name.
 
@@ -137,6 +191,7 @@ def _wrapper_bound(body: str, func: dict, drift: list,
     args = _call_args(body, func["name"])
     if not args:
         return {}
+    subst = subst or {}
     assigned = {m.group("var") for m in _ASSIGNED.finditer(body)}
     doc_params = documented.get(func["name"], frozenset())
     params = func.get("params", [])
@@ -146,6 +201,10 @@ def _wrapper_bound(body: str, func: dict, drift: list,
             break
         pname = params[i].get("name")
         if not pname:
+            continue
+        if a in subst:
+            # a helper parameter the delegating wrapper bound to a literal
+            bound[pname] = subst[a]
             continue
         if a.startswith("&") or "PG_GETARG" in a or a in assigned:
             continue  # out-param or caller-sourced local
@@ -182,6 +241,7 @@ def merge_boundargs(idl: dict, mdb_src: str | Path,
     undocumented parameters."""
     documented = documented or {}
     wrappers = extract_wrappers(mdb_src)
+    helpers = extract_helpers(mdb_src)
     n = 0
     drift: list[tuple[str, str, str]] = []
     groups: dict[str, list] = {}
@@ -199,6 +259,17 @@ def merge_boundargs(idl: dict, mdb_src: str | Path,
         for func in group:
             for k, v in _wrapper_bound(body, func, drift, documented).items():
                 wbound.setdefault(k, v)
+        if not wbound:
+            # The wrapper names no MEOS call of its own: it delegates, and the literal it
+            # binds sits at that delegation. `mdbC` names ONE wrapper per catalog entry, so
+            # the sibling that binds the opposite literal is a different entry and the two
+            # never merge.
+            hbody, subst = _delegated(body, helpers)
+            if hbody is None:
+                continue
+            for func in group:
+                for k, v in _wrapper_bound(hbody, func, drift, documented, subst).items():
+                    wbound.setdefault(k, v)
         if not wbound:
             continue
         for func in group:
