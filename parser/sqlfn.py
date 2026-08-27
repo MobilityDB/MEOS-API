@@ -46,7 +46,11 @@ _CSQLAGGFN = re.compile(r"@csqlaggfn\b")
 # operators lost their SQL name that way).
 _FNDEF = re.compile(r"\*/\s*\n(?:[^\n(){};=]+\n)?(?:[\w\s*]+?\s)?(\w+)\s*\(")
 _SQLFN = re.compile(r"@sqlfn\s+(\w+)\s*\(\)")
-_SQLOP = re.compile(r"@sqlop\s+@p\s+(\S+)")
+# The operator stops at a comma, mirroring `_SQLFN`'s `(\w+)\s*\(\)`: a block naming several
+# SQL functions lists their operators the same comma-separated way
+# (`@sqlop @p ->, @p ->>` beside `@sqlfn a(), b()`), and a PostgreSQL operator name never
+# contains a comma. `(\S+)` ran past it and published the comma as part of the operator.
+_SQLOP = re.compile(r"@sqlop\s+@p\s+([^\s,]+)")
 _DATUM = re.compile(r"Datum\s+(\w+)\s*\(\s*PG_FUNCTION_ARGS")
 # `CREATE [OR REPLACE] FUNCTION name(` — the SQL-facing signature; the wrapper it
 # binds is in the trailing `AS 'MODULE_PATHNAME', '<Wrapper>'`.

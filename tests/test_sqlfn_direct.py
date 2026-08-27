@@ -69,6 +69,30 @@ class DirectSqlfnTests(unittest.TestCase):
         (mdb / "y.c").write_text(MDB_C)
         return str(meos), str(mdb)
 
+    def test_multi_op_tag_keeps_the_operator_without_its_comma(self):
+        """A block naming several SQL functions lists their operators the same
+        comma-separated way `@sqlfn` lists the names, so the operator ends at the
+        comma. Reading to the next whitespace published `->,` as the operator."""
+        src = """
+/**
+ * @ingroup meos_json_json
+ * @brief Extract a field from a temporal JSONB value
+ * @sqlfn tjsonbObjectField(), tjsonbObjectFieldText()
+ * @sqlop @p ->, @p ->>
+ */
+Temporal *
+tjsonb_object_field(const Temporal *temp, const text *key)
+{
+}
+"""
+        with tempfile.TemporaryDirectory() as d:
+            meos = Path(d) / "meos"
+            meos.mkdir()
+            (meos / "j.c").write_text(src)
+            direct = _meos_direct_sql(str(meos))
+        self.assertEqual(direct.get("tjsonb_object_field"),
+                         ("tjsonbObjectField", "->"))
+
     def test_direct_map_needs_sqlfn_and_skips_csqlfn_blocks(self):
         with tempfile.TemporaryDirectory() as d:
             meos, _ = self._trees(d)
