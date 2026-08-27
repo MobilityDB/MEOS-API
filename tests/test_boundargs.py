@@ -108,6 +108,69 @@ def _idl():
     ]}
 
 
+DELEGATING = """
+Datum
+Jsonb_field_common(FunctionCallInfo fcinfo, bool astext)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  text *key = PG_GETARG_TEXT_P(1);
+  Temporal *result = jsonb_field(temp, key, astext);
+  PG_RETURN_TEMPORAL_P(result);
+}
+
+PGDLLEXPORT Datum Jsonb_field(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Jsonb_field);
+Datum
+Jsonb_field(PG_FUNCTION_ARGS)
+{
+  return Jsonb_field_common(fcinfo, false);
+}
+
+PGDLLEXPORT Datum Jsonb_field_text(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Jsonb_field_text);
+Datum
+Jsonb_field_text(PG_FUNCTION_ARGS)
+{
+  return Jsonb_field_common(fcinfo, true);
+}
+"""
+
+
+class DelegatingWrapperTests(unittest.TestCase):
+    """A wrapper that binds its literal at the DELEGATION, not at the MEOS call."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        src = Path(self.tmp.name) / "src"
+        src.mkdir()
+        (src / "deleg.c").write_text(DELEGATING)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _idl(self, wrapper):
+        return {"functions": [
+            {"name": "jsonb_field", "mdbC": wrapper,
+             "params": [{"name": "temp"}, {"name": "key"}, {"name": "astext"}]}]}
+
+    def test_literal_behind_the_helper_parameter_is_captured(self):
+        idl, n, drift = merge_boundargs(self._idl("Jsonb_field"), self.tmp.name)
+        self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], {"astext": "false"})
+        self.assertEqual(drift, [])
+
+    def test_the_sibling_wrapper_binds_the_other_literal(self):
+        # Same helper, same MEOS function, opposite literal: the value follows the
+        # wrapper each catalog entry names, so the two never merge into one.
+        idl, n, drift = merge_boundargs(self._idl("Jsonb_field_text"), self.tmp.name)
+        self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], {"astext": "true"})
+
+    def test_caller_read_args_stay_out(self):
+        idl, _, _ = merge_boundargs(self._idl("Jsonb_field"), self.tmp.name)
+        bound = idl["functions"][0]["shape"]["boundArgs"]
+        self.assertNotIn("temp", bound)
+        self.assertNotIn("key", bound)
+
+
 class BoundArgsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
