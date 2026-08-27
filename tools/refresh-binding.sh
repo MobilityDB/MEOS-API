@@ -213,5 +213,8 @@ export PREFIX CATALOG JAR
 step "Done — ${ENGINE:-binding} refreshed against MobilityDB $MDB_COMMIT"
 if [ -n "$CATALOG_DEST" ]; then echo "  catalog : $BINDING/$CATALOG_DEST" >&2
 else echo "  catalog : $CATALOG" >&2; fi
-[ -n "$LIBMEOS" ] && echo "  libmeos : $LIBMEOS" >&2
-[ -n "$JAR" ] && echo "  jmeos   : $JAR ($JMEOS_COORDS)" >&2
+# `if` blocks, not `[ ... ] && echo`: an AND-list whose test is false is the script's last command
+# and leaves its exit status at 1, so a binding that builds no libmeos and no jar — every non-JVM
+# consumer, MobilityDuck among them — reported failure from a refresh that had just succeeded.
+if [ -n "$LIBMEOS" ]; then echo "  libmeos : $LIBMEOS" >&2; fi
+if [ -n "$JAR" ]; then echo "  jmeos   : $JAR ($JMEOS_COORDS)" >&2; fi
