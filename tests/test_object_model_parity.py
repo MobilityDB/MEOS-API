@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from parser.object_model import attach_object_model
-from object_model_parity import build_parity, _parse_oracle, PYMEOS
+from object_model_parity import (build_parity, _parse_oracle, _oracle_id,
+                                 PYMEOS)
 
 MODEL = ROOT / "meta" / "object-model.json"
 _CATALOG = ROOT / "output" / "meos-idl.json"
@@ -57,6 +58,21 @@ class ParityLogicTests(unittest.TestCase):
         # nothing silently dropped
         self.assertEqual(rep["knownCorrections"] + rep["needsCorrection"],
                          rep["divergences"])
+
+    def test_oracle_is_named_by_its_place_not_by_this_machine(self):
+        """Two checkouts of the same oracle must yield the same artefact.
+
+        The consumer regenerates this file to detect drift, so an oracle path
+        carrying the checkout's location reports drift between any two machines
+        reading the very same oracle -- and the drift gate can then never go
+        green.
+        """
+        a = _oracle_id(Path("/home/someone/src/PyMEOS/pymeos/factory.py"))
+        b = _oracle_id(Path("/opt/build-7f3/PyMEOS/pymeos/factory.py"))
+        self.assertEqual(a, b)
+        self.assertEqual(a, "pymeos/factory.py")
+        self.assertNotIn("/home", a)
+        self.assertFalse(Path(a).is_absolute())
 
     def test_every_divergence_has_a_correction(self):
         oracle = _parse_oracle(PYMEOS)

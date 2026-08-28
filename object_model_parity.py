@@ -26,6 +26,18 @@ PYMEOS = (Path(sys.argv[3]) if len(sys.argv) > 3
           else Path(__file__).resolve().parent.parent
           / "PyMEOS" / "pymeos" / "factory.py")
 
+
+def _oracle_id(path: Path) -> str:
+    """The oracle named by its place INSIDE PyMEOS, never by this machine.
+
+    Where the file sits on a given disk is a property of the checkout, not of
+    the audit, so recording it makes the artefact differ between two machines
+    that read the very same oracle -- and a consumer that regenerates the file
+    to check for drift then sees drift that is not there.
+    """
+    parts = path.resolve().parts
+    return "/".join(parts[-2:]) if len(parts) >= 2 else path.name
+
 _SUBTYPE = {"INSTANT": "TINSTANT", "SEQUENCE": "TSEQUENCE",
             "SEQUENCE_SET": "TSEQUENCESET"}
 _TEMPORAL_RE = re.compile(
@@ -76,7 +88,7 @@ def build_parity(catalog: dict, oracle) -> dict:
     if oracle is None:
         return {
             "status": "oracle-unavailable",
-            "oraclePath": str(PYMEOS),
+            "oraclePath": _oracle_id(PYMEOS),
             "note": "PyMEOS factory.py not found; reporting curated "
                     "corrections only — no fabricated parity verdict.",
             "total": len(work), "aligned": 0,
@@ -137,7 +149,7 @@ def build_parity(catalog: dict, oracle) -> dict:
     needs = [w for w in work if w["status"] == "needs-correction"]
     return {
         "status": "audited",
-        "oraclePath": str(PYMEOS),
+        "oraclePath": _oracle_id(PYMEOS),
         "total": len(work),
         "aligned": aligned_concrete,
         "divergences": len(work),
