@@ -46,6 +46,15 @@ _CSQLAGGFN = re.compile(r"@csqlaggfn\b")
 # operators lost their SQL name that way).
 _FNDEF = re.compile(r"\*/\s*\n(?:[^\n(){};=]+\n)?(?:[\w\s*]+?\s)?(\w+)\s*\(")
 _SQLFN = re.compile(r"@sqlfn\s+(\w+)\s*\(\)")
+# @sqlaggfn names the SQL AGGREGATE a PG wrapper serves, on the wrapper of one of
+# its transition/combine/final members. It is the aggregate counterpart of
+# @sqlfn on the SAME block: @sqlfn states the CREATE FUNCTION the wrapper backs
+# (tcount_transfn), @sqlaggfn the CREATE AGGREGATE that function implements
+# (tCount). Without it the aggregate name has nowhere to live but @sqlfn, which
+# then holds a name no CREATE FUNCTION carries and leaves a consumer to tell an
+# aggregate from a function by the C symbol's suffix. Same value grammar as
+# @sqlfn — bare `name()`, never `#Name()` — so a block may name several.
+_SQLAGGFN = re.compile(r"@sqlaggfn\s+(\w+)\s*\(\)")
 # The operator stops at a comma, mirroring `_SQLFN`'s `(\w+)\s*\(\)`: a block naming several
 # SQL functions lists their operators the same comma-separated way
 # (`@sqlop @p ->, @p ->>` beside `@sqlfn a(), b()`), and a PostgreSQL operator name never
@@ -259,6 +268,26 @@ def _mdb_to_sql(mdb_src):
                 lst = out.setdefault(dm.group(1), [])
                 if entry not in lst:
                     lst.append(entry)
+    return out
+
+
+def _mdb_to_agg(mdb_src):
+    """MobilityDB-C wrapper name -> ordered list of SQL aggregate names.
+
+    Mirrors `_mdb_to_sql` on the @sqlaggfn tag: the same doxygen block carries
+    @sqlfn for the CREATE FUNCTION and @sqlaggfn for the CREATE AGGREGATE, so a
+    wrapper resolves to both without either name displacing the other. A member
+    shared by several aggregates lists them, and duplicates collapse."""
+    out = {}
+    for cf in Path(mdb_src).rglob("*.c"):
+        text = cf.read_text(errors="ignore")
+        for m in _SQLAGGFN.finditer(text):
+            close = text.find("*/", m.end())
+            dm = _DATUM.search(text, close if close != -1 else m.end())
+            if dm:
+                lst = out.setdefault(dm.group(1), [])
+                if m.group(1) not in lst:
+                    lst.append(m.group(1))
     return out
 
 
@@ -479,6 +508,38 @@ def attach_aggfn_map(idl, meos_src):
         names = a2n.get(f["name"])
         if names:
             f["sqlAgg"] = names
+            n += 1
+    return idl, n
+
+
+def attach_sqlaggfn_map(idl, meos_src, mdb_src):
+    """Attach `sqlAggregate` — the SQL AGGREGATE(s) a function's PG wrapper
+    serves, read from @sqlaggfn in mobilitydb/src over the same @csqlfn chain
+    that resolves `sqlfn`.
+
+    This is the aggregate name a binding registers (`tCount`), and it is a
+    different fact from both neighbours it sits beside:
+
+      `sqlfn`   the CREATE FUNCTION the wrapper backs (`tcount_transfn`) — the
+                aggregate's transition member, which no user calls;
+      `sqlAgg`  the aggregate-ROLE name from MEOS's @csqlaggfn
+                (`setUnionTransition`), naming the member within its aggregate.
+
+    Keeping them apart is what lets a binding tell an aggregate from a function
+    without reading the C symbol's suffix, and it is why `sqlfn` can state the
+    function it actually backs. Faithful reader: recorded verbatim, no
+    derivation, and absent for every function whose wrapper carries no tag."""
+    m2d = _meos_to_mdb(meos_src)
+    d2a = _mdb_to_agg(mdb_src)
+    n = 0
+    for f in idl["functions"]:
+        names = []
+        for w in m2d.get(f["name"]) or ():
+            for a in d2a.get(w) or ():
+                if a not in names:
+                    names.append(a)
+        if names:
+            f["sqlAggregate"] = names
             n += 1
     return idl, n
 
