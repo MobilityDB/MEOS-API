@@ -494,36 +494,44 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
 
 
 def attach_aggfn_map(idl, meos_src):
-    """Attach `sqlAgg` — the SQL aggregate-role name(s) each aggregate function
+    """Attach `sqlAggRole` — the aggregate-ROLE name(s) each aggregate function
     implements, read faithfully from @csqlaggfn in meos/src. This gives an
     aggregate member its own catalog identity (setUnionTransition, spanUnionFinal)
     distinct from the identically named binary set/span union FUNCTION, and lets a
     binding reconstruct the standard PostgreSQL aggregate model (a <aggregate> with
     its Transition / Combine / Final members) instead of guessing from name
     suffixes. A member shared by two aggregates (spanset_union_finalfn) carries a
-    list. Faithful reader: the name is recorded verbatim, no derivation."""
+    list. Faithful reader: the name is recorded verbatim, no derivation.
+
+    The ROLE is what this field holds — `setUnionTransition` is the transition
+    member OF the `setUnion` aggregate. The aggregate itself is `sqlAgg`, named
+    the way the SQL surface names one where a scalar shares its spelling
+    (merge / mergeAgg, tMin / tMinAgg)."""
     a2n = _meos_agg_names(meos_src)
     n = 0
     for f in idl["functions"]:
         names = a2n.get(f["name"])
         if names:
-            f["sqlAgg"] = names
+            f["sqlAggRole"] = names
             n += 1
     return idl, n
 
 
 def attach_sqlaggfn_map(idl, meos_src, mdb_src):
-    """Attach `sqlAggregate` — the SQL AGGREGATE(s) a function's PG wrapper
-    serves, read from @sqlaggfn in mobilitydb/src over the same @csqlfn chain
-    that resolves `sqlfn`.
+    """Attach `sqlAgg` — the SQL AGGREGATE(s) a function's PG wrapper serves,
+    read from @sqlaggfn in mobilitydb/src over the same @csqlfn chain that
+    resolves `sqlfn`.
 
-    This is the aggregate name a binding registers (`tCount`), and it is a
-    different fact from both neighbours it sits beside:
+    `Agg` is how the SQL surface itself names an aggregate where a scalar shares
+    its spelling (merge / mergeAgg, tMin / tMinAgg), so it is the word for the
+    field that holds one. This is the name a binding registers (`tCount`), and
+    it is a different fact from both neighbours it sits beside:
 
-      `sqlfn`   the CREATE FUNCTION the wrapper backs (`tcount_transfn`) — the
-                aggregate's transition member, which no user calls;
-      `sqlAgg`  the aggregate-ROLE name from MEOS's @csqlaggfn
-                (`setUnionTransition`), naming the member within its aggregate.
+      `sqlfn`       the CREATE FUNCTION the wrapper backs (`tcount_transfn`) —
+                    the aggregate's transition member, which no user calls;
+      `sqlAggRole`  the aggregate-ROLE name from MEOS's @csqlaggfn
+                    (`setUnionTransition`), naming the member WITHIN its
+                    aggregate rather than the aggregate.
 
     Keeping them apart is what lets a binding tell an aggregate from a function
     without reading the C symbol's suffix, and it is why `sqlfn` can state the
@@ -539,7 +547,7 @@ def attach_sqlaggfn_map(idl, meos_src, mdb_src):
                 if a not in names:
                     names.append(a)
         if names:
-            f["sqlAggregate"] = names
+            f["sqlAgg"] = names
             n += 1
     return idl, n
 

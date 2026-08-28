@@ -86,8 +86,8 @@ class SqlAggfnTests(unittest.TestCase):
             idl, n = attach_sqlaggfn_map(idl, meos, mdb)
         by = {f["name"]: f for f in idl["functions"]}
         self.assertEqual(n, 1)
-        self.assertEqual(by["temporal_tcount_transfn"]["sqlAggregate"], ["tCount"])
-        self.assertNotIn("sqlAggregate", by["temporal_num_instants"])
+        self.assertEqual(by["temporal_tcount_transfn"]["sqlAgg"], ["tCount"])
+        self.assertNotIn("sqlAgg", by["temporal_num_instants"])
 
     def test_sqlfn_states_the_function_the_wrapper_backs(self):
         """The two tags coexist on one block: the aggregate name does not take
@@ -99,7 +99,7 @@ class SqlAggfnTests(unittest.TestCase):
             idl, _ = attach_sqlaggfn_map(idl, meos, mdb)
         f = idl["functions"][0]
         self.assertEqual(f["sqlfn"], "tcount_transfn")
-        self.assertEqual(f["sqlAggregate"], ["tCount"])
+        self.assertEqual(f["sqlAgg"], ["tCount"])
 
 
 if __name__ == "__main__":
