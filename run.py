@@ -14,7 +14,8 @@ from parser.nullable import merge_nullable
 from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import merge_boundargs
 from parser.enrich import enrich_idl
-from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, lint_ea_sqlfn,
+from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map,
+                          attach_sqlaggfn_map, lint_ea_sqlfn,
                           lint_positional_sqlfn, lint_sqlfn_case_collisions)
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
@@ -188,6 +189,12 @@ def main():
         # named binary set/span union function. One-hop, faithful to the source tag.
         idl, nagg = attach_aggfn_map(idl, MEOS_SRC)
         print(f"      Attached {nagg} @csqlaggfn aggregate names", file=sys.stderr)
+        # The SQL aggregate a member serves, from @sqlaggfn on its PG wrapper. It
+        # rides the same @csqlfn chain as `sqlfn`, and holds the name a binding
+        # registers the aggregate under, so `sqlfn` is free to state the CREATE
+        # FUNCTION the wrapper backs rather than the aggregate above it.
+        idl, naggfn = attach_sqlaggfn_map(idl, MEOS_SRC, MDB_SRC)
+        print(f"      Attached {naggfn} @sqlaggfn SQL aggregate names", file=sys.stderr)
         # Guard: a copy-paste @csqlfn in meos/src can point an ever/always function at
         # the opposite-prefix wrapper (eintersects_* tagged #Aintersects_*), flipping its
         # SQL name and breaking the binding overload dispatch. The parser is faithful, so
