@@ -188,7 +188,7 @@ def main():
         # implements, so an aggregate member is distinguishable from the identically
         # named binary set/span union function. One-hop, faithful to the source tag.
         idl, nagg = attach_aggfn_map(idl, MEOS_SRC)
-        print(f"      Attached {nagg} @csqlaggfn aggregate names", file=sys.stderr)
+        print(f"      Attached {nagg} @csqlaggfn aggregate-role names", file=sys.stderr)
         # The SQL aggregate a member serves, from @sqlaggfn on its PG wrapper. It
         # rides the same @csqlfn chain as `sqlfn`, and holds the name a binding
         # registers the aggregate under, so `sqlfn` is free to state the CREATE
