@@ -90,7 +90,14 @@ if [ "$BUILD_LIBMEOS" = 1 ]; then
 
   # Optional CI-provisioned toolchain locations: pass each only when it exists, so CI (where
   # they do) stays byte-for-byte and a developer's cmake auto-detects its own instead.
-  cfg=(-DCMAKE_BUILD_TYPE=Release -DMEOS=ON $FAMILIES)
+  # The install prefix belongs to the CONFIGURE step, not only to the install:
+  # meos.pc is generated from CMAKE_INSTALL_PREFIX at configure time, so a build
+  # configured for the default prefix keeps naming /usr/local no matter where
+  # `cmake --install --prefix` puts the files. A consumer that follows the
+  # installed library's own pkg-config file -- which is how a generated binding
+  # discovers the include dir and the family macros -- would then be sent to
+  # whatever occupies the machine-wide directory instead of this prefix.
+  cfg=(-DCMAKE_BUILD_TYPE=Release -DMEOS=ON -DCMAKE_INSTALL_PREFIX="$PARSE_PREFIX" $FAMILIES)
   [ -e "${H3_LIBRARY:=/usr/lib/x86_64-linux-gnu/libh3.so}" ] && cfg+=(-DH3_LIBRARY="$H3_LIBRARY")
   [ -e "${H3_INCLUDE_DIR:=/usr/include/h3}" ]                && cfg+=(-DH3_INCLUDE_DIR="$H3_INCLUDE_DIR")
   [ -x "${PG_CONFIG:=/usr/lib/postgresql/17/bin/pg_config}" ] && cfg+=(-DPOSTGRESQL_PG_CONFIG="$PG_CONFIG")
