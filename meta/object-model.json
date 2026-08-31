@@ -84,28 +84,6 @@
       "prefixes": [
         "temporal"
       ],
-      "temptypes": [
-        "T_TBOOL",
-        "T_TTEXT",
-        "T_TJSONB",
-        "T_TINT",
-        "T_TBIGINT",
-        "T_TFLOAT",
-        "T_TGEOMPOINT",
-        "T_TGEOGPOINT",
-        "T_TGEOMETRY",
-        "T_TGEOGRAPHY",
-        "T_TCBUFFER",
-        "T_TNPOINT",
-        "T_TPOSE",
-        "T_TPOSECHAIN",
-        "T_TRGEOMETRY",
-        "T_TH3INDEX",
-        "T_TQUADBIN",
-        "T_TS2CELL",
-        "T_TPCPOINT",
-        "T_TPCPATCH"
-      ],
       "doc": "Superclass of every temporal type; temporal_* functions are late-bound over `subtype` and `temptype`."
     },
     "TAlpha": {
@@ -114,11 +92,6 @@
       "predicate": "talpha_type",
       "prefixes": [
         "talpha"
-      ],
-      "temptypes": [
-        "T_TBOOL",
-        "T_TTEXT",
-        "T_TJSONB"
       ],
       "doc": "Non-numeric, non-spatial temporal types (step/discrete interpolation only). A real MEOS grouping (talpha_type) with no user-facing class name in PyMEOS — see corrections."
     },
@@ -131,8 +104,7 @@
       ],
       "temptypes": [
         "T_TBOOL"
-      ],
-      "cBaseType": "T_BOOL"
+      ]
     },
     "TText": {
       "kind": "leaf",
@@ -143,8 +115,7 @@
       ],
       "temptypes": [
         "T_TTEXT"
-      ],
-      "cBaseType": "T_TEXT"
+      ]
     },
     "TJsonb": {
       "kind": "leaf",
@@ -155,8 +126,7 @@
       ],
       "temptypes": [
         "T_TJSONB"
-      ],
-      "cBaseType": "T_JSONB"
+      ]
     },
     "TNumber": {
       "kind": "abstract",
@@ -164,11 +134,6 @@
       "predicate": "tnumber_type",
       "prefixes": [
         "tnumber"
-      ],
-      "temptypes": [
-        "T_TINT",
-        "T_TBIGINT",
-        "T_TFLOAT"
       ],
       "basePredicate": "tnumber_basetype",
       "doc": "Temporal numbers; supports linear interpolation."
@@ -182,8 +147,7 @@
       ],
       "temptypes": [
         "T_TINT"
-      ],
-      "cBaseType": "T_INT4"
+      ]
     },
     "TBigint": {
       "kind": "leaf",
@@ -194,8 +158,7 @@
       ],
       "temptypes": [
         "T_TBIGINT"
-      ],
-      "cBaseType": "T_INT8"
+      ]
     },
     "TFloat": {
       "kind": "leaf",
@@ -206,8 +169,7 @@
       ],
       "temptypes": [
         "T_TFLOAT"
-      ],
-      "cBaseType": "T_FLOAT8"
+      ]
     },
     "TSpatial": {
       "kind": "abstract",
@@ -215,22 +177,6 @@
       "predicate": "tspatial_type",
       "prefixes": [
         "tspatial"
-      ],
-      "temptypes": [
-        "T_TGEOMPOINT",
-        "T_TGEOGPOINT",
-        "T_TGEOMETRY",
-        "T_TGEOGRAPHY",
-        "T_TCBUFFER",
-        "T_TNPOINT",
-        "T_TPOSE",
-        "T_TPOSECHAIN",
-        "T_TRGEOMETRY",
-        "T_TH3INDEX",
-        "T_TQUADBIN",
-        "T_TS2CELL",
-        "T_TPCPOINT",
-        "T_TPCPATCH"
       ],
       "doc": "Temporal types carrying an STBox spatial bounding box."
     },
@@ -243,12 +189,6 @@
         "tgeo"
       ],
       "userFacingName": "TGeo",
-      "temptypes": [
-        "T_TGEOMETRY",
-        "T_TGEOGRAPHY",
-        "T_TGEOMPOINT",
-        "T_TGEOGPOINT"
-      ],
       "doc": "All PostGIS-derived spatiotemporal types (geometry/geography-based). Authoritative parent per MobilityDB manual Ch.7 Figure 7.1 (= the broad C predicate tgeo_type_all). NOTE: the narrower C predicate tgeo_type() and most tgeo_* functions reject points — class membership (manual) is broader than tgeo_* API applicability; see correction OM-M1."
     },
     "TPoint": {
@@ -259,10 +199,6 @@
         "tpoint"
       ],
       "userFacingName": "TPoint",
-      "temptypes": [
-        "T_TGEOMPOINT",
-        "T_TGEOGPOINT"
-      ],
       "doc": "Temporal points. API-level intermediate (C predicate tpoint_type + the tpoint_* method family); NOT drawn in the manual Figure 7.1 (a conceptual diagram) but required so the tpoint_* methods bind to a class — see correction OM-M6."
     },
     "TGeomPoint": {
@@ -276,7 +212,6 @@
       "temptypes": [
         "T_TGEOMPOINT"
       ],
-      "cBaseType": "T_GEOMETRY",
       "traits": [
         "geometryBased"
       ]
@@ -292,7 +227,6 @@
       "temptypes": [
         "T_TGEOGPOINT"
       ],
-      "cBaseType": "T_GEOGRAPHY",
       "traits": [
         "geodetic"
       ]
@@ -308,7 +242,6 @@
       "temptypes": [
         "T_TGEOMETRY"
       ],
-      "cBaseType": "T_GEOMETRY",
       "traits": [
         "geometryBased"
       ]
@@ -324,7 +257,6 @@
       "temptypes": [
         "T_TGEOGRAPHY"
       ],
-      "cBaseType": "T_GEOGRAPHY",
       "traits": [
         "geodetic"
       ]
@@ -340,7 +272,6 @@
       "temptypes": [
         "T_TCBUFFER"
       ],
-      "cBaseType": "T_CBUFFER",
       "conditional": "CBUFFER"
     },
     "TNpoint": {
@@ -354,7 +285,6 @@
       "temptypes": [
         "T_TNPOINT"
       ],
-      "cBaseType": "T_NPOINT",
       "conditional": "NPOINT"
     },
     "TPose": {
@@ -368,7 +298,6 @@
       "temptypes": [
         "T_TPOSE"
       ],
-      "cBaseType": "T_POSE",
       "conditional": "POSE"
     },
     "TRGeometry": {
@@ -384,7 +313,6 @@
       "temptypes": [
         "T_TRGEOMETRY"
       ],
-      "cBaseType": "T_POSE",
       "conditional": "RGEO",
       "note": "Base type is T_POSE, not a geometry — base != name (see corrections). User-facing API name is `trgeometry`; internal C functions keep the `trgeo_` prefix and must NOT be normalized."
     }
@@ -393,19 +321,10 @@
     "_comment": "Orthogonal boolean axes — NOT inheritance parents (modelling them as parents would create a diamond TGeomPoint<-{TPoint,TGeometryBased}). Tagged on leaves; each backed by a MEOS predicate, gated against source.",
     "geometryBased": {
       "predicate": "tgeometry_type",
-      "temptypes": [
-        "T_TGEOMPOINT",
-        "T_TGEOMETRY"
-      ],
       "doc": "Cartesian (planar) base — geometry."
     },
     "geodetic": {
       "predicate": "tgeodetic_type",
-      "temptypes": [
-        "T_TGEOGPOINT",
-        "T_TGEOGRAPHY",
-        "T_TH3INDEX"
-      ],
       "doc": "Ellipsoidal base — geography; also the H3 DGGS cells (geodetic, SRID 4326)."
     }
   },

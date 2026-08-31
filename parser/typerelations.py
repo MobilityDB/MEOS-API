@@ -65,7 +65,7 @@ def temptype_basetypes(cat_src: str) -> dict:
             if "temptype_basetype" in fields}
 
 
-def _locate_catalog(src_root: Path | None) -> Path | None:
+def locate_catalog(src_root: Path | None) -> Path | None:
     """The ``meos_catalog.c`` path from the resolved source root, or the ``MDB_SRC_ROOT`` checkout.
 
     The object-model resolver returns the ``meos/src`` directory when it can, but on the
@@ -95,7 +95,7 @@ def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
     registry: the consumers read the registry to resolve a concrete collection
     type, so an empty one silently degrades every one of them.
     """
-    catalog = _locate_catalog(src_root)
+    catalog = locate_catalog(src_root)
     if catalog is None:
         return idl
 
