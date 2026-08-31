@@ -163,3 +163,31 @@ bindings leave `build-libmeos` at its default and consume only `catalog-path`.
 
 (a) add the two CI steps above; (b) point your generator at `catalog-path` (or `cp` it into
 place); (c) `git rm` any committed `meos-idl.json` / `libmeos.so` and add them to `.gitignore`.
+
+## Keeping a binding's tree honest (check-tree-hygiene)
+
+The advice above — never track a `libmeos.so` or a `meos-idl.json` — is a rule a
+repository drifts out of quietly, because nothing in a green build notices. The
+`check-tree-hygiene` action makes it mechanical, and covers the three siblings of
+the same drift:
+
+| rule | what it refuses | what it cost when it went unchecked |
+| --- | --- | --- |
+| `build-output` | a tracked `.so`, `.jar`, `.class`, `target/` entry or `dependency-reduced-pom.xml` | a 5.9 MB `libmeos.so` under a benchmark module, made the default `meos.lib.dir` by its own pom: a local run loaded it while CI loaded a freshly built one, and it answered for neither S2CELL nor POSECHAIN |
+| `skipped-tests` | `-DskipTests`, `-Dmaven.test.skip`, `<skipTests>`, `skipITs` | a jar built and published from a suite that never ran |
+| `stale-pin` | a clone of an ecosystem repository off `master`, or onto a fork | a Dockerfile building MobilityDB `stable-1.3` and a personal fork, while the jar in the same image came from the catalog of master |
+| `orphan-image` | a named `Dockerfile*` no tracked file references | an image nothing built, kept current by nobody |
+
+Add it as one step; it builds nothing and installs nothing.
+
+```yaml
+- name: Check tree hygiene
+  uses: MobilityDB/MEOS-API/.github/actions/check-tree-hygiene@master
+```
+
+Run the same rules over a working tree with `tools/check-tree-hygiene.py`, which
+is what the action calls, so a local answer and a CI answer cannot differ.
+
+A deliberate exception is a recorded decision, so it lives in the repository as
+`tools/tree-hygiene-allow.txt` — one `<rule> <path-glob>  # why` per line — and
+carries its reason beside it.

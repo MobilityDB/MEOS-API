@@ -1,0 +1,56 @@
+name: tree hygiene
+
+# Dogfoods the reusable check-tree-hygiene composite action against this
+# repository, so the rules a consumer imports are the rules this repository is
+# held to. The check reads `git ls-files` and nothing else — no build, no
+# install — so it answers in seconds on every pull request.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  hygiene:
+    name: Refuse tracked build output, skipped suites and stale pins
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Run the script from this checkout rather than through the action, which
+      # would fetch master: a pull request must be checked by the rules it
+      # carries, or a change to them is not exercised until after it merges.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check the tree
+        run: tools/check-tree-hygiene.py --root .
+
+      # The rules earn their place by failing on a tree that carries the state
+      # they name. The fixture is built here rather than tracked, since tracking
+      # a .so is the very thing the first rule refuses — and its strings are
+      # assembled from parts, since a workflow spelling them outright is exactly
+      # what the rules are here to catch.
+      - name: Prove the check can fail
+        run: |
+          set -e
+          SKIP="-D""skipTests"
+          STALE="stable""-1.3"
+          FIX=$(mktemp -d)
+          git -C "$FIX" init -q
+          mkdir -p "$FIX/mod"
+          printf '\x7fELF fixture' > "$FIX/mod/libmeos.so"
+          echo "RUN git clone https://github.com/MobilityDB/MobilityDB.git -b $STALE /src" \
+            > "$FIX/Dockerfile.fixture"
+          echo "mvn package $SKIP" > "$FIX/build.sh"
+          echo "nothing references the fixture image" > "$FIX/README.md"
+          git -C "$FIX" add -A
+          if python3 "$GITHUB_WORKSPACE/tools/check-tree-hygiene.py" --root "$FIX"; then
+            echo "::error::the check passed a tree carrying build output, a stale pin, a skipped suite and an orphan image"
+            exit 1
+          fi
+          echo "the check fails on the fixture, as it must"

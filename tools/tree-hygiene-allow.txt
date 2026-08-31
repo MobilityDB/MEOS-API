@@ -1,0 +1,8 @@
+# Deliberate exceptions to tools/check-tree-hygiene.py, one per line:
+#
+#   <rule> <path-glob>  # why
+#
+# An exception is a recorded decision, so it carries its reason here rather than
+# living as a silent hole in the rules.
+
+skipped-tests GENERATION.md  # the rule table names the flags it forbids, to forbid them
