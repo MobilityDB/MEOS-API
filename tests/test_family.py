@@ -73,6 +73,22 @@ class FamilyClassificationTests(unittest.TestCase):
         for family in self.optional_families - {"RASTER"}:
             self.assertIn(family, present, f"{family} unpopulated — classifier regression?")
 
+    def test_family_guard_outranks_the_declaring_header(self):
+        # A family's declarations do not all live in the family's own header: a
+        # shared header carries some under `#if <FAMILY>`, which MobilityDB
+        # compiles out when the family is off. The path says meos.h, so a
+        # path-only classifier calls them CORE and a consumer gating on this
+        # field emits them into a build whose headers never declared them and
+        # whose library never defined them. These sit under `#if POINTCLOUD` in
+        # meos.h and meos_catalog.h; the control beside them is unguarded and
+        # stays CORE, so the test fails if the guard is read too widely as well
+        # as if it is not read at all.
+        for name in ("rtree_create_tpcbox", "sptree_create_tpcbox",
+                     "meos_initialize_pointcloud", "pointcloud_basetype"):
+            self.assertEqual(self._family(name), "POINTCLOUD", name)
+        for name in ("sptree_create_stbox", "sptree_create_tbox"):
+            self.assertEqual(self._family(name), "CORE", name)
+
     def test_families_are_known_labels(self):
         # The field's vocabulary is CORE plus the published list; anything else
         # means the classifier named a family the build never had.

@@ -1,8 +1,9 @@
 import re
 import clang.cindex
+from functools import lru_cache
 from pathlib import Path
 
-from parser.families import header_family, subdir_family
+from parser.families import all_families, header_family, subdir_family
 
 
 def _canonical_spelling(ty) -> str:
@@ -131,15 +132,75 @@ def _canonical_c_spelling(ty) -> str:
 # core, the base ``geo``/tpoint types the families build on, and the shared
 # top-level headers — is ``CORE`` and always emitted.
 # -----------------------------------------------------------------------------
-def _family_of(loc_path: str) -> str:
-    """Classify the declaring header into its optional family, or ``CORE``.
+#: A family's declarations do not all live in the family's own header. A shared
+#: header carries a few under ``#if <FAMILY>``, which MobilityDB compiles out when
+#: the family is off — three in ``meos.h`` at the time of writing
+#: (``rtree_create_tpcbox``, ``sptree_create_tpcbox``, ``meos_initialize_pointcloud``,
+#: all under ``#if POINTCLOUD``). The path says ``meos.h``, so a path-only
+#: classification calls them ``CORE``, and a consumer gating on the family field
+#: emits them unconditionally: the declaration is gone from its build and the
+#: symbol is absent from its library, so the wrapper fails to compile or fails to
+#: link. Reading the guard is what makes the field answer for those too.
+#:
+#: `#else` ends the family's region rather than continuing it: the alternative
+#: branch is the one taken when the family is OFF, so nothing in it belongs to the
+#: family.
+_GUARD_OPEN = re.compile(
+    r"^\s*#\s*if(?:def)?\s+(?:defined\s*\(\s*)?([A-Z][A-Z0-9_]*)\s*\)?\s*$")
+_GUARD_ELSE = re.compile(r"^\s*#\s*el(?:se|if)\b")
+_GUARD_CLOSE = re.compile(r"^\s*#\s*endif\b")
 
-    The family is taken from the header's parent directory (the canonical
-    grouping); the top-level ``meos_<family>.h`` public headers are mapped by
-    name. Both mappings are derived from MobilityDB's own ``ALL`` family list,
-    so a family added there is classified here with no edit. Anything unmatched
-    (temporal core, base geo, shared headers) is ``CORE`` and always emitted.
+
+@lru_cache(maxsize=None)
+def _guard_families(loc_path: str) -> tuple:
+    """Per-line family guard for a header: ``line number -> family or None``.
+
+    Returned as a tuple indexed by 1-based line, so a lookup is a subscript. A
+    header that cannot be read guards nothing, which is the same answer a header
+    with no family guard gives.
     """
+    families = set(all_families())
+    try:
+        lines = Path(loc_path).read_text(errors="ignore").splitlines()
+    except OSError:
+        return ()
+    out = [None] * (len(lines) + 1)
+    stack = []
+    for i, line in enumerate(lines, start=1):
+        m = _GUARD_OPEN.match(line)
+        if m:
+            stack.append(m.group(1) if m.group(1) in families else None)
+            out[i] = None
+            continue
+        if _GUARD_CLOSE.match(line):
+            if stack:
+                stack.pop()
+            out[i] = None
+            continue
+        if _GUARD_ELSE.match(line):
+            if stack:
+                stack[-1] = None
+            out[i] = None
+            continue
+        out[i] = next((f for f in reversed(stack) if f is not None), None)
+    return tuple(out)
+
+
+def _family_of(loc_path: str, line: int = 0) -> str:
+    """Classify a declaration into its optional family, or ``CORE``.
+
+    The guard the declaration sits under is read first, because it is the one
+    signal that answers for a family's declarations placed outside the family's
+    own header. Otherwise the family is taken from the header's parent directory
+    (the canonical grouping), then from the top-level ``meos_<family>.h`` public
+    headers by name. Every mapping derives from MobilityDB's own ``ALL`` family
+    list, so a family added there is classified here with no edit. Anything
+    unmatched (temporal core, base geo, shared headers) is ``CORE`` and always
+    emitted.
+    """
+    guards = _guard_families(loc_path)
+    if 0 < line < len(guards) and guards[line] is not None:
+        return guards[line]
     path = Path(loc_path)
     fam = subdir_family().get(path.parent.name)
     if fam is not None:
@@ -180,7 +241,7 @@ def extract_function(node) -> dict:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
-        "family": _family_of(node.location.file.name),
+        "family": _family_of(node.location.file.name, node.location.line),
         "vendored": _is_vendored(node.location.file.name),
         "returnType": {
             "c": _c_spelling(node.result_type),
@@ -201,7 +262,7 @@ def extract_struct(node) -> dict:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
-        "family": _family_of(node.location.file.name),
+        "family": _family_of(node.location.file.name, node.location.line),
         "vendored": _is_vendored(node.location.file.name),
         "fields": [
             {
@@ -219,7 +280,7 @@ def extract_enum(node) -> dict:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
-        "family": _family_of(node.location.file.name),
+        "family": _family_of(node.location.file.name, node.location.line),
         "vendored": _is_vendored(node.location.file.name),
         "values": [
             {
@@ -259,7 +320,7 @@ def extract_macro(node) -> dict | None:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
-        "family": _family_of(node.location.file.name),
+        "family": _family_of(node.location.file.name, node.location.line),
         "vendored": _is_vendored(node.location.file.name),
         "value": value,
     }
