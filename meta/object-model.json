@@ -667,7 +667,7 @@
     ]
   },
   "errors": {
-    "_comment": "The MEOS error/exception contract. MEOS has a single raise mechanism: meos_error(int errlevel, int errcode, const char *fmt, ...) (meos.h). errcode is an `errorCode` enum value. The per-function `raises` set is DERIVED by static scan of the function definition body in MobilityDB meos/src (see derivation) — never fabricated.",
+    "_comment": "The MEOS error/exception contract. MEOS has a single raise mechanism: meos_error(int errlevel, int errcode, const char *fmt, ...) (meos_error.h). errcode is an `errorCode` enum value. The per-function `raises` set is DERIVED by static scan of the function definition body in MobilityDB meos/src (see derivation) — never fabricated.",
     "enum": "errorCode",
     "raiseSite": "meos_error(int errlevel, int errcode, const char *format, ...)",
     "codes": [
@@ -717,6 +717,11 @@
         "meaning": "Internal file error"
       },
       {
+        "name": "MEOS_ERR_OUT_OF_MEMORY",
+        "value": 9,
+        "meaning": "Out of memory error"
+      },
+      {
         "name": "MEOS_ERR_INVALID_ARG",
         "value": 10,
         "meaning": "Invalid argument"
@@ -735,6 +740,21 @@
         "name": "MEOS_ERR_FEATURE_NOT_SUPPORTED",
         "value": 13,
         "meaning": "Feature not currently supported"
+      },
+      {
+        "name": "MEOS_ERR_INDETERMINATE_COLLATION",
+        "value": 14,
+        "meaning": "Indeterminate collation"
+      },
+      {
+        "name": "MEOS_ERR_SYNTAX_ERROR",
+        "value": 15,
+        "meaning": "Syntax error"
+      },
+      {
+        "name": "MEOS_ERR_NULL_RESULT",
+        "value": 16,
+        "meaning": "Operation returned null"
       },
       {
         "name": "MEOS_ERR_MFJSON_INPUT",
@@ -775,6 +795,16 @@
         "name": "MEOS_ERR_GEOJSON_OUTPUT",
         "value": 27,
         "meaning": "GEOJSON output error"
+      },
+      {
+        "name": "MEOS_ERR_SQL_JSON_ERROR",
+        "value": 28,
+        "meaning": "SQL JSON error"
+      },
+      {
+        "name": "MEOS_ERR_INVALID_REGULAR_EXPRESSION",
+        "value": 29,
+        "meaning": "Regular expression error"
       }
     ],
     "derivation": {
