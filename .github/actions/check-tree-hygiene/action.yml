@@ -1,0 +1,49 @@
+name: Check tree hygiene
+description: >-
+  Refuse the four ways a binding repository accumulates a state its own CI cannot
+  see: tracked build output, a suite kept from running, a clone pinned off master
+  or onto a fork, and a Dockerfile nothing builds.
+
+  The rules themselves are tools/check-tree-hygiene.py in this repository, the one
+  runnable definition this action and a developer both call, so the CI path and the
+  by-hand path cannot drift. A consumer runs this action against its own checkout;
+  nothing is built and nothing is installed, so it costs a checkout and a python.
+
+inputs:
+  path:
+    description: "Directory to check (default: the workspace)."
+    required: false
+    default: "."
+  rules:
+    description: >-
+      Space-separated subset of build-output, skipped-tests, stale-pin,
+      orphan-image. Empty runs them all.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # The rules live beside the catalog and the provisioning recipe, so a
+    # consumer takes them from here rather than carrying a copy that goes stale.
+    - name: Check out the rules
+      uses: actions/checkout@v4
+      with:
+        repository: MobilityDB/MEOS-API
+        ref: master
+        path: .meos-api-hygiene
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Check the tree
+      shell: bash
+      run: |
+        RULE_ARGS=""
+        for rule in ${{ inputs.rules }}; do
+          RULE_ARGS="$RULE_ARGS --rule $rule"
+        done
+        python3 "$GITHUB_WORKSPACE/.meos-api-hygiene/tools/check-tree-hygiene.py" \
+          --root "${{ inputs.path }}" $RULE_ARGS
