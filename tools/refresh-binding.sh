@@ -21,6 +21,7 @@
 #     MDB_REF=master                        # MobilityDB ref to derive from (pinned bindings override)
 #     FAMILIES=-DALL=ON                     # cmake family flags for the libmeos build
 #     CATALOG_DEST=tools/meos-idl.json      # where to stage the catalog, relative to the repo
+#     GENERATOR_DEST=tools                  # where to stage the JVM generator (JVM consumers)
 #     JMEOS_COORDS=org.jmeos:meos:1.0       # JVM only: build+install the JMEOS jar as these coords
 #     BUILD_CMD='<generate + build + test>' # run from <repo>/<BUILD_DIR>
 # BUILD_CMD runs with $PREFIX (libmeos install prefix, empty when BUILD_LIBMEOS=false),
@@ -87,6 +88,7 @@ WORK_DIR="$(cd "$WORK_DIR" && pwd)"
 # Read the binding's last-leg description; apply defaults, then let CLI flags override.
 ENGINE=""; BUILD_DIR="."; BUILD_LIBMEOS="true"; MDB_REF="master"
 FAMILIES="-DALL=ON"; CATALOG_DEST="tools/meos-idl.json"; JMEOS_COORDS=""; BUILD_CMD=""
+GENERATOR_DEST=""
 # shellcheck source=/dev/null
 . "$BINDING/tools/refresh.conf"
 [ -n "$BUILD_CMD" ] || { echo "refresh.conf: BUILD_CMD is required" >&2; exit 2; }
@@ -211,6 +213,18 @@ fi
 if [ -n "$CATALOG_DEST" ]; then
   mkdir -p "$(dirname "$BINDING/$CATALOG_DEST")"
   cp "$CATALOG" "$BINDING/$CATALOG_DEST"
+fi
+
+# Stage the JVM generator beside the catalog, when GENERATOR_DEST is set. The generator is one
+# file with three engine arms, so it lives here and each consumer receives the same copy rather
+# than vendoring its own: three vendored copies drift, and the one that gains a feature keeps it
+# to itself. Staged rather than committed, exactly as the catalog is, so a consumer's tree holds
+# no copy to go stale. `codegen_spark_udfs.py` travels with it because the spark arm delegates to
+# it by `__file__`.parent, so the two are one unit wherever they sit.
+if [ -n "$GENERATOR_DEST" ]; then
+  mkdir -p "$BINDING/$GENERATOR_DEST"
+  cp "$MEOSAPI/tools/codegen_jvm.py" "$MEOSAPI/tools/codegen_spark_udfs.py" \
+     "$BINDING/$GENERATOR_DEST/"
 fi
 
 step "Building the ${ENGINE:-binding} surface from the catalog"
