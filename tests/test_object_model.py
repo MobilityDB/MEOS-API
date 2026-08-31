@@ -9,6 +9,7 @@ truth cannot silently drift away from MEOS.
 """
 
 import json
+import os
 import re
 import sys
 import tempfile
@@ -250,6 +251,53 @@ def _enum_block(text: str, end_marker: str) -> dict:
     block = text[start:end]
     return {n: int(v) for n, v in
             re.findall(r"\b([A-Z][A-Z0-9_]+)\s*=\s*(\d+)", block)}
+
+
+class SourceRootResolutionTest(unittest.TestCase):
+    """The resolver answers over the checkout the provisioning names.
+
+    The directory name belongs to the provisioner: the CI action checks MobilityDB
+    out as ``_mobilitydb_src`` and hands the parse ``MDB_SRC_ROOT``, while the
+    literal probe names ``_mobilitydb``.  A resolver reading only the literal name
+    reports no source over a tree that is present, and the catalog then carries
+    neither the object model nor the type relations the source states.
+    """
+
+    def _tree(self, d):
+        src = Path(d) / "meos" / "src" / "temporal"
+        src.mkdir(parents=True)
+        (src / "meos_catalog.c").write_text("/* catalog */\n")
+        return Path(d)
+
+    def test_provisioned_root_resolves_whatever_the_directory_is_called(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self._tree(Path(d) / "_mobilitydb_src")
+            saved = {k: os.environ.pop(k, None) for k in ("MOBILITYDB_SRC", "MDB_SRC_ROOT")}
+            try:
+                os.environ["MDB_SRC_ROOT"] = str(root)
+                self.assertEqual(find_mobilitydb_src(), root / "meos" / "src")
+            finally:
+                for k, v in saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+
+    def test_no_source_still_answers_none(self):
+        # From a directory holding no checkout, so the relative `_mobilitydb`
+        # probe cannot answer and the result is the resolver's own.
+        saved = {k: os.environ.pop(k, None) for k in ("MOBILITYDB_SRC", "MDB_SRC_ROOT")}
+        cwd = os.getcwd()
+        try:
+            os.environ["MDB_SRC_ROOT"] = "/no/such/checkout"
+            with tempfile.TemporaryDirectory() as empty:
+                os.chdir(empty)
+                self.assertIsNone(find_mobilitydb_src())
+        finally:
+            os.chdir(cwd)
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
 
 
 _SRC = find_mobilitydb_src(ROOT / "meos" / "include")
