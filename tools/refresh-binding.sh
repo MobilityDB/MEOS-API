@@ -24,7 +24,9 @@
 #     JMEOS_COORDS=org.jmeos:meos:1.0       # JVM only: build+install the JMEOS jar as these coords
 #     BUILD_CMD='<generate + build + test>' # run from <repo>/<BUILD_DIR>
 # BUILD_CMD runs with $PREFIX (libmeos install prefix, empty when BUILD_LIBMEOS=false),
-# $CATALOG (absolute catalog path), $JAR (JVM only) exported; $SKIP_TESTS set with --skip-tests.
+# $CATALOG (absolute catalog path) and $JAR (JVM only) exported.  The binding's own suite always
+# runs: a refresh that skipped it reported a compile as a refresh, and the tests are the only
+# thing that tells a regenerated surface from a merely well-formed one.
 #
 # Usage:
 #   tools/refresh-binding.sh --binding <path> [options]
@@ -39,7 +41,6 @@
 #   --mdb-ref <ref>     Override the MobilityDB ref (else refresh.conf MDB_REF, else master).
 #   --jmeos-ref <ref>   JMEOS ref when --jmeos is not given. Default: main.
 #   --families <flags>  Override the cmake family flags (else refresh.conf FAMILIES, else -DALL=ON).
-#   --skip-tests        Build without running the binding's test suite (SKIP_TESTS=1 for BUILD_CMD).
 #   --force             Rebuild libmeos even when the MobilityDB commit is unchanged.
 #   -h, --help
 set -euo pipefail
@@ -54,7 +55,6 @@ MEOSAPI="${MEOSAPI:-$(cd "$(dirname "$0")/.." && pwd)}"
 MDB_REF_CLI=""
 JMEOS_REF="main"
 FAMILIES_CLI=""
-SKIP_TESTS=0
 FORCE=0
 
 while [ $# -gt 0 ]; do
@@ -67,7 +67,6 @@ while [ $# -gt 0 ]; do
     --mdb-ref)   MDB_REF_CLI="$2"; shift 2 ;;
     --jmeos-ref) JMEOS_REF="$2"; shift 2 ;;
     --families)  FAMILIES_CLI="$2"; shift 2 ;;
-    --skip-tests) SKIP_TESTS=1; shift ;;
     --force)     FORCE=1; shift ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "refresh-binding.sh: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
@@ -216,7 +215,6 @@ fi
 
 step "Building the ${ENGINE:-binding} surface from the catalog"
 export PREFIX CATALOG JAR
-[ "$SKIP_TESTS" = 1 ] && export SKIP_TESTS=1
 ( cd "$BINDING/$BUILD_DIR" && eval "$BUILD_CMD" )
 
 step "Done — ${ENGINE:-binding} refreshed against MobilityDB $MDB_COMMIT"
