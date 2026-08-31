@@ -6,6 +6,7 @@ import tempfile
 import os
 from pathlib import Path
 
+from parser.families import all_families
 from parser.extractors import (
     extract_function,
     extract_struct,
@@ -97,18 +98,6 @@ def merge_meta(idl: dict, meta_path: Path) -> dict:
     return idl
 
 
-# The optional families MobilityDB's ``ALL=ON`` build enables, each defining a
-# ``-D<FAMILY>=1`` compile flag. Mirror that build here so declarations guarded
-# by ``#if <FAMILY>`` in the core headers (e.g. ``#if POINTCLOUD`` around
-# ``meos_initialize_pointcloud`` in meos.h) enter the catalog — the family
-# headers themselves are unguarded, but a handful of core-header declarations
-# are gated. Kept in sync with MobilityDB CMakeLists.txt's ``if(ALL) foreach``.
-_ALL_FAMILIES = (
-    "CBUFFER", "H3", "JSON", "NPOINT", "POINTCLOUD", "POSE",
-    "QUADBIN", "RASTER", "RGEO",
-)
-
-
 def parse_meos(entry: Path, include_dir: Path,
                extra_headers: tuple[Path, ...] = ()) -> dict:
     index = clang.cindex.Index.create()
@@ -125,7 +114,14 @@ def parse_meos(entry: Path, include_dir: Path,
         # it, and an undefined ``UNUSED`` makes clang error on the declarator and
         # silently drop the remaining parameters of that prototype.
         "-DUNUSED=__attribute__((unused))",
-        *(f"-D{family}=1" for family in _ALL_FAMILIES),
+        # Define each optional family MobilityDB's ``ALL=ON`` build defines, so
+        # declarations guarded by ``#if <FAMILY>`` in the core headers (e.g.
+        # ``#if POINTCLOUD`` around ``meos_initialize_pointcloud`` in meos.h)
+        # enter the catalog — the family headers themselves are unguarded, but a
+        # handful of core-header declarations are gated. The list is read from
+        # MobilityDB's own ``if(ALL) foreach`` block rather than restated here,
+        # so a family added there is compiled in with no edit.
+        *(f"-D{family}=1" for family in all_families()),
     ] + _clang_extra_args(),
         # Record ``#define`` macro definitions as cursors so the public
         # object-like integer macros (WKB / WKT variant flags, ``MEOS_FLAG_*``)

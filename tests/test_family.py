@@ -8,9 +8,11 @@ top-level headers — is ``CORE``. A binding gates a family in or out purely by
 this field, so an edge build can drop unused families (e.g. POINTCLOUD) to
 shrink its footprint.
 
-These assert each optional family is populated, that representative symbols land
-in the right family, and that CORE stays the base. Plain unittest, no pytest
-dependency.
+The set of families is the catalog's own ``families`` field, read from
+MobilityDB's ``if(ALL) foreach`` list, so these tests cover a family added
+there without being edited. They assert each family is populated, that
+representative symbols land in the right family, and that CORE stays the
+base. Plain unittest, no pytest dependency.
 
 The IDL is generated, not committed; run ``python run.py`` first.
 """
@@ -20,11 +22,6 @@ from pathlib import Path
 
 IDL = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
 
-OPTIONAL_FAMILIES = {
-    "CBUFFER", "NPOINT", "POSE", "RGEO", "H3",
-    "QUADBIN", "POINTCLOUD", "JSON", "RASTER",
-}
-
 
 class FamilyClassificationTests(unittest.TestCase):
     def setUp(self):
@@ -33,6 +30,10 @@ class FamilyClassificationTests(unittest.TestCase):
         idl = json.loads(IDL.read_text())
         self.functions = idl["functions"]
         self.by_name = {f["name"]: f for f in self.functions}
+        # The catalog publishes the families it was built from, read out of
+        # MobilityDB's own `ALL` list; restating them here is what let POSECHAIN
+        # and S2CELL go unclassified while every hand copy still looked right.
+        self.optional_families = set(idl["families"])
 
     def _family(self, name):
         self.assertIn(name, self.by_name, f"{name} missing from IDL")
@@ -63,14 +64,19 @@ class FamilyClassificationTests(unittest.TestCase):
             self.assertEqual(self._family(name), "CORE", name)
 
     def test_each_optional_family_is_populated(self):
-        # Hard guard: a healthy full-surface IDL populates every optional family;
-        # an empty one means the header layout or the classifier regressed.
+        # Hard guard: a healthy full-surface IDL populates every family the build
+        # enabled; an empty one means the header layout or the classifier
+        # regressed, or that a family MobilityDB added is reaching the catalog as
+        # CORE. RASTER needs the postgis_raster extension to be on the build
+        # path, so its absence is a build fact rather than a classifier one.
         present = {f["family"] for f in self.functions}
-        for family in OPTIONAL_FAMILIES - {"RASTER"}:
+        for family in self.optional_families - {"RASTER"}:
             self.assertIn(family, present, f"{family} unpopulated — classifier regression?")
 
     def test_families_are_known_labels(self):
-        known = OPTIONAL_FAMILIES | {"CORE"}
+        # The field's vocabulary is CORE plus the published list; anything else
+        # means the classifier named a family the build never had.
+        known = self.optional_families | {"CORE"}
         for f in self.functions:
             self.assertIn(f["family"], known, f"{f['name']}: unknown family {f['family']}")
 

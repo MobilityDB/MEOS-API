@@ -19,6 +19,7 @@ from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map,
                           lint_positional_sqlfn, lint_sqlfn_case_collisions)
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
+from parser.families import all_families, use_headers_dir
 from parser.object_model import attach_object_model, find_mobilitydb_src
 from parser.typerelations import attach_type_relations
 
@@ -35,6 +36,11 @@ OUTPUT_DIR  = Path("./output")
 # Absent → honest source-unavailable signal, never a fabricated empty set.
 MOBILITYDB_SRC = (Path(sys.argv[2]) if len(sys.argv) > 2
                   else find_mobilitydb_src(HEADERS_DIR))
+
+# The families are read from the checkout's CMakeLists.txt; name the header tree
+# so a caller that cloned MobilityDB itself and passes only its headers (the
+# OpenAPI regeneration does) locates that checkout without exporting a variable.
+use_headers_dir(HEADERS_DIR)
 
 
 def _source_commit():
@@ -284,6 +290,13 @@ def main():
     idl["sourceCommit"] = _source_commit()
     print(f"      sourceCommit = {idl['sourceCommit'] or '(source not a git checkout — unstamped)'}",
           file=sys.stderr)
+
+    # Publish the optional families MobilityDB's `ALL=ON` build enables, read from its own
+    # `if(ALL) foreach` list. Every consumer of a family — the `family` field's own vocabulary,
+    # the family tests, a binding gating its build — reads this rather than restating the list,
+    # so a family added to MobilityDB reaches all of them without an edit anywhere downstream.
+    idl["families"] = list(all_families())
+    print(f"      families = {', '.join(idl['families'])}", file=sys.stderr)
 
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
