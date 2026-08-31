@@ -29,13 +29,6 @@ outputs:
   libmeos-prefix:
     description: Install prefix of libmeos when build-libmeos=true (else empty).
     value: ${{ steps.provision.outputs.libmeos-prefix }}
-  jvm-generator-dir:
-    description: >-
-      Directory holding the JVM surface generator, `codegen_jvm.py` and the
-      `codegen_spark_udfs.py` its spark arm delegates to. A JVM consumer copies
-      both beside its catalog rather than vendoring them, so the three engines
-      share one generator and a feature added to it reaches all of them.
-    value: ${{ github.action_path }}/../../../tools
   mobilitydb-src:
     description: >-
       The MobilityDB checkout the catalog was derived from. A consumer reads

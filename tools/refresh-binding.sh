@@ -215,15 +215,16 @@ if [ -n "$CATALOG_DEST" ]; then
   cp "$CATALOG" "$BINDING/$CATALOG_DEST"
 fi
 
-# Stage the JVM generator beside the catalog, when GENERATOR_DEST is set. The generator is one
-# file with three engine arms, so it lives here and each consumer receives the same copy rather
-# than vendoring its own: three vendored copies drift, and the one that gains a feature keeps it
-# to itself. Staged rather than committed, exactly as the catalog is, so a consumer's tree holds
-# no copy to go stale. `codegen_spark_udfs.py` travels with it because the spark arm delegates to
-# it by `__file__`.parent, so the two are one unit wherever they sit.
+# Stage the JVM generator beside the catalog, when GENERATOR_DEST is set. JMEOS owns it: the
+# generator emits calls into the `functions.GeneratedFunctions` JMEOS produces, so the two move
+# together. Each consumer receives the same copy rather than vendoring its own, staged rather
+# than committed exactly as the catalog is, so a consumer's tree holds no copy to go stale.
+# `codegen_spark_udfs.py` travels with it because the spark arm loads it by `__file__`.parent,
+# so the two are one unit wherever they sit.
 if [ -n "$GENERATOR_DEST" ]; then
+  [ -n "$JMEOS" ] || { echo "GENERATOR_DEST needs the JMEOS checkout (set JMEOS_COORDS)" >&2; exit 2; }
   mkdir -p "$BINDING/$GENERATOR_DEST"
-  cp "$MEOSAPI/tools/codegen_jvm.py" "$MEOSAPI/tools/codegen_spark_udfs.py" \
+  cp "$JMEOS/tools/codegen_jvm.py" "$JMEOS/tools/codegen_spark_udfs.py" \
      "$BINDING/$GENERATOR_DEST/"
 fi
 

@@ -217,22 +217,6 @@ catalog, the `family` classification and every consumer that gates on it
 without an edit anywhere downstream. A written-down copy goes short at the
 next family and silently classifies that family's whole surface as `CORE`.
 
-## The JVM surface generator
-
-`tools/codegen_jvm.py` is the generator the three JVM consumers — MobilitySpark,
-MobilityFlink and MobilityKafka — project their MEOS surface with, one file with
-an engine arm each (`--engine {spark|flink|kafka}`). It lives here rather than
-in each consumer because three vendored copies drift, and the copy that gains a
-feature keeps it to itself. `codegen_spark_udfs.py` sits beside it and travels
-with it: the spark arm loads it through `__file__`'s directory, so the two are
-one unit wherever they are.
-
-A consumer receives it the way it receives the catalog — staged, never
-committed. `tools/refresh-binding.sh` copies both files into the directory
-`GENERATOR_DEST` names, and the `provision-meos` action publishes the same
-directory as its `jvm-generator-dir` output for a workflow to copy from. A
-consumer therefore holds no copy of its own to go stale.
-
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog — including any field derived by the service-projection pass (e.g. correcting a `category` or forcing `network.exposable`).
