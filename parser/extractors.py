@@ -170,11 +170,41 @@ def _family_of(loc_path: str) -> str:
     return _TOPLEVEL_FAMILY.get(path.name, "CORE")
 
 
+#: A first-party header states MobilityDB's licence in its opening block; a header
+#: vendored from another project states that project's. MobilityDB's own `license_check`
+#: CI job holds every first-party file to that block, so it is an enforced invariant
+#: rather than a convention, and reading it needs no list of vendored file names.
+_OWN_LICENCE = "This MobilityDB code"
+_vendored_cache: dict = {}
+
+
+def _is_vendored(loc_path: str) -> bool:
+    """Whether the declaring header comes from a vendored project rather than MobilityDB.
+
+    A vendored library is linked as a static archive, so the linker pulls in only the
+    objects MEOS references while the header keeps declaring the whole library: those
+    declarations are real API of that library and belong in the catalog, but they are not
+    MEOS's surface and libmeos exports only the part it links. Marking them lets a consumer
+    hold MEOS's own declarations to the export invariant without either dropping the
+    vendored functions that ARE exported or asserting something untrue about the rest.
+    """
+    hit = _vendored_cache.get(loc_path)
+    if hit is None:
+        try:
+            head = Path(loc_path).read_text(errors="ignore")[:4096]
+            hit = _OWN_LICENCE not in head
+        except OSError:
+            hit = False
+        _vendored_cache[loc_path] = hit
+    return hit
+
+
 def extract_function(node) -> dict:
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
         "family": _family_of(node.location.file.name),
+        "vendored": _is_vendored(node.location.file.name),
         "returnType": {
             "c": _c_spelling(node.result_type),
             "canonical": _canonical_c_spelling(node.result_type),
@@ -195,6 +225,7 @@ def extract_struct(node) -> dict:
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
         "family": _family_of(node.location.file.name),
+        "vendored": _is_vendored(node.location.file.name),
         "fields": [
             {
                 "name": f.spelling,
@@ -212,6 +243,7 @@ def extract_enum(node) -> dict:
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
         "family": _family_of(node.location.file.name),
+        "vendored": _is_vendored(node.location.file.name),
         "values": [
             {
                 "name": v.spelling,
@@ -251,5 +283,6 @@ def extract_macro(node) -> dict | None:
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
         "family": _family_of(node.location.file.name),
+        "vendored": _is_vendored(node.location.file.name),
         "value": value,
     }
