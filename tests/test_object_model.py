@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from parser.typerelations import temptype_basetypes
 from parser.object_model import (
     _scan_errors, attach_object_model, find_mobilitydb_src)
 
@@ -283,8 +284,11 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(set(t["temptypes"]), derived, name)
 
     def test_leaf_base_types_match_catalog(self):
-        pairs = dict(re.findall(
-            r"\{\s*(T_T[A-Z0-9_]+)\s*,\s*(T_[A-Z0-9_]+)\s*\}", self.cat))
+        # The relation is a `.temptype_basetype` field of the type-indexed
+        # MEOS_RELTYPE_CATALOG; read it through the parser that already reads
+        # that array rather than matching its shape a second time here.
+        pairs = temptype_basetypes(self.cat)
+        self.assertTrue(pairs, "MEOS_RELTYPE_CATALOG yielded no base type")
         for node, spec in self.lat.items():
             if spec["kind"] == "leaf":
                 tt = spec["temptypes"][0]

@@ -52,6 +52,19 @@ def _rows(text: str, array: str) -> list:
             for t, body in _ROW_RE.findall(m.group(1))]
 
 
+def temptype_basetypes(cat_src: str) -> dict:
+    """Each temporal type's base type, as ``MEOS_RELTYPE_CATALOG`` states it.
+
+    The forward direction of the relation :func:`attach_type_relations` reads
+    the inverse of, published so that a caller wanting one temporal type's base
+    — the drift gate checking the lattice's leaves — reads the catalog through
+    the same parser rather than matching the array's shape a second time.
+    """
+    return {t: fields["temptype_basetype"]
+            for t, fields in _rows(cat_src, "MEOS_RELTYPE_CATALOG")
+            if "temptype_basetype" in fields}
+
+
 def _locate_catalog(src_root: Path | None) -> Path | None:
     """The ``meos_catalog.c`` path from the resolved source root, or the ``MDB_SRC_ROOT`` checkout.
 
