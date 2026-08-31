@@ -28,6 +28,20 @@ _CATALOG = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
 _TBOOL = "{t@2000-01-01, f@2000-01-03, t@2000-01-05}"
 _TFLOAT = "{1.5@2000-01-01, 3.5@2000-01-03}"
 
+# A three-instant literal per temporal subtype, keyed by the decoder that reads
+# it. Which decoder the catalog selects for the opaque `Temporal` is settled by
+# an alphabetical tiebreak that build_type_encodings() documents as arbitrary:
+# there is no generic `temporal_in`, so the pick is whichever subtype sorts
+# first, and it MOVES when MobilityDB gains a type (tbigint displaced tbool).
+# The fixture therefore follows the pick instead of naming it.
+_LITERAL_BY_DECODER = {
+    "tbool_in": _TBOOL,
+    "tint_in": "{1@2000-01-01, 2@2000-01-03, 1@2000-01-05}",
+    "tbigint_in": "{1@2000-01-01, 2@2000-01-03, 1@2000-01-05}",
+    "tfloat_in": "{1.5@2000-01-01, 3.5@2000-01-03, 1.5@2000-01-05}",
+    "ttext_in": "{AA@2000-01-01, BB@2000-01-03, AA@2000-01-05}",
+}
+
 _KIND_TAG = {"integer": "int", "number": "double",
              "boolean": "bool", "string": "str"}
 
@@ -48,16 +62,25 @@ class CtypesIntegrationTests(unittest.TestCase):
         cls.tout = t.get("out", "tbool_out")
         cls.in_aux = _aux(t.get("in_aux", []))
         cls.out_aux = _aux(t.get("out_aux", []))
+        cls.tin_literal = _LITERAL_BY_DECODER.get(cls.tin)
 
     def test_catalog_selected_in_out(self):
         # Decoding stays a typed wrapper (subtype-narrow); encoding is the
         # generic temporal_out with a defaulted maxdd.
-        self.assertEqual(self.tin, "tbool_in")
+        #
+        # WHICH subtype decodes is not asserted: no `temporal_in` exists, so
+        # build_type_encodings() falls back to an alphabetical pick it calls
+        # arbitrary, and that pick moves when MobilityDB gains a type. What the
+        # design does guarantee is asserted instead — the decoder is one of the
+        # subtype-narrow readers, and the encoder IS the generic root.
+        self.assertIn(self.tin, _LITERAL_BY_DECODER,
+                      f"catalog selected {self.tin!r} as the Temporal decoder; "
+                      f"add its literal to _LITERAL_BY_DECODER")
         self.assertEqual(self.tout, "temporal_out")
         self.assertEqual(self.out_aux, [("int", 15)])
 
     def test_decode_invoke_scalar(self):
-        h = self.eng.decode(self.tin, _TBOOL, self.in_aux)
+        h = self.eng.decode(self.tin, self.tin_literal, self.in_aux)
         self.assertTrue(h)
         n = self.eng.invoke("temporal_num_instants", [("ptr", h)], "int")
         self.assertEqual(n, 3)
@@ -96,7 +119,14 @@ class CtypesIntegrationTests(unittest.TestCase):
             True)
         self.assertTrue(present)
         self.assertTrue(ptr)
-        self.assertIn("POINT", self.eng.encode("geo_as_ewkt", ptr).upper())
+        # geo_as_ewkt(const GSERIALIZED *, int maxdd) takes TWO arguments, so
+        # maxdd must be passed: encode() builds argtypes from the aux it is
+        # given, and calling a two-argument function with one argument leaves
+        # maxdd reading whatever the register held. MEOS rejects it whenever
+        # that junk is negative — measured failing 4 runs in 6, with a
+        # different value each time, and passing 6 in 6 once maxdd is supplied.
+        self.assertIn("POINT",
+                      self.eng.encode("geo_as_ewkt", ptr, [("int", 15)]).upper())
 
     def test_input_array_builder_round_trip(self):
         # Temporal *temporal_merge_array(Temporal **temparr, int count):

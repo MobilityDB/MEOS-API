@@ -40,21 +40,60 @@ jobs:
       - name: Install pytest
         run: pip install pytest
 
+      # PyMEOS is the object-model parity oracle. The audit reads its
+      # factory.py and degrades to `oracle-unavailable` without it, so the two
+      # parity gates assert nothing until it is on disk.
+      - name: Check out the PyMEOS oracle
+        uses: actions/checkout@v4
+        with:
+          repository: MobilityDB/PyMEOS
+          path: _pymeos
+
       # The action wrote output/meos-idl.json at the repo root, exactly where
       # the suite loads it from; assert the advertised path and run the tests.
       #
-      # MDB_SRC_ROOT names the MobilityDB checkout the catalog came from. The
-      # drift gates read meos_catalog.c and meos_error.h directly, and skip
-      # themselves where no source is reachable — so without it the suite is
-      # green while the assertions that hold the model to MEOS never run. The
-      # assertion below fails the job rather than let that recur silently.
+      # Every environment variable here is a precondition some test guards on,
+      # and a guard that fails makes the test SKIP: it asserts nothing and the
+      # job still reports success. This job already had the material for all of
+      # them and named none, so 11 of 268 tests never ran.
+      #
+      #   MDB_SRC_ROOT      the MobilityDB checkout the catalog came from; the
+      #                     drift gates read meos_catalog.c and meos_error.h.
+      #   MEOS_LIBRARY_PATH the libmeos just built; the ctypes engine suite
+      #                     decodes, invokes and round-trips against it.
+      #   MEOS_INCLUDE_DIR  the installed headers; the vendored-provenance test
+      #                     splits them by owner.
+      #   PYMEOS_FACTORY    the parity oracle checked out above.
+      #
+      # Each is asserted before the run, so a moved path fails the job here
+      # rather than turning into a silent skip.
       - name: Run the test suite
         env:
           MDB_SRC_ROOT: ${{ steps.provision.outputs.mobilitydb-src }}
+          MEOS_LIBRARY_PATH: ${{ steps.provision.outputs.libmeos-prefix }}/lib/libmeos.so
+          MEOS_INCLUDE_DIR: ${{ steps.provision.outputs.libmeos-prefix }}/include
+          PYMEOS_FACTORY: ${{ github.workspace }}/_pymeos/pymeos/factory.py
         run: |
+          set -o pipefail
           test -s "${{ steps.provision.outputs.catalog-path }}"
           test -f "$MDB_SRC_ROOT/meos/src/temporal/meos_catalog.c"
-          python3 -m pytest tests/ -v
+          test -f "$MEOS_LIBRARY_PATH"
+          test -f "$MEOS_INCLUDE_DIR/meos.h"
+          test -f "$PYMEOS_FACTORY"
+          python3 -m pytest tests/ -v -rs | tee "$RUNNER_TEMP/pytest.log"
+
+      # A skipped test is indistinguishable from a passing one in the job's
+      # conclusion, which is how the eleven went unnoticed. Every precondition
+      # is supplied and asserted above, so a skip now means a guard reads a
+      # condition this job no longer satisfies — a defect, not a circumstance.
+      - name: Refuse a silent skip
+        run: |
+          if grep -qE '[0-9]+ skipped' "$RUNNER_TEMP/pytest.log"; then
+            grep -E '^SKIPPED' "$RUNNER_TEMP/pytest.log" || true
+            echo "::error::the suite skipped tests; every precondition is supplied, so a skip is a defect"
+            exit 1
+          fi
+          echo "no test skipped"
 
       - name: Upload meos-idl.json as artefact
         if: always()

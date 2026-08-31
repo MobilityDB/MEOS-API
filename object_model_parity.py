@@ -13,18 +13,23 @@
 # honest `oracle-unavailable` status (same philosophy as portable_parity.py).
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
-IN_PATH = (Path(sys.argv[1]) if len(sys.argv) > 1
-           else Path("output/meos-idl.json"))
-OUT_PATH = (Path(sys.argv[2]) if len(sys.argv) > 2
-            else Path("output/meos-object-model-parity.json"))
-# PyMEOS oracle: factory.py. Default = sibling checkout; overridable.
-PYMEOS = (Path(sys.argv[3]) if len(sys.argv) > 3
-          else Path(__file__).resolve().parent.parent
-          / "PyMEOS" / "pymeos" / "factory.py")
+# These defaults are resolved WITHOUT reading sys.argv, because the test suite
+# imports this module and a module that indexes sys.argv at import time reads
+# the RUNNER's flags. Under `pytest tests/ -q -rs` the oracle resolved to the
+# literal path `-rs`, which no checkout has, so the parity gate skipped itself
+# and the suite reported green while asserting nothing. The command line is
+# read in main(), where it belongs. The oracle also honours $PYMEOS_FACTORY, so
+# a job whose PyMEOS checkout is not a sibling can name it.
+IN_PATH = Path("output/meos-idl.json")
+OUT_PATH = Path("output/meos-object-model-parity.json")
+PYMEOS = Path(os.environ.get("PYMEOS_FACTORY")
+              or Path(__file__).resolve().parent.parent
+              / "PyMEOS" / "pymeos" / "factory.py")
 
 
 def _oracle_id(path: Path) -> str:
@@ -169,6 +174,14 @@ def _by_kind(work):
 
 
 def main() -> None:
+    # The command line is read here, so importing this module never consults it.
+    global IN_PATH, OUT_PATH, PYMEOS
+    if len(sys.argv) > 1:
+        IN_PATH = Path(sys.argv[1])
+    if len(sys.argv) > 2:
+        OUT_PATH = Path(sys.argv[2])
+    if len(sys.argv) > 3:
+        PYMEOS = Path(sys.argv[3])
     if not IN_PATH.exists():
         sys.exit(f"Catalog not found: {IN_PATH} — run `python run.py` first.")
     oracle = _parse_oracle(PYMEOS)

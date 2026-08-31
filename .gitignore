@@ -9,6 +9,13 @@ output/
 # Fetched MobilityDB sources
 _mobilitydb/
 meos/
+# PyMEOS, the object-model parity oracle, where CI checks it out
+_pymeos/
+
+# The prefix tools/provision-meos.sh installs libmeos and the MEOS headers
+# into. The suite now runs against a built one, so a developer has it locally;
+# it is build output and never belongs in the tree.
+.prefix/
 
 # IDE
 .vscode/
