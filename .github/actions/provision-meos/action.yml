@@ -29,6 +29,14 @@ outputs:
   libmeos-prefix:
     description: Install prefix of libmeos when build-libmeos=true (else empty).
     value: ${{ steps.provision.outputs.libmeos-prefix }}
+  mobilitydb-src:
+    description: >-
+      The MobilityDB checkout the catalog was derived from. A consumer reads
+      this rather than the directory name, which is this action's to choose:
+      the parse locates the sources through $MDB_SRC_ROOT, and a job wanting
+      the same sources (a suite whose drift gates read meos_catalog.c) sets
+      that variable from here.
+    value: ${{ github.workspace }}/_mobilitydb_src
 
 runs:
   using: composite

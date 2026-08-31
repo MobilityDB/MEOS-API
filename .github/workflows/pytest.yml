@@ -42,9 +42,18 @@ jobs:
 
       # The action wrote output/meos-idl.json at the repo root, exactly where
       # the suite loads it from; assert the advertised path and run the tests.
+      #
+      # MDB_SRC_ROOT names the MobilityDB checkout the catalog came from. The
+      # drift gates read meos_catalog.c and meos_error.h directly, and skip
+      # themselves where no source is reachable — so without it the suite is
+      # green while the assertions that hold the model to MEOS never run. The
+      # assertion below fails the job rather than let that recur silently.
       - name: Run the test suite
+        env:
+          MDB_SRC_ROOT: ${{ steps.provision.outputs.mobilitydb-src }}
         run: |
           test -s "${{ steps.provision.outputs.catalog-path }}"
+          test -f "$MDB_SRC_ROOT/meos/src/temporal/meos_catalog.c"
           python3 -m pytest tests/ -v
 
       - name: Upload meos-idl.json as artefact
