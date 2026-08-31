@@ -31,15 +31,25 @@ from pathlib import Path
 def find_mobilitydb_src(headers_dir: Path | None = None) -> Path | None:
     """Resolve the MobilityDB C source root for the error scan / drift gate.
 
-    First existing of: $MOBILITYDB_SRC, the sparse-checkout
-    ``_mobilitydb/meos/src``, or the ``src`` sibling of the headers dir.
-    Returns None when no source tree is available — callers must degrade to
-    an honest signal, never fabricate.
+    First existing of: $MOBILITYDB_SRC, the checkout $MDB_SRC_ROOT names, the
+    sparse-checkout ``_mobilitydb/meos/src``, or the ``src`` sibling of the
+    headers dir.  Returns None when no source tree is available — callers must
+    degrade to an honest signal, never fabricate.
+
+    ``MDB_SRC_ROOT`` is the checkout the provisioning hands the parse, and it is
+    consulted because the directory name is the provisioner's to choose: the CI
+    action checks MobilityDB out as ``_mobilitydb_src`` while the probe below
+    names ``_mobilitydb``, so a resolver that knows only the literal name reports
+    no source over a tree that is present, and every catalog it derives silently
+    loses what the source carries.
     """
     candidates = []
     env = os.environ.get("MOBILITYDB_SRC")
     if env:
         candidates.append(Path(env))
+    root = os.environ.get("MDB_SRC_ROOT")
+    if root:
+        candidates.append(Path(root) / "meos" / "src")
     candidates.append(Path("_mobilitydb") / "meos" / "src")
     if headers_dir is not None:
         candidates.append(Path(headers_dir).parent / "src")
