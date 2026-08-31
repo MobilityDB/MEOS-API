@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.typerelations import attach_type_relations
+from parser.typerelations import _locate_catalog, attach_type_relations
 from parser.object_model import find_mobilitydb_src
 
 _FIXTURE = """
@@ -29,24 +29,24 @@ static const char *MEOS_TYPE_NAMES[] =
   [T_TEXT] = "text",
   [T_TEXTSET] = "textset",
   [T_TTEXT] = "ttext",
+  [T_GEOMETRY] = "geometry",
+  [T_TGEOMPOINT] = "tgeompoint",
+  [T_TGEOMETRY] = "tgeometry",
 };
-static const settype_catalog_struct MEOS_SETTYPE_CATALOG[] =
+static const reltype_catalog_struct MEOS_RELTYPE_CATALOG[] =
 {
-  {T_FLOATSET,  T_FLOAT8},
-  {T_TEXTSET,   T_TEXT},
-};
-static const spantype_catalog_struct MEOS_SPANTYPE_CATALOG[] =
-{
-  {T_FLOATSPAN, T_FLOAT8},
-};
-static const spansettype_catalog_struct MEOS_SPANSETTYPE_CATALOG[] =
-{
-  {T_FLOATSPANSET, T_FLOATSPAN},
-};
-static const temptype_catalog_struct MEOS_TEMPTYPE_CATALOG[] =
-{
-  {T_TFLOAT, T_FLOAT8},
-  {T_TTEXT,  T_TEXT},
+  [T_FLOAT8] = { .basetype_settype = T_FLOATSET,
+    .basetype_spantype = T_FLOATSPAN },
+  [T_FLOATSET] = { .type_bboxtype = T_FLOATSPAN, .settype_basetype = T_FLOAT8 },
+  [T_FLOATSPAN] = { .spantype_basetype = T_FLOAT8,
+    .spantype_spansettype = T_FLOATSPANSET },
+  [T_FLOATSPANSET] = { .spansettype_spantype = T_FLOATSPAN },
+  [T_TFLOAT] = { .type_bboxtype = T_TBOX, .temptype_basetype = T_FLOAT8 },
+  [T_TEXT] = { .basetype_settype = T_TEXTSET },
+  [T_TEXTSET] = { .settype_basetype = T_TEXT },
+  [T_TTEXT] = { .type_bboxtype = T_TSTZSPAN, .temptype_basetype = T_TEXT },
+  [T_TGEOMPOINT] = { .type_bboxtype = T_STBOX, .temptype_basetype = T_GEOMETRY },
+  [T_TGEOMETRY] = { .type_bboxtype = T_STBOX, .temptype_basetype = T_GEOMETRY },
 };
 """
 
@@ -70,6 +70,21 @@ class TypeRelationsParseTest(unittest.TestCase):
         # text has a set and a temporal type but no span/span set.
         by_base = self._attach(_FIXTURE)
         self.assertEqual(by_base["text"], {"temporal": "ttext", "set": "textset"})
+
+    def test_base_shared_by_several_temporal_types_resolves_in_meostype_order(self):
+        # A geometry is the base of both tgeompoint and tgeometry; the catalog names no
+        # temporal type at the base's own entry, so the role is the inverse relation
+        # resolved in MeosType order — the last entry, as the arrays of pairs resolved it.
+        by_base = self._attach(_FIXTURE)
+        self.assertEqual(by_base["geometry"]["temporal"], "tgeometry")
+
+    def test_catalog_without_the_relation_array_raises(self):
+        # A located catalog the parse reads no relation out of is a lost array, not a
+        # catalog without types: it must raise rather than attach an empty registry that
+        # silently degrades every consumer resolving a concrete collection type.
+        names_only = _FIXTURE[:_FIXTURE.index("static const reltype_catalog_struct")]
+        with self.assertRaises(ValueError):
+            self._attach(names_only)
 
     def test_absent_source_degrades_without_fabricating(self):
         saved = os.environ.pop("MDB_SRC_ROOT", None)
@@ -102,8 +117,13 @@ class TypeRelationsParseTest(unittest.TestCase):
 class TypeRelationsSourceTest(unittest.TestCase):
 
     def test_canonical_numeric_mappings(self):
+        # Resolve the tree the way the extractor does, so the live assertion runs wherever the
+        # extractor runs: find_mobilitydb_src reads $MOBILITYDB_SRC, while the provisioning that
+        # derives the catalog checks the repository out under $MDB_SRC_ROOT, which _locate_catalog
+        # consults. Resolving through only the first skipped this check on the build path that
+        # produces the catalog, which is the path whose drift it exists to catch.
         src = find_mobilitydb_src()
-        if src is None:
+        if src is None and _locate_catalog(None) is None:
             self.skipTest("MobilityDB source not available")
         by_base = attach_type_relations({}, src)["typeRelations"]["byBase"]
         self.assertEqual(by_base["float8"]["spanset"], "floatspanset")
