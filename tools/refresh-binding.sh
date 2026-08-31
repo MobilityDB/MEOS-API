@@ -165,7 +165,16 @@ fi
 
 # The catalog (and, for native/FFI bindings, libmeos) — the slow leg. Skip it when the commit,
 # the family flags and the build-libmeos choice are all already current, unless --force.
-STAMP_KEY="$MDB_COMMIT $FAMILIES libmeos=$BUILD_LIBMEOS"
+# The parser that derives the catalog is part of what the cached catalog is derived FROM, so the
+# MEOS-API revision is in the key: without it, a fix to the parse produced the same key as the run
+# that predated it, the stale catalog was reported "already current", and the refresh silently
+# regenerated the binding from the output the fix was meant to replace. A working tree with
+# uncommitted changes carries no revision that distinguishes it, so it never matches a cached key.
+MEOSAPI_REV="$(git -C "$MEOSAPI" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git -C "$MEOSAPI" status --porcelain 2>/dev/null)" ]; then
+  MEOSAPI_REV="$MEOSAPI_REV-dirty-$(date +%s)"
+fi
+STAMP_KEY="$MDB_COMMIT $FAMILIES libmeos=$BUILD_LIBMEOS meos-api=$MEOSAPI_REV"
 provision_current=0
 if [ "$FORCE" = 0 ] && [ -f "$CATALOG" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$STAMP_KEY" ]; then
   if [ "$BUILD_LIBMEOS" != "true" ] || [ -f "$LIBMEOS" ]; then provision_current=1; fi
