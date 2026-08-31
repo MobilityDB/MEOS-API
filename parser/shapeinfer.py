@@ -65,6 +65,35 @@ def _strip_one_ptr(ctype: str) -> str:
     return s
 
 
+def _is_index_pair_return(func: dict, count: str) -> bool:
+    """Whether the ``int *`` return is a FLATTENED array of index PAIRS.
+
+    The NxN kernels (``*_tgeoarr_tgeoarr``) take one or more ``(TYPE **arr, int n)``
+    array arguments and answer which elements of one array relate to which of the
+    other.  Their ``@param[out] count`` is the number of resulting index PAIRS while
+    the returned ``int *`` holds ``2 * count`` ints, ``[i0, j0, i1, j1, ...]`` — so a
+    consumer that reads ``count`` ints reads half the answer.  Nothing in
+    ``lengthFrom`` says that, which is why every binding either re-derived the factor
+    or marshalled these by hand.
+
+    The convention is structural, so it is derived rather than listed: an ``int *``
+    return, an ``int *count`` out-parameter, and at least one ``(TYPE **, int)``
+    argument pair — the shape that makes an index into each input array meaningful.
+    """
+    params = func.get("params", [])
+    arrays = 0
+    for i, prm in enumerate(params):
+        c = (prm.get("cType") or "").replace(" ", "")
+        if c.endswith("**") and i + 1 < len(params):
+            nxt = (params[i + 1].get("cType") or "").replace(" ", "")
+            if nxt == "int":
+                arrays += 1
+    if arrays < 1:
+        return False
+    return any((prm.get("cType") or "").replace(" ", "") == "int*"
+               and prm.get("name") == count for prm in params)
+
+
 def infer_shapes(idl: dict) -> tuple[dict, dict]:
     """Populate ``func['shape']`` with ``arrayReturn``/``outputArrays`` derived
     from the signatures.  Returns ``(idl, stats)``.  Idempotent and additive:
@@ -92,6 +121,12 @@ def infer_shapes(idl: dict) -> tuple[dict, dict]:
                 "canonical": _strip_one_ptr(
                     rtype.get("canonical", ret)),
             }
+            # How many elements make up ONE unit of `lengthFrom`.  Omitted when it is
+            # 1 (the ordinary case); 2 for the NxN kernels, whose count is a number
+            # of index PAIRS over a flattened `[i0, j0, i1, j1, ...]` return.  A
+            # binding multiplies `lengthFrom` by it and never re-derives the factor.
+            if _strip_one_ptr(ret).strip() == "int" and _is_index_pair_return(func, count):
+                ar["groupSize"] = 2
             n_arr += 1
         # Parallel written-back out-arrays (``TYPE **extra`` alongside count).
         out = [{"param": p["name"]} for p in func["params"]

@@ -61,6 +61,40 @@ class ShapeInferTests(unittest.TestCase):
         self.assertEqual(idl["functions"][0]["shape"]["outputArrays"],
                          [{"param": "value_bins"}, {"param": "time_bins"}])
 
+    def test_index_pair_return_records_its_group_size(self):
+        # edwithin_tgeoarr_tgeoarr-style: the NxN kernels answer "which element of
+        # one array relates to which of the other", so `count` is a number of index
+        # PAIRS and the `int *` return holds 2 * count ints, [i0, j0, i1, j1, ...].
+        # Without the group size a consumer reads `count` ints and gets half.
+        idl = {"functions": [_fn(
+            "edwithin_tgeoarr_tgeoarr", "int *",
+            [("arr1", "const Temporal **"), ("count1", "int"),
+             ("arr2", "const Temporal **"), ("count2", "int"),
+             ("dist", "double"), ("count", "int *")])]}
+        idl, _ = infer_shapes(idl)
+        ar = idl["functions"][0]["shape"]["arrayReturn"]
+        self.assertEqual(ar["lengthFrom"], {"kind": "param", "name": "count"})
+        self.assertEqual(ar["element"], {"c": "int", "canonical": "int"})
+        self.assertEqual(ar["groupSize"], 2)
+
+    def test_ordinary_array_return_records_no_group_size(self):
+        # A scalar array return counts its own elements, so it carries no group
+        # size and a binding reads `lengthFrom` elements unchanged.
+        idl = {"functions": [_fn(
+            "floatset_values", "double *",
+            [("s", "const Set *"), ("count", "int *")])]}
+        idl, _ = infer_shapes(idl)
+        self.assertNotIn("groupSize", idl["functions"][0]["shape"]["arrayReturn"])
+
+    def test_index_pair_rule_needs_an_array_argument(self):
+        # The factor comes from the NxN shape, not from returning `int *`: a
+        # function with no (TYPE **, int) argument pair counts its own ints.
+        idl = {"functions": [_fn(
+            "some_int_array_fn", "int *",
+            [("temp", "const Temporal *"), ("count", "int *")])]}
+        idl, _ = infer_shapes(idl)
+        self.assertNotIn("groupSize", idl["functions"][0]["shape"]["arrayReturn"])
+
     def test_input_array_with_value_count_untouched(self):
         # tsequence_make-style: ** input array carries its length BY VALUE
         idl = {"functions": [_fn(
