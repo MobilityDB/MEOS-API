@@ -202,6 +202,21 @@ function to the class it is a method of (`functionToClass`), the
 closed-algebra companion hierarchies (`companions`), the error contract
 (`errors`), and the irregularity worklist (`corrections`).
 
+## Optional type families
+
+`meos-idl.json` carries a top-level `families` list — the optional type
+families MobilityDB's `-DALL=ON` build enables — and every record's `family`
+field takes its value from it (or `CORE`). The list is read from MobilityDB's
+own `if(ALL) foreach(_family ...)` block in its top-level `CMakeLists.txt`,
+which is the ecosystem's single source of truth for which families exist.
+
+**A binding reads `families`; it never restates the list.** A family lives in
+`meos/src/<family>/` and is fronted by the public header `meos_<family>.h`,
+both spelled from the token, so a family added to MobilityDB reaches the
+catalog, the `family` classification and every consumer that gates on it
+without an edit anywhere downstream. A written-down copy goes short at the
+next family and silently classifies that family's whole surface as `CORE`.
+
 ## Adding metadata
 
 Manual annotations (ownership rules, additional documentation, deprecation flags, etc.) live in `meta/meos-meta.json`. The merger applies them on top of the libclang-parsed structure when generating the final catalog — including any field derived by the service-projection pass (e.g. correcting a `category` or forcing `network.exposable`).
