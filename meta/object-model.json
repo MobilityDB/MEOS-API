@@ -6,10 +6,10 @@
     "sourceOfTruth": "MobilityDB meos/src/temporal/meos_catalog.c — the type-family predicate functions and MEOS_TEMPTYPE_CATALOG are the authoritative membership oracle; meos/include/meos.h — the tempSubtype and errorCode enums. The regression test re-derives every membership set from these so this file cannot silently drift.",
     "predicates": {
       "temporal_type": "meos_catalog.c — all temporal types (superclass membership)",
-      "talpha_type": "meos_catalog.c — {T_TBOOL,T_TTEXT} (+ internal tdoubleN)",
-      "tnumber_type": "meos_catalog.c — {T_TINT,T_TFLOAT}",
+      "talpha_type": "meos_catalog.c — the types carrying no arithmetic or spatial structure, plus the internal tdoubleN aggregation types",
+      "tnumber_type": "meos_catalog.c — the types over a numeric base",
       "tnumber_basetype": "meos_catalog.c — {T_INT4,T_FLOAT8}",
-      "tspatial_type": "meos_catalog.c — points+geos (+ cbuffer/npoint/pose/rgeo, #if-gated)",
+      "tspatial_type": "meos_catalog.c — the types carrying an SRID, i.e. every family whose values sit in space",
       "tpoint_type": "meos_catalog.c — {T_TGEOMPOINT,T_TGEOGPOINT}",
       "tgeo_type": "meos_catalog.c — {T_TGEOMETRY,T_TGEOGRAPHY}",
       "tgeo_type_all": "meos_catalog.c — {T_TGEOMETRY,T_TGEOGRAPHY,T_TGEOMPOINT,T_TGEOGPOINT} (overlap — see corrections)",
@@ -98,9 +98,11 @@
         "T_TCBUFFER",
         "T_TNPOINT",
         "T_TPOSE",
+        "T_TPOSECHAIN",
         "T_TRGEOMETRY",
         "T_TH3INDEX",
         "T_TQUADBIN",
+        "T_TS2CELL",
         "T_TPCPOINT",
         "T_TPCPATCH"
       ],
@@ -222,9 +224,13 @@
         "T_TCBUFFER",
         "T_TNPOINT",
         "T_TPOSE",
+        "T_TPOSECHAIN",
         "T_TRGEOMETRY",
         "T_TH3INDEX",
-        "T_TQUADBIN"
+        "T_TQUADBIN",
+        "T_TS2CELL",
+        "T_TPCPOINT",
+        "T_TPCPATCH"
       ],
       "doc": "Temporal types carrying an STBox spatial bounding box."
     },
