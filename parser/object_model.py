@@ -27,6 +27,8 @@ import os
 import re
 from pathlib import Path
 
+from parser.typerelations import locate_catalog, temptype_basetypes
+
 
 def find_mobilitydb_src(headers_dir: Path | None = None) -> Path | None:
     """Resolve the MobilityDB C source root for the error scan / drift gate.
@@ -298,6 +300,76 @@ def _scan_errors(src_root: Path, public: set) -> dict:
     return result
 
 
+class MembershipUnavailable(RuntimeError):
+    """The source states a membership the lattice cannot use.
+
+    Raised where ``meos_catalog.c`` IS readable and disagrees with the model —
+    a predicate the model names that MEOS does not declare, a predicate
+    admitting nothing, a leaf modelling a type the relation catalog does not
+    relate. Each is a real disagreement, never a missing file: an unreachable
+    source is reported as ``membership.status`` instead, the way the error
+    contract reports one.
+    """
+
+
+_PREDICATE_TEMPTYPE_RE = re.compile(r"\bT_T[A-Z0-9_]+\b")
+
+#: The tdoubleN types exist for temporal aggregation and are not part of the
+#: published model, so a predicate admitting them contributes the rest.
+_INTERNAL_TEMPTYPES = frozenset({"T_TDOUBLE2", "T_TDOUBLE3", "T_TDOUBLE4"})
+
+
+def _predicate_body(cat_src: str, name: str) -> str:
+    """The body of the ``name(MeosType ...)`` membership predicate."""
+    m = re.search(r"\n" + re.escape(name) + r"\(MeosType \w+\)\s*", cat_src)
+    if not m:
+        raise MembershipUnavailable(
+            f"meos_catalog.c declares no `{name}` predicate — the lattice names "
+            "a membership oracle MEOS does not have")
+    i = cat_src.index("{", m.end())
+    depth, j = 0, i
+    while j < len(cat_src):
+        depth += (cat_src[j] == "{") - (cat_src[j] == "}")
+        if depth == 0:
+            return cat_src[i:j + 1]
+        j += 1
+    return cat_src[i:]
+
+
+def predicate_temptypes(cat_src: str, name: str) -> list:
+    """The temporal types a membership predicate admits, in MeosType order."""
+    seen, out = set(), []
+    for t in _PREDICATE_TEMPTYPE_RE.findall(_predicate_body(cat_src, name)):
+        if t not in _INTERNAL_TEMPTYPES and t not in seen:
+            seen.add(t)
+            out.append(t)
+    if not out:
+        raise MembershipUnavailable(f"`{name}` admits no temporal type")
+    return out
+
+
+def derive_membership(nodes: dict, cat_src: str, basetypes: dict) -> None:
+    """Fill each node's membership from the catalog, in place.
+
+    A node naming a `predicate` takes the types that predicate admits; a leaf
+    takes the base type ``MEOS_RELTYPE_CATALOG`` gives the one type it models.
+    Neither is stated in the model file: both are MEOS's to say, and a copy of
+    either is a second source that goes stale the next time MEOS gains a type.
+    """
+    for name, spec in nodes.items():
+        pred = spec.get("predicate")
+        if pred:
+            spec["temptypes"] = predicate_temptypes(cat_src, pred)
+        temptypes = spec.get("temptypes")
+        if spec.get("kind") == "leaf" and temptypes:
+            temptype = temptypes[0]
+            if temptype not in basetypes:
+                raise MembershipUnavailable(
+                    f"{name} models {temptype}, which the relation catalog "
+                    "gives no base type")
+            spec["cBaseType"] = basetypes[temptype]
+
+
 def attach_object_model(idl: dict, path: Path,
                         mobilitydb_src: Path | None = None) -> dict:
     """Attach ``idl["objectModel"]`` from the canonical lattice file."""
@@ -305,8 +377,29 @@ def attach_object_model(idl: dict, path: Path,
         return idl
     model = json.loads(Path(path).read_text())
 
-    lat = _tree({k: v for k, v in model["lattice"].items()
-                 if not k.startswith("_")})
+    # The lattice's type membership is MEOS's to state, so it is read from
+    # meos_catalog.c at each parse rather than carried in the model file. A
+    # class the model names gains the types its predicate admits, and a leaf the
+    # base type the relation catalog gives it, so a type MEOS adds reaches the
+    # published model with no edit here.
+    catalog = locate_catalog(mobilitydb_src)
+    lattice_nodes = {k: v for k, v in model["lattice"].items()
+                     if not k.startswith("_")}
+    trait_nodes = {k: v for k, v in model["traits"].items()
+                   if not k.startswith("_")}
+    if catalog is not None:
+        cat_src = catalog.read_text(errors="ignore")
+        basetypes = temptype_basetypes(cat_src)
+        derive_membership(lattice_nodes, cat_src, basetypes)
+        derive_membership(trait_nodes, cat_src, basetypes)
+        membership = {"status": "derived", "source": str(catalog)}
+    else:
+        # Say so rather than publish an empty membership: a class naming no
+        # type would be indistinguishable from one MEOS has no type for. The
+        # error contract answers an unreachable source the same way.
+        membership = {"status": "source-unavailable", "source": None}
+
+    lat = _tree(lattice_nodes)
     for fam in ("Box", "Collection"):
         _tree({k: v for k, v in model["companions"][fam]["nodes"].items()
                if not k.startswith("_")})
@@ -376,6 +469,7 @@ def attach_object_model(idl: dict, path: Path,
     idl["objectModel"] = {
         "provenance": model["provenance"],
         "axes": model["axes"],
+        "membership": membership,
         "lattice": lat,
         "traits": model["traits"],
         "companions": model["companions"],

@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.typerelations import _locate_catalog, attach_type_relations
+from parser.typerelations import attach_type_relations, locate_catalog
 from parser.object_model import find_mobilitydb_src
 
 _FIXTURE = """
@@ -119,11 +119,11 @@ class TypeRelationsSourceTest(unittest.TestCase):
     def test_canonical_numeric_mappings(self):
         # Resolve the tree the way the extractor does, so the live assertion runs wherever the
         # extractor runs: find_mobilitydb_src reads $MOBILITYDB_SRC, while the provisioning that
-        # derives the catalog checks the repository out under $MDB_SRC_ROOT, which _locate_catalog
+        # derives the catalog checks the repository out under $MDB_SRC_ROOT, which locate_catalog
         # consults. Resolving through only the first skipped this check on the build path that
         # produces the catalog, which is the path whose drift it exists to catch.
         src = find_mobilitydb_src()
-        if src is None and _locate_catalog(None) is None:
+        if src is None and locate_catalog(None) is None:
             self.skipTest("MobilityDB source not available")
         by_base = attach_type_relations({}, src)["typeRelations"]["byBase"]
         self.assertEqual(by_base["float8"]["spanset"], "floatspanset")

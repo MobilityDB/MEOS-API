@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from parser.typerelations import temptype_basetypes
+from parser.object_model import (MembershipUnavailable, derive_membership,
+                                  predicate_temptypes)
 from parser.object_model import (
     _scan_errors, attach_object_model, find_mobilitydb_src)
 
@@ -54,7 +56,8 @@ class ModelFileTests(unittest.TestCase):
         for n, s in self.lat.items():
             self.assertIn(s["kind"], ("root", "abstract", "leaf"))
             if s["kind"] == "leaf":
-                self.assertIn("cBaseType", s, n)
+                # A leaf names the ONE type it models; its base type is the
+                # catalog's to give and is derived onto the attached model.
                 self.assertEqual(len(s["temptypes"]), 1, n)
             if s["kind"] in ("root", "abstract"):
                 self.assertIsNotNone(s.get("predicate"), n)
@@ -323,28 +326,125 @@ def _enum_from_headers(end_marker: str) -> dict:
         f"(searched {len(_HEADERS)} under {[str(d) for d in _HEADER_DIRS]})")
 
 
+_SYNTHETIC_CATALOG = """
+static const reltype_catalog_struct MEOS_RELTYPE_CATALOG[] =
+{
+  [T_TBOOL] = { .type_bboxtype = T_TSTZSPAN, .temptype_basetype = T_BOOL },
+  [T_TNEW]  = { .type_bboxtype = T_TSTZSPAN, .temptype_basetype = T_NEW },
+};
+
+bool
+demo_type(MeosType type)
+{
+  return (type == T_TBOOL ||
+    /* the doubleX are internal aggregation types */
+    type == T_TDOUBLE2 ||
+    type == T_TNEW);
+}
+"""
+
+
+class MembershipDerivationTest(unittest.TestCase):
+    """The membership comes from the source, so a type MEOS adds arrives free."""
+
+    def test_a_type_added_to_a_predicate_is_read_with_no_model_edit(self):
+        # The property the derivation exists for.
+        self.assertEqual(predicate_temptypes(_SYNTHETIC_CATALOG, "demo_type"),
+                         ["T_TBOOL", "T_TNEW"])
+
+    def test_the_internal_aggregation_types_stay_out_of_the_model(self):
+        self.assertNotIn("T_TDOUBLE2",
+                         predicate_temptypes(_SYNTHETIC_CATALOG, "demo_type"))
+
+    def test_a_predicate_the_source_does_not_declare_raises(self):
+        with self.assertRaises(MembershipUnavailable):
+            predicate_temptypes(_SYNTHETIC_CATALOG, "no_such_type")
+
+    def test_derive_fills_predicate_nodes_and_leaf_base_types(self):
+        nodes = {
+            "Demo": {"kind": "root", "predicate": "demo_type"},
+            "TBool": {"kind": "leaf", "predicate": None,
+                      "temptypes": ["T_TBOOL"]},
+        }
+        derive_membership(nodes, _SYNTHETIC_CATALOG,
+                          temptype_basetypes(_SYNTHETIC_CATALOG))
+        self.assertEqual(nodes["Demo"]["temptypes"], ["T_TBOOL", "T_TNEW"])
+        self.assertEqual(nodes["TBool"]["cBaseType"], "T_BOOL")
+
+    def test_a_leaf_whose_type_the_catalog_does_not_relate_raises(self):
+        nodes = {"TGhost": {"kind": "leaf", "predicate": None,
+                            "temptypes": ["T_TGHOST"]}}
+        with self.assertRaises(MembershipUnavailable):
+            derive_membership(nodes, _SYNTHETIC_CATALOG,
+                              temptype_basetypes(_SYNTHETIC_CATALOG))
+
+    def test_attaching_without_the_source_says_so_rather_than_emptying(self):
+        # A class naming no type would read the same as one MEOS has no type
+        # for, so the status says which it is — as the error contract does.
+        saved = os.environ.pop("MDB_SRC_ROOT", None)
+        try:
+            om = attach_object_model({"functions": []}, MODEL, None)["objectModel"]
+            self.assertEqual(om["membership"]["status"], "source-unavailable")
+            self.assertNotIn("temptypes", om["lattice"]["Temporal"])
+        finally:
+            if saved is not None:
+                os.environ["MDB_SRC_ROOT"] = saved
+
+    @unittest.skipUnless(_CAT_C and _CAT_C.exists(),
+                         "MobilityDB sources not available (run setup.py)")
+    def test_attaching_with_the_source_says_it_derived(self):
+        om = attach_object_model({"functions": []}, MODEL, _SRC)["objectModel"]
+        self.assertEqual(om["membership"]["status"], "derived")
+        self.assertIn("T_TPOSECHAIN", om["lattice"]["Temporal"]["temptypes"])
+
+
 @unittest.skipUnless(_CAT_C and _CAT_C.exists(),
                      "MobilityDB sources not available (run setup.py)")
 class DriftGate(unittest.TestCase):
+    """What the ATTACHED model says, against what MEOS says.
+
+    The model file no longer states the membership, so there is no copy left to
+    drift; what these hold is that the derivation reaches the published lattice
+    and answers what the source answers.
+    """
+
     @classmethod
     def setUpClass(cls):
         cls.d = json.loads(MODEL.read_text())
         cls.cat = _CAT_C.read_text(errors="ignore")
-        cls.lat = _nodes(cls.d["lattice"])
+        cls.attached = attach_object_model(
+            {"functions": []}, MODEL, _SRC)["objectModel"]
+        cls.lat = _nodes(cls.attached["lattice"])
+
+    def test_the_model_file_states_no_membership_of_its_own(self):
+        # The property the derivation exists for: a copy is what drifts, so
+        # there must be none to drift. A leaf still names the ONE type it
+        # models — that is the class's identity, not a copy of MEOS.
+        for node, spec in _nodes(self.d["lattice"]).items():
+            if spec.get("predicate"):
+                self.assertNotIn("temptypes", spec, f"{node} copies membership")
+            self.assertNotIn("cBaseType", spec, f"{node} copies its base type")
+        for name, t in _nodes(self.d["traits"]).items():
+            self.assertNotIn("temptypes", t, f"{name} copies membership")
 
     def test_predicate_membership_matches_source(self):
+        checked = 0
         for node, spec in self.lat.items():
             pred = spec.get("predicate")
             if not pred:
                 continue
-            derived = _predicate_temptypes(self.cat, pred) - _INTERNAL
+            derived = set(_predicate_temptypes(self.cat, pred)) - _INTERNAL
             self.assertEqual(set(spec["temptypes"]), derived,
-                             f"{node} ({pred}) drifted from MEOS")
+                             f"{node} ({pred}) does not answer its predicate")
+            checked += 1
+        self.assertTrue(checked, "no node carries a predicate — derivation ran?")
 
     def test_traits_match_source(self):
-        for name, t in _nodes(self.d["traits"]).items():
-            derived = _predicate_temptypes(self.cat, t["predicate"])
-            self.assertEqual(set(t["temptypes"]), derived, name)
+        traits = _nodes(self.attached["traits"])
+        self.assertTrue(traits, "no trait attached")
+        for name, t in traits.items():
+            derived = set(_predicate_temptypes(self.cat, t["predicate"]))
+            self.assertEqual(set(t["temptypes"]), derived - _INTERNAL, name)
 
     def test_leaf_base_types_match_catalog(self):
         # The relation is a `.temptype_basetype` field of the type-indexed
@@ -352,11 +452,14 @@ class DriftGate(unittest.TestCase):
         # that array rather than matching its shape a second time here.
         pairs = temptype_basetypes(self.cat)
         self.assertTrue(pairs, "MEOS_RELTYPE_CATALOG yielded no base type")
+        leaves = 0
         for node, spec in self.lat.items():
             if spec["kind"] == "leaf":
                 tt = spec["temptypes"][0]
                 self.assertEqual(spec["cBaseType"], pairs[tt],
-                                 f"{node} base type drifted")
+                                 f"{node} base type does not answer the catalog")
+                leaves += 1
+        self.assertTrue(leaves, "no leaf attached")
 
     @unittest.skipUnless(_HEADERS, "MEOS public headers not available")
     def test_enums_match_source(self):
