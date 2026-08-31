@@ -198,7 +198,10 @@ class AttachTests(unittest.TestCase):
         om = self._attach(["temporal_merge"])["objectModel"]
         self.assertEqual(om["errors"]["status"], "source-unavailable")
         self.assertEqual(om["errors"]["raises"], {})       # not fabricated
-        self.assertEqual(len(om["errors"]["codes"]), 21)
+        # The contract's codes carry through with no source; how many there are
+        # is the model's to state, and a literal here is one more copy of it.
+        self.assertEqual(om["errors"]["codes"],
+                         json.loads(MODEL.read_text())["errors"]["codes"])
 
     def test_scanned_errors_are_sorted_for_reproducibility(self):
         # The raises map is keyed by the public function set; iterating a set is
@@ -250,13 +253,25 @@ def _enum_block(text: str, end_marker: str) -> dict:
 
 _SRC = find_mobilitydb_src(ROOT / "meos" / "include")
 _CAT_C = (_SRC / "temporal" / "meos_catalog.c") if _SRC else None
-_MEOS_H = None
-if _SRC:
-    for cand in (_SRC.parent / "include" / "meos.h",
-                 ROOT / "meos" / "include" / "meos.h"):
-        if cand.exists():
-            _MEOS_H = cand
-            break
+
+#: The public headers, in whichever of the two trees carries them. An enum is
+#: looked up across all of them rather than in one named file: `errorCode` is
+#: declared in `meos_error.h` and `tempSubtype` in `meos.h`, and either can move
+#: to another public header without ceasing to be the source of truth.
+_HEADER_DIRS = [d for d in ((_SRC.parent / "include") if _SRC else None,
+                            ROOT / "meos" / "include") if d and d.is_dir()]
+_HEADERS = [h for d in _HEADER_DIRS for h in sorted(d.glob("meos*.h"))]
+
+
+def _enum_from_headers(end_marker: str) -> dict:
+    """The enum ending at ``end_marker``, from the public header declaring it."""
+    for h in _HEADERS:
+        text = h.read_text(errors="ignore")
+        if end_marker in text:
+            return _enum_block(text, end_marker)
+    raise AssertionError(
+        f"no public header declares `{end_marker}` "
+        f"(searched {len(_HEADERS)} under {[str(d) for d in _HEADER_DIRS]})")
 
 
 @unittest.skipUnless(_CAT_C and _CAT_C.exists(),
@@ -291,13 +306,12 @@ class DriftGate(unittest.TestCase):
                 self.assertEqual(spec["cBaseType"], pairs[tt],
                                  f"{node} base type drifted")
 
-    @unittest.skipUnless(_MEOS_H and _MEOS_H.exists(), "meos.h not available")
+    @unittest.skipUnless(_HEADERS, "MEOS public headers not available")
     def test_enums_match_source(self):
-        h = _MEOS_H.read_text(errors="ignore")
-        sub = _enum_block(h, "} tempSubtype;")
+        sub = _enum_from_headers("} tempSubtype;")
         for v in self.d["axes"]["subtype"]["values"]:
             self.assertEqual(sub[v["name"]], v["value"], v["name"])
-        err = _enum_block(h, "} errorCode;")
+        err = _enum_from_headers("} errorCode;")
         for c in self.d["errors"]["codes"]:
             self.assertEqual(err[c["name"]], c["value"], c["name"])
         self.assertEqual(len(self.d["errors"]["codes"]), len(err))
