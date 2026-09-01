@@ -1,0 +1,40 @@
+name: Check test outcome
+description: >-
+  Refuse the two ways a suite stops covering the code while the job still
+  reports success: a test that is SKIPPED, and a suite that SHRANK.
+
+  A skipped test asserts nothing and reads as a pass in the conclusion. A test
+  the build never collects is reported nowhere at all, so the skip count cannot
+  see it — what moves is the total, which is why the total carries a floor.
+
+  The rules themselves are tools/check-test-outcome.py in this repository, the
+  one runnable definition this action and a developer both call, so the CI
+  answer and the by-hand answer cannot differ. It reads surefire and pytest
+  summaries and sums every module's line.
+
+inputs:
+  log:
+    description: "Build log carrying the test summary."
+    required: true
+  min-tests:
+    description: >-
+      The floor the total may not fall below. Raise it when the suite grows;
+      lowering it is a deliberate act that belongs in the commit removing the
+      tests.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check out the rules
+      uses: actions/checkout@v4
+      with:
+        repository: MobilityDB/MEOS-API
+        ref: master
+        path: .meos-api-outcome
+
+    - name: Read the suite's own summary
+      shell: bash
+      run: |
+        python3 "$GITHUB_WORKSPACE/.meos-api-outcome/tools/check-test-outcome.py" \
+          "${{ inputs.log }}" --min-tests "${{ inputs.min-tests }}"
