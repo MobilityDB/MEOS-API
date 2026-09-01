@@ -8,7 +8,7 @@ as ``families``, and every consumer — this parser's compile flags, its family
 classification, the tests, and each downstream binding — projects that field
 rather than restating the list.
 
-Restating it is what drifts. A family added to MobilityDB (``POSECHAIN``,
+Restating it is what drifts. A family added to MobilityDB (``RASTER``,
 ``S2CELL``) leaves any written-down copy silently short, and a short copy
 classifies that family's whole surface as ``CORE``. Reading the list means a new
 family reaches every consumer with no edit here.

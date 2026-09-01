@@ -31,7 +31,7 @@ class FamilyClassificationTests(unittest.TestCase):
         self.functions = idl["functions"]
         self.by_name = {f["name"]: f for f in self.functions}
         # The catalog publishes the families it was built from, read out of
-        # MobilityDB's own `ALL` list; restating them here is what let POSECHAIN
+        # MobilityDB's own `ALL` list; restating them here is what let RASTER
         # and S2CELL go unclassified while every hand copy still looked right.
         self.optional_families = set(idl["families"])
 

@@ -31,7 +31,7 @@ option(ALL "Set ON|OFF (default=OFF) to include all the optional families" OFF)
 option(CBUFFER "circular buffers" OFF)
 
 if(ALL)
-  foreach(_family CBUFFER POSE RGEO POSECHAIN S2CELL)
+  foreach(_family CBUFFER POSE RGEO RASTER S2CELL)
     set(${_family} ON CACHE BOOL "Enabled by ALL=ON" FORCE)
   endforeach()
 endif()
@@ -47,7 +47,7 @@ def _write(text: str) -> Path:
 class ReadAllFamiliesTests(unittest.TestCase):
     def test_reads_the_foreach_of_the_if_all_block(self):
         self.assertEqual(read_all_families(_write(_CMAKE)),
-                         ("CBUFFER", "POSE", "POSECHAIN", "RGEO", "S2CELL"))
+                         ("CBUFFER", "POSE", "RASTER", "RGEO", "S2CELL"))
 
     def test_a_family_added_to_the_block_is_read_with_no_code_change(self):
         # The property the whole module exists for.

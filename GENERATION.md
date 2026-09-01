@@ -173,7 +173,7 @@ the same drift:
 
 | rule | what it refuses | what it cost when it went unchecked |
 | --- | --- | --- |
-| `build-output` | a tracked `.so`, `.jar`, `.class`, `target/` entry or `dependency-reduced-pom.xml` | a 5.9 MB `libmeos.so` under a benchmark module, made the default `meos.lib.dir` by its own pom: a local run loaded it while CI loaded a freshly built one, and it answered for neither S2CELL nor POSECHAIN |
+| `build-output` | a tracked `.so`, `.jar`, `.class`, `target/` entry or `dependency-reduced-pom.xml` | a 5.9 MB `libmeos.so` under a benchmark module, made the default `meos.lib.dir` by its own pom: a local run loaded it while CI loaded a freshly built one, and it answered for neither S2CELL nor RASTER |
 | `skipped-tests` | `-DskipTests`, `-Dmaven.test.skip`, `<skipTests>`, `skipITs` | a jar built and published from a suite that never ran |
 | `stale-pin` | a clone of an ecosystem repository off `master`, or onto a fork | a Dockerfile building MobilityDB `stable-1.3` and a personal fork, while the jar in the same image came from the catalog of master |
 | `orphan-image` | a named `Dockerfile*` no tracked file references | an image nothing built, kept current by nobody |
