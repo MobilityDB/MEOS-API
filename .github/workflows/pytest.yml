@@ -86,14 +86,42 @@ jobs:
       # conclusion, which is how the eleven went unnoticed. Every precondition
       # is supplied and asserted above, so a skip now means a guard reads a
       # condition this job no longer satisfies — a defect, not a circumstance.
-      - name: Refuse a silent skip
+      #
+      # The floor is the second half, and it guards what the skip count cannot
+      # see: a test the run never collects is reported nowhere, so removing one
+      # leaves the skip count at zero while coverage leaves. Raise it when the
+      # suite grows; lowering it belongs in the commit that removes the tests.
+      # Run the script from this checkout rather than through the action, which
+      # would fetch master: a pull request must be checked by the rules it
+      # carries, or a change to them is not exercised until after it merges.
+      # Consumers use the action; this repository owns the rules.
+      - name: Refuse a skip, and a suite that shrank
+        run: tools/check-test-outcome.py "$RUNNER_TEMP/pytest.log" --min-tests 268
+
+      # The rules earn their place by refusing a log that carries what they
+      # name. Both fixtures are written here rather than tracked, and the
+      # summary strings are assembled from parts so this file does not itself
+      # read as a skipping suite.
+      - name: Prove the check can fail
         run: |
-          if grep -qE '[0-9]+ skipped' "$RUNNER_TEMP/pytest.log"; then
-            grep -E '^SKIPPED' "$RUNNER_TEMP/pytest.log" || true
-            echo "::error::the suite skipped tests; every precondition is supplied, so a skip is a defect"
+          set -e
+          SK="skip""ped"
+          printf '===== 257 passed, 11 %s in 13.58s =====\n' "$SK" > "$RUNNER_TEMP/fx-skip.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-skip.log" --min-tests 268; then
+            echo "::error::the check passed a log reporting skips and a shrunken suite"
             exit 1
           fi
-          echo "no test skipped"
+          printf '===== 267 passed in 13.58s =====\n' > "$RUNNER_TEMP/fx-shrank.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-shrank.log" --min-tests 268; then
+            echo "::error::the check passed a suite one test below its floor"
+            exit 1
+          fi
+          printf 'nothing here\n' > "$RUNNER_TEMP/fx-empty.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-empty.log" --min-tests 268; then
+            echo "::error::the check passed a log carrying no summary at all"
+            exit 1
+          fi
+          echo "the check refuses a skip, a shrunken suite, and a log with no summary"
 
       - name: Upload meos-idl.json as artefact
         if: always()

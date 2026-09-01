@@ -191,3 +191,34 @@ is what the action calls, so a local answer and a CI answer cannot differ.
 A deliberate exception is a recorded decision, so it lives in the repository as
 `tools/tree-hygiene-allow.txt` — one `<rule> <path-glob>  # why` per line — and
 carries its reason beside it.
+
+## Keeping a suite honest (check-test-outcome)
+
+Tree hygiene reads files; it cannot see what a run actually did. Two things a
+suite does are invisible in a job's conclusion, and `check-test-outcome` refuses
+both:
+
+| it refuses | why the job cannot see it otherwise |
+| --- | --- |
+| a test reported **skipped** | a skipped test carries no assertion, and the conclusion of a job with skips is `success`. `-Dmeos.enabled=false` is enough to disable a whole MEOS surface under a green build. |
+| a suite that **shrank** | a test the run never collects appears in no count at all, so the skip number stays 0. A surefire `<excludes>`, a `-Dtest=` filter, a class renamed out of `*Test` and a deleted file are all invisible to the first rule. The total is what moves, so the total carries a floor. |
+
+The second rule is the one that matters once the first exists: when skipping is
+refused, deleting a test is the remaining way to stop running it.
+
+```yaml
+- name: Refuse a skip, and a suite that shrank
+  uses: MobilityDB/MEOS-API/.github/actions/check-test-outcome@master
+  with:
+    log: ${{ runner.temp }}/build.log
+    min-tests: "268"
+```
+
+Pipe the build through `tee` to produce that log, and keep `set -o pipefail` so
+the build's own failure is not masked by `tee` succeeding. The check reads both
+the surefire and the pytest summary dialects, and sums every module's line: a
+multi-module build prints one summary per module, so the last line alone
+understates the total.
+
+Raise the floor when the suite grows. Lowering it is a deliberate act that
+belongs in the same commit as the removal it accounts for.
