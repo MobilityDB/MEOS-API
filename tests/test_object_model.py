@@ -28,6 +28,23 @@ from parser.object_model import (
 MODEL = ROOT / "meta" / "object-model.json"
 _INTERNAL = {"T_TDOUBLE2", "T_TDOUBLE3", "T_TDOUBLE4"}  # not public classes
 
+#: Temporal types MEOS admits that no leaf class models yet, so the lattice
+#: cannot express them and a binding projected from it reaches them only
+#: through the flat C surface. This set is a RATCHET, not a permission: the
+#: coverage test compares against it exactly, so a new uncovered type fails the
+#: suite, and giving one of these a class fails it too until the entry goes.
+#:
+#: The three cell-index families are one open question rather than three: H3,
+#: quadbin and S2 are the same kind of thing — a temporal value over a discrete
+#: global grid — and whether they sit under a shared abstract parent, the way
+#: TPoint groups TGeomPoint and TGeogPoint, is a taxonomy decision the model
+#: owner makes. The other three have obvious homes beside their siblings.
+_UNMODELLED = {
+    "T_TH3INDEX", "T_TQUADBIN", "T_TS2CELL",   # cell-index grouping undecided
+    "T_TPOSECHAIN",                            # sibling of TPose
+    "T_TPCPOINT", "T_TPCPATCH",                # the point-cloud pair
+}
+
 
 def _nodes(d):
     return {k: v for k, v in d.items() if not k.startswith("_")}
@@ -445,6 +462,42 @@ class DriftGate(unittest.TestCase):
         for name, t in traits.items():
             derived = set(_predicate_temptypes(self.cat, t["predicate"]))
             self.assertEqual(set(t["temptypes"]), derived - _INTERNAL, name)
+
+    def test_every_temporal_type_has_a_leaf_class(self):
+        # The root's membership comes from `temporal_type()`, so the root
+        # already knows every temporal type MEOS admits. A LEAF is what gives
+        # one of them a class, and a type the root admits while no leaf claims
+        # it is a type the object model cannot express: a binding projected
+        # from this lattice reaches it only through the flat C surface.
+        #
+        # This is coverage, not membership — the assertions above hold each
+        # node to its own predicate and pass whether or not a type has a class
+        # at all, which is why the gap survived them.
+        root = self.lat["Temporal"]
+        admitted = set(root["temptypes"]) - _INTERNAL
+        self.assertTrue(admitted, "the root claims no temporal type")
+
+        claimed = {t for spec in self.lat.values() if spec["kind"] == "leaf"
+                   for t in spec["temptypes"]}
+        self.assertTrue(claimed, "no leaf claims a temporal type")
+
+        # A type may not be claimed twice: two classes for one type is an
+        # ambiguity the projection cannot resolve.
+        seen = {}
+        for node, spec in self.lat.items():
+            if spec["kind"] != "leaf":
+                continue
+            for t in spec["temptypes"]:
+                self.assertNotIn(t, seen,
+                                 f"{t} is claimed by both {seen.get(t)} and {node}")
+                seen[t] = node
+
+        self.assertEqual(admitted - claimed, _UNMODELLED,
+                         "the set of temporal types with no leaf class moved; "
+                         "give the new one a class, or record it in _UNMODELLED "
+                         "with the reason it has none")
+        self.assertEqual(claimed - admitted, set(),
+                         "leaf classes modelling a type MEOS does not admit")
 
     def test_leaf_base_types_match_catalog(self):
         # The relation is a `.temptype_basetype` field of the type-indexed
