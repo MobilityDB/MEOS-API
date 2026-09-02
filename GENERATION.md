@@ -15,8 +15,11 @@ the MEOS C headers.
 `run.py <meos/include>` parses the MEOS public headers with libclang and emits
 `output/meos-idl.json`: every function, struct, and enum with signatures, ownership, shape
 (output arrays / nullability), recovered collapsed C types (`bool`/`int64`/`Timestamp`/…
-that the preprocessor flattens to `int`), `@ingroup` groups, the `@sqlfn` SQL-name map, and
-the portable bare-name aliases. The `generator/` modules project the catalog onto the
+that the preprocessor flattens to `int`), `@ingroup` groups, the `@sqlfn` SQL-name map, the
+portable bare-name aliases, and the type registries: `typeRelations` for each base type's
+set, span, span set and temporal types, and `temporalTypes` for what MEOS states about each
+`Temporal<T>` — its base, its bounding box, the MF-JSON type token `asMFJSON` writes for it,
+and its number, spatial and linear classes. The `generator/` modules project the catalog onto the
 language-**agnostic** service contracts (OpenAPI, MCP, the runtime server, the OGC Moving
 Features projection) — the surfaces that need no foreign toolchain. Language bindings live in
 their own repos and generate from this catalog.

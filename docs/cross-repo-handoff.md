@@ -19,6 +19,8 @@ python tools/portable_parity.py  # -> output/meos-portable-parity.json (bare-nam
 |---|---|
 | `meos-idl.json#/portableAliases` | canonical operator→bare-name dialect: `byOperator`, `byBareName`, `families`, `explicitBacking`, `scope` |
 | `meos-idl.json#/functions[].{network,wire,api}` | per-function projectability + decode/encode/array/out-param wire model |
+| `meos-idl.json#/temporalTypes` | per `Temporal<T>`: its `base`, its `bbox`, the `mfjson` type token `asMFJSON` writes, and the `number` / `spatial` / `linear` classes |
+| `meos-idl.json#/typeRelations/byBase` | each base type's `set`, `span`, `spanset` and its `temporal` types, the last a list since a base carries several |
 | `meos-coverage.json#/worklist` | every non-exposable public function with a `class` + concrete upstream `suggest`, ranked by `byClass` |
 | `meos-portable-parity.json` | each bare name → backing family, with the verified parity headline |
 | OpenAPI / MCP / runtime server | generated from the same catalog |
@@ -53,6 +55,15 @@ results across all three platforms using the bare names only.
 - **`cbuffer`, `npoint`, `pose`, `rgeo` are full user-facing temporal
   types**, covered like every other type; they are never excluded from a
   parity headline.
+- **One base type carries several temporal types.** A geometry is the base of
+  `tgeompoint` and `tgeometry`, a geography of `tgeogpoint` and `tgeography`,
+  a pose of `tpose` and `trgeometry`. `typeRelations.byBase[...].temporal` is a
+  list for that reason, one entry or several, so a consumer reads one shape;
+  taking a single name loses three types MEOS has.
+- **A surface that speaks MF-JSON reads the type token from
+  `temporalTypes[...].mfjson`.** It differs per type and MEOS states it in one
+  place, `temptype_as_mfjson_sb`. A type the switch does not name carries no
+  `mfjson` key: `asMFJSON` has no form for it.
 - `trgeometry` is the user-facing name; internal functions keep the
   `trgeo_` prefix — the internal prefix is not normalized.
 - Aliases **reuse each operator's own backing function** (equivalence by

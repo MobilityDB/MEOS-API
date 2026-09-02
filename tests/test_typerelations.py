@@ -63,20 +63,22 @@ class TypeRelationsParseTest(unittest.TestCase):
     def test_full_numeric_base_resolves_all_four_templates(self):
         by_base = self._attach(_FIXTURE)
         self.assertEqual(by_base["float8"], {
-            "temporal": "tfloat", "set": "floatset",
+            "temporal": ["tfloat"], "set": "floatset",
             "span": "floatspan", "spanset": "floatspanset"})
 
     def test_non_orderable_base_has_set_but_no_span(self):
         # text has a set and a temporal type but no span/span set.
         by_base = self._attach(_FIXTURE)
-        self.assertEqual(by_base["text"], {"temporal": "ttext", "set": "textset"})
+        self.assertEqual(by_base["text"], {"temporal": ["ttext"], "set": "textset"})
 
-    def test_base_shared_by_several_temporal_types_resolves_in_meostype_order(self):
-        # A geometry is the base of both tgeompoint and tgeometry; the catalog names no
-        # temporal type at the base's own entry, so the role is the inverse relation
-        # resolved in MeosType order — the last entry, as the arrays of pairs resolved it.
+    def test_base_shared_by_several_temporal_types_names_all_of_them(self):
+        # A geometry is the base of both tgeompoint and tgeometry, and the catalog names no
+        # temporal type at the base's own entry, so the role is the inverse relation: every
+        # type naming that base, in MeosType order. Naming one of them drops the other from
+        # the registry, and a generator projecting the temporal types out of it emits a
+        # surface missing a type MEOS has.
         by_base = self._attach(_FIXTURE)
-        self.assertEqual(by_base["geometry"]["temporal"], "tgeometry")
+        self.assertEqual(by_base["geometry"]["temporal"], ["tgeompoint", "tgeometry"])
 
     def test_catalog_without_the_relation_array_raises(self):
         # A located catalog the parse reads no relation out of is a lost array, not a
@@ -128,10 +130,19 @@ class TypeRelationsSourceTest(unittest.TestCase):
         by_base = attach_type_relations({}, src)["typeRelations"]["byBase"]
         self.assertEqual(by_base["float8"]["spanset"], "floatspanset")
         self.assertEqual(by_base["int4"], {
-            "temporal": "tint", "set": "intset",
+            "temporal": ["tint"], "set": "intset",
             "span": "intspan", "spanset": "intspanset"})
         self.assertEqual(by_base["int8"]["span"], "bigintspan")
         self.assertNotIn("span", by_base["text"])
+        # The three bases MEOS instantiates Temporal<T> over more than once. Reading one
+        # temporal type per base loses tgeompoint, tgeogpoint and tpose from the registry.
+        self.assertEqual(by_base["geometry"]["temporal"], ["tgeompoint", "tgeometry"])
+        self.assertEqual(by_base["geography"]["temporal"], ["tgeogpoint", "tgeography"])
+        self.assertEqual(by_base["pose"]["temporal"], ["tpose", "trgeometry"])
+        # And every temporal type MEOS declares is reachable through some base.
+        reachable = {t for record in by_base.values() for t in record.get("temporal", ())}
+        for name in ("tpose", "tgeompoint", "tgeogpoint", "trgeometry", "tgeometry"):
+            self.assertIn(name, reachable)
 
 
 if __name__ == "__main__":

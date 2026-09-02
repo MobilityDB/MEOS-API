@@ -22,6 +22,7 @@ from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
 from parser.families import all_families, use_headers_dir
 from parser.object_model import attach_object_model, find_mobilitydb_src
+from parser.temporaltypes import attach_temporal_types
 from parser.typerelations import attach_type_relations
 
 
@@ -294,6 +295,13 @@ def main():
     # and temporal types), derived from the meos_catalog.c positional arrays. A binding projects
     # the concrete collection type of a value-domain result from this, never hard-coding it.
     idl = attach_type_relations(idl, MOBILITYDB_SRC)
+
+    # Attach the temporal-type registry: per Temporal<T>, its base, its bounding box, the
+    # MF-JSON type token asMFJSON writes for it, and the number/spatial/linear classes, all
+    # read from meos_catalog.c and type_out.c. A surface that speaks MF-JSON projects the
+    # token from here; carrying a per-type table of its own is a copy that goes stale the
+    # moment a family is added.
+    idl = attach_temporal_types(idl, MOBILITYDB_SRC)
 
     # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
     # a consumer proves it is current by comparing sourceCommit to live upstream master, never by
