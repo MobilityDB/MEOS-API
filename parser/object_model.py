@@ -214,11 +214,18 @@ _OONAME_EXCLUDE_SUFFIXES = ("_transfn", "_finalfn", "_combinefn")
 _OONAME_OVERRIDES: dict[str, str] = {}
 
 
-def _strip_class_token(fn_name: str, cls: str) -> str:
+def _strip_class_token(fn_name: str, cls: str, prefix: str = "") -> str:
     """Drop the class prefix the function-name object model encodes, leaving
-    the bare member name. Tries the class's own lower-cased token first, then
-    the generic superclass tokens, longest match wins."""
-    tokens = sorted({cls.lower(), *_GENERIC_TOKENS}, key=len, reverse=True)
+    the bare member name. Tries the prefix the classifier matched and the
+    class's own lower-cased token, then the generic superclass tokens, longest
+    match wins.
+
+    The matched prefix is what a class whose C prefix is not its lower-cased
+    name is reached by — `geom_*` for Geometry, `geog_*` for Geography — and
+    without it those members keep the prefix twice over, as `geomBuffer` on a
+    Geometry."""
+    tokens = sorted({cls.lower(), prefix, *_GENERIC_TOKENS} - {""},
+                    key=len, reverse=True)
     for tok in tokens:
         if fn_name == tok:
             return ""
@@ -241,11 +248,11 @@ def _camel(member: str) -> str:
     return "".join(out)
 
 
-def _ooname(fn_name: str, cls: str) -> str:
+def _ooname(fn_name: str, cls: str, prefix: str = "") -> str:
     """Canonical camelCase OO method name for a classified function."""
     if fn_name in _OONAME_OVERRIDES:
         return _OONAME_OVERRIDES[fn_name]
-    return _camel(_strip_class_token(fn_name, cls))
+    return _camel(_strip_class_token(fn_name, cls, prefix))
 
 
 def _oo_excluded(fn: dict, role: str) -> bool:
@@ -533,7 +540,7 @@ def attach_object_model(idl: dict, path: Path,
         role = _role(name)
         method = {"function": name, "role": role,
                   "scope": tgt["scope"], "backing": name,
-                  "ooName": _ooname(name, cls)}
+                  "ooName": _ooname(name, cls, pref)}
         if _oo_excluded(fn, role):
             method["ooExclude"] = True
         sugar = []
