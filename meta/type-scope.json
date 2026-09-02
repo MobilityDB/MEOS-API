@@ -14,6 +14,14 @@
       "types": "*",
       "note": "Generic over Temporal *: the complement of temporal_at_values."
     },
+    "temporal_at_tstzset": {
+      "types": "*",
+      "note": "Generic over Temporal *: restricts any temporal type to a timestamptz set. Its siblings state a scope through the validity check they call, and this one calls none."
+    },
+    "temporal_minus_tstzset": {
+      "types": "*",
+      "note": "Generic over Temporal *: the complement of temporal_at_tstzset, stating no validity check of its own either."
+    },
     "temporal_end_instant": {
       "types": "*",
       "note": "Generic over Temporal *: accessor on any temporal type."
