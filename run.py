@@ -15,8 +15,9 @@ from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import merge_boundargs
 from parser.enrich import enrich_idl
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map,
-                          attach_sqlaggfn_map, lint_ea_sqlfn,
-                          lint_positional_sqlfn, lint_sqlfn_case_collisions)
+                          attach_sqlaggfn_map, lint_container_family_csqlfn,
+                          lint_ea_sqlfn, lint_positional_sqlfn,
+                          lint_sqlfn_case_collisions)
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
 from parser.families import all_families, use_headers_dir
@@ -233,6 +234,17 @@ def main():
                   file=sys.stderr)
             for cname, sf in pos_bad:
                 print(f"        {cname} -> @sqlfn {sf}", file=sys.stderr)
+        # Guard: a function whose name ends in the container it takes (_tstzset, _spanset)
+        # resolved to a wrapper over a DIFFERENT container. The wrapper exists and is
+        # reachable, so the name checks pass while the catalog carries the SQL surface of
+        # the sibling overload. The function name is the SoT; fix the @csqlfn at source.
+        fam_bad = lint_container_family_csqlfn(idl)
+        if fam_bad:
+            print(f"      ⚠ {len(fam_bad)} @csqlfn container-family mismatch(es) (the wrapper "
+                  f"takes a different container than the function — fix at source):",
+                  file=sys.stderr)
+            for cname, wrapper in fam_bad:
+                print(f"        {cname} -> {wrapper}", file=sys.stderr)
 
         # Now that both the @sqlfn/@sqlop map (step 4) and the portable bare-name map
         # (step 3) are attached, classify the shared bbox-topological BACKING tags
