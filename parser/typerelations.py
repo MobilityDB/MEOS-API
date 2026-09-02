@@ -8,6 +8,10 @@ maps a ``MeosType`` to its public name. Reading the relations out of the entries
 and resolving through the names yields, for each base type name, the names of
 its set, span, span set and temporal types.
 
+``Temporal<T>`` is the one template a base instantiates more than once, so the
+``temporal`` role is a list: a geometry carries ``tgeompoint`` and ``tgeometry``,
+a pose carries ``tpose`` and ``trgeometry``.
+
 This is the static metadata a binding generator needs to pick the concrete
 collection type of a value-domain result — ``SpanSet<float>`` is ``floatspanset``
 — with no hand-coding: every binding is a projection of the catalog, so the
@@ -32,18 +36,16 @@ _RELATIONS = (
 )
 
 
-def _names(text: str) -> dict:
+def type_names(text: str) -> dict:
     """The ``MeosType`` enum-name to public-name map from ``MEOS_TYPE_NAMES``."""
     m = re.search(r'MEOS_TYPE_NAMES\s*\[\]\s*=\s*\{(.*?)\};', text, re.S)
     return dict(_NAME_RE.findall(m.group(1))) if m else {}
 
 
-def _rows(text: str, array: str) -> list:
+def catalog_rows(text: str, array: str) -> list:
     """The ``[T_X] = { .field = T_Y, ... }`` entries of the type-indexed catalog array.
 
-    Returned in file order — which is ``MeosType`` order, the ordering the catalog enforces —
-    so a base reached from several entries resolves to the last one, as the arrays of pairs
-    this array replaced did.
+    Returned in file order, which is ``MeosType`` order, the ordering the catalog enforces.
     """
     m = re.search(re.escape(array) + r'\s*\[\]\s*=\s*\{(.*?)\};', text, re.S)
     if not m:
@@ -61,12 +63,12 @@ def temptype_basetypes(cat_src: str) -> dict:
     the same parser rather than matching the array's shape a second time.
     """
     return {t: fields["temptype_basetype"]
-            for t, fields in _rows(cat_src, "MEOS_RELTYPE_CATALOG")
+            for t, fields in catalog_rows(cat_src, "MEOS_RELTYPE_CATALOG")
             if "temptype_basetype" in fields}
 
 
-def locate_catalog(src_root: Path | None) -> Path | None:
-    """The ``meos_catalog.c`` path from the resolved source root, or the ``MDB_SRC_ROOT`` checkout.
+def locate_temporal_source(src_root: Path | None, filename: str) -> Path | None:
+    """A ``meos/src/temporal`` source path from the resolved root, or the ``MDB_SRC_ROOT`` checkout.
 
     The object-model resolver returns the ``meos/src`` directory when it can, but on the
     installed-headers build path it cannot (the headers carry no source tree), while the provisioning
@@ -75,14 +77,19 @@ def locate_catalog(src_root: Path | None) -> Path | None:
     """
     candidates = []
     if src_root is not None:
-        candidates.append(Path(src_root) / "temporal" / "meos_catalog.c")
+        candidates.append(Path(src_root) / "temporal" / filename)
     mdb = os.environ.get("MDB_SRC_ROOT")
     if mdb:
-        candidates.append(Path(mdb) / "meos" / "src" / "temporal" / "meos_catalog.c")
+        candidates.append(Path(mdb) / "meos" / "src" / "temporal" / filename)
     for candidate in candidates:
         if candidate.exists():
             return candidate
     return None
+
+
+def locate_catalog(src_root: Path | None) -> Path | None:
+    """The ``meos_catalog.c`` path, the type registry's own source."""
+    return locate_temporal_source(src_root, "meos_catalog.c")
 
 
 def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
@@ -100,8 +107,8 @@ def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
         return idl
 
     text = re.sub(r"//.*", "", catalog.read_text(errors="ignore"))
-    names = _names(text)
-    rows = _rows(text, "MEOS_RELTYPE_CATALOG")
+    names = type_names(text)
+    rows = catalog_rows(text, "MEOS_RELTYPE_CATALOG")
 
     # Each entry names the types related to the type it is indexed by, in both directions.
     related = {role: {} for role, _, _ in _RELATIONS}
@@ -112,11 +119,14 @@ def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
                 related[role][meos_type] = fields[forward]
             if inverse in fields:
                 related[role][fields[inverse]] = meos_type
-        # A base names no temporal type of its own — several temporal types share one base
-        # (a geometry is the base of both tgeompoint and tgeometry) — so the temporal role is
-        # the inverse of temptype_basetype, resolved in MeosType order.
+        # A base names no temporal type of its own, and one base carries SEVERAL of them: a
+        # geometry is the base of tgeompoint and tgeometry, a pose of tpose and trgeometry. So
+        # the temporal role is the inverse of temptype_basetype, and it is every type naming
+        # that base, in MeosType order. Keeping one of them drops the others from the registry
+        # entirely, and a generator projecting the temporal types out of it then emits a
+        # surface missing a type MEOS has.
         if "temptype_basetype" in fields:
-            temp_of_base[fields["temptype_basetype"]] = meos_type
+            temp_of_base.setdefault(fields["temptype_basetype"], []).append(meos_type)
 
     set_of_base = related["set"]
     span_of_base = related["span"]
@@ -133,8 +143,14 @@ def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
         if base_name is None:
             continue
         record = {}
-        for role, mapping in (("temporal", temp_of_base), ("set", set_of_base),
-                              ("span", span_of_base), ("spanset", spanset_of_base)):
+        # The temporal role is a list for every base, one entry or several, so a consumer
+        # reads one shape rather than branching on how many temporal types a base happens
+        # to have today.
+        temporals = [names[t] for t in temp_of_base.get(base, ()) if names.get(t) is not None]
+        if temporals:
+            record["temporal"] = temporals
+        for role, mapping in (("set", set_of_base), ("span", span_of_base),
+                              ("spanset", spanset_of_base)):
             inst = mapping.get(base)
             if inst is not None and names.get(inst) is not None:
                 record[role] = names[inst]
