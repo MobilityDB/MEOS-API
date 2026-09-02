@@ -61,6 +61,14 @@ PYTEST = re.compile(r"(?:^|\s)(\d+)\s+passed(?:,\s*(\d+)\s+skipped)?")
 # deleting a function does.
 GO = re.compile(r"^\s*--- (PASS|FAIL|SKIP): ")
 
+# `Passed!  - Failed: 0, Passed: 38, Skipped: 0, Total: 38, Duration: 182 ms` —
+# the summary VSTest writes per test assembly, whichever way the run ended. An
+# empty assembly writes `No test is available in ...` and NO summary at all, so
+# the no-dialect failure below is what catches a suite with nothing in it.
+VSTEST = re.compile(
+    r"(?:Passed|Failed)!\s+-\s+Failed:\s*(\d+),\s*Passed:\s*(\d+),"
+    r"\s*Skipped:\s*(\d+),\s*Total:\s*(\d+)")
+
 
 def read_summaries(text: str):
     """Return (total, skipped, dialect, lines) summed over every summary found."""
@@ -86,6 +94,15 @@ def read_summaries(text: str):
     if lines:
         # One line per test is a listing, not a summary; report the tally.
         return total, skipped, "go", [f"{total} result line(s), {skipped} skipped"]
+
+    for raw in text.splitlines():
+        m = VSTEST.search(raw)
+        if m:
+            total += int(m.group(4))
+            skipped += int(m.group(3))
+            lines.append(raw.strip())
+    if lines:
+        return total, skipped, "vstest", lines
 
     for raw in text.splitlines():
         m = PYTEST.search(raw)

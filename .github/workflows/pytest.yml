@@ -96,7 +96,7 @@ jobs:
       # carries, or a change to them is not exercised until after it merges.
       # Consumers use the action; this repository owns the rules.
       - name: Refuse a skip, and a suite that shrank
-        run: tools/check-test-outcome.py "$RUNNER_TEMP/pytest.log" --min-tests 278
+        run: tools/check-test-outcome.py "$RUNNER_TEMP/pytest.log" --min-tests 287
 
       # The rules earn their place by refusing a log that carries what they
       # name. Both fixtures are written here rather than tracked, and the
@@ -151,6 +151,31 @@ jobs:
           printf 'ok  \tgithub.com/x/y\t0.42s\n' > "$RUNNER_TEMP/fx-go-quiet.log"
           if tools/check-test-outcome.py "$RUNNER_TEMP/fx-go-quiet.log" --min-tests 3; then
             echo "::error::the check passed a Go log written without -v, which carries no counts"
+            exit 1
+          fi
+          # The VSTest dialect, which MEOS.NET tees. An assembly holding no
+          # test at all writes no summary and exits 0, so the log it leaves is
+          # the thing to refuse.
+          printf 'Passed!  - Failed: 0, Passed: 38, Skip''ped: 0, Total: 38, Duration: 182 ms - A.dll (net8.0)\n' \
+            > "$RUNNER_TEMP/fx-vstest-ok.log"
+          if ! tools/check-test-outcome.py "$RUNNER_TEMP/fx-vstest-ok.log" --min-tests 38; then
+            echo "::error::the check refused a VSTest log that satisfies both rules"
+            exit 1
+          fi
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-vstest-ok.log" --min-tests 39; then
+            echo "::error::the check passed a VSTest suite below its floor"
+            exit 1
+          fi
+          printf 'Failed!  - Failed: 0, Passed: 36, Skip''ped: 2, Total: 38, Duration: 190 ms - A.dll (net8.0)\n' \
+            > "$RUNNER_TEMP/fx-vstest-skip.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-vstest-skip.log" --min-tests 38; then
+            echo "::error::the check passed a VSTest log reporting skips"
+            exit 1
+          fi
+          printf 'No test is available in /src/A.dll. Make sure that test discoverer & executors are registered.\n' \
+            > "$RUNNER_TEMP/fx-vstest-empty.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-vstest-empty.log" --min-tests 1; then
+            echo "::error::the check passed a VSTest run over an assembly holding no test"
             exit 1
           fi
           echo "the check refuses a skip, a shrunken suite, and a log with no summary, in every dialect it reads"
