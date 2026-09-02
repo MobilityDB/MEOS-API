@@ -67,6 +67,22 @@ def temptype_basetypes(cat_src: str) -> dict:
             if "temptype_basetype" in fields}
 
 
+def bbox_types(cat_src: str) -> list:
+    """The bounding-box types, as ``MEOS_RELTYPE_CATALOG`` states them.
+
+    The `type_bboxtype` column names the box a type stores, so its distinct
+    values are exactly the box types MEOS has — which is what a companion
+    class is needed for, and what a hand list of them drifts from.
+    """
+    seen, out = set(), []
+    for _, fields in catalog_rows(cat_src, "MEOS_RELTYPE_CATALOG"):
+        bbox = fields.get("type_bboxtype")
+        if bbox and bbox != "T_UNKNOWN" and bbox not in seen:
+            seen.add(bbox)
+            out.append(bbox)
+    return out
+
+
 def locate_temporal_source(src_root: Path | None, filename: str) -> Path | None:
     """A ``meos/src/temporal`` source path from the resolved root, or the ``MDB_SRC_ROOT`` checkout.
 
