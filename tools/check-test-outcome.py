@@ -23,10 +23,16 @@
 #            deleting a test is the remaining way to stop running it, and this
 #            is what stands in that path.
 #
-# Both summary dialects are read, and every module's line is summed rather than
+# Each summary dialect is read, and every module's line is summed rather than
 # the last one taken — a multi-module build prints one summary per module, and
 # reading only the last understates the total (measured: MobilityKafka prints 7
 # and 4, so its total is 11 rather than the 4 a tail would report).
+#
+# The Go dialect prints no counts at all: `go test -v` writes one result line
+# per test and per subtest, and the totals are their tally. A run without -v
+# writes only `ok <pkg> 0.42s`, which carries neither a total nor a skip count,
+# so such a log reaches the no-summary rule below and fails — the log a Go
+# consumer tees must come from `go test -v`.
 #
 # Usage:
 #   tools/check-test-outcome.py <build.log> [--min-tests N] [--allow-skips]
@@ -48,6 +54,13 @@ SUREFIRE = re.compile(
 # `268 passed in 12.19s` / `257 passed, 11 skipped in 13.58s` — pytest's summary.
 PYTEST = re.compile(r"(?:^|\s)(\d+)\s+passed(?:,\s*(\d+)\s+skipped)?")
 
+# `--- PASS: TestName (0.01s)` / `    --- SKIP: TestName/sub (0.00s)` — the
+# result line `go test -v` writes for every test and every subtest. Subtests
+# count on both sides: a t.Run whose body skips is as unrun as its parent would
+# be, and deleting a case from a table-driven test moves the total exactly as
+# deleting a function does.
+GO = re.compile(r"^\s*--- (PASS|FAIL|SKIP): ")
+
 
 def read_summaries(text: str):
     """Return (total, skipped, dialect, lines) summed over every summary found."""
@@ -62,6 +75,17 @@ def read_summaries(text: str):
             lines.append(line.strip())
     if lines:
         return total, skipped, "surefire", lines
+
+    for raw in text.splitlines():
+        m = GO.match(raw)
+        if m:
+            total += 1
+            if m.group(1) == "SKIP":
+                skipped += 1
+            lines.append(raw.strip())
+    if lines:
+        # One line per test is a listing, not a summary; report the tally.
+        return total, skipped, "go", [f"{total} result line(s), {skipped} skipped"]
 
     for raw in text.splitlines():
         m = PYTEST.search(raw)
@@ -97,8 +121,8 @@ def main() -> int:
     # rather than a silent pass.
     if dialect is None:
         print(f"check-test-outcome: {path} ({len(text)} bytes) carries no test "
-              f"summary in either dialect — the suite did not run, or the log "
-              f"is not the one the run wrote", file=sys.stderr)
+              f"summary in any dialect it reads — the suite did not run, or the "
+              f"log is not the one the run wrote", file=sys.stderr)
         return 1
 
     print(f"check-test-outcome: {dialect}, {len(lines)} summary line(s)")
@@ -111,7 +135,8 @@ def main() -> int:
     if skipped and not args.allow_skips:
         for line in text.splitlines():
             s = line.strip()
-            if s.startswith("SKIPPED") or " SKIPPED " in s:
+            if (s.startswith("SKIPPED") or " SKIPPED " in s
+                    or s.startswith("--- SKIP:")):
                 print(f"  {s}")
         print(f"::error::{skipped} test(s) skipped. A skipped test asserts "
               f"nothing and reports as success. Supply the precondition its "
@@ -128,6 +153,13 @@ def main() -> int:
 
     if failed:
         return 1
+    if skipped:
+        # Only --allow-skips reaches here with a non-zero count, and saying
+        # "nothing skipped" over it would misreport the one run that tolerates
+        # them.
+        print(f"check-test-outcome: {skipped} skipped, tolerated by "
+              f"--allow-skips; the suite did not shrink")
+        return 0
     print("check-test-outcome: nothing skipped, and the suite did not shrink")
     return 0
 
