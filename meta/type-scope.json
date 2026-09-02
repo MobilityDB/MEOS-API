@@ -91,6 +91,18 @@
       "types": ["trgeometry"],
       "note": "Serves trgeometry alone; states no validity check."
     },
+    "trgeometry_delete_tstzspan": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its validity check names the time span deleted, not the temporal type."
+    },
+    "trgeometry_delete_tstzset": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its validity check names the timestamp set, not the temporal type."
+    },
+    "trgeometry_delete_tstzspanset": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its validity check names the time span set, not the temporal type."
+    },
     "trgeometry_at_value": {
       "types": ["trgeometry"],
       "note": "Serves trgeometry alone. Its operand is a Temporal *, and the only parameter naming a type is the pose restricted to, so the parameter types name the value rather than the temporal type."
