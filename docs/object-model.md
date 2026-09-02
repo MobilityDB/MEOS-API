@@ -107,11 +107,24 @@ reconciliation cannot silently regress.
 MEOS is a closed algebra: temporal operations return and consume spans,
 sets and boxes (`tnumber_to_span` → a `Span`, `temporal_time` → a
 `TsTzSpanSet`, `tnumber_to_tbox` → `TBox`). The methods cannot be typed
-without these, so `objectModel.companions` carries two parallel
-hierarchies — `Box` (`TBox`, `STBox`) and `Collection`
+without these, so `objectModel.companions` carries three parallel
+hierarchies — `Box` (`TBox`, `STBox`), `Collection`
 (`Set`/`Span`/`SpanSet` with the concrete int/bigint/float/text/date/
-tstz/geo/… leaves) — and `objectModel.algebra` records which companion a
-temporal family yields.
+tstz/geo/… leaves) and `Value` — and `objectModel.algebra` records which
+companion a temporal family yields.
+
+`Value` holds the base values themselves: `Text`, `Jsonb`, `Geo` over
+`Geometry` and `Geography` (both a `GSERIALIZED`, parented exactly as
+`TGeo` parents `TGeometry` and `TGeography`), `Cbuffer`, `Npoint`,
+`Nsegment`, `Pose`, `PoseChain`, `Pcpoint`, `Pcpatch` and `Raquet`. A
+base value crosses the MEOS boundary as a pointer unless
+`basetype_byvalue()` names its type — which is why the DGGS cells, being
+a `uint64`, need no class and the ten by-reference base types do.
+`DriftGate::test_every_byreference_base_type_has_a_value_class` derives
+that set from the two predicates and fails until each has a class, so a
+base type MEOS adds reaches the model with no edit to the file.
+`Nsegment` and `Raquet` are the two MeosTypes no membership predicate
+admits; the model states them, and the same gate states that it does.
 
 ## Method assignment
 
@@ -121,7 +134,7 @@ is a method of, by **longest-prefix match** (so `tgeompoint_*` beats
 resolves to the concrete `TFloatInst`). The assignment **reuses the
 function itself** as the backing symbol — equivalence by construction, no
 C-symbol guessing. A function with no prefix match (operator overloads,
-`datum_*`/`geo_*` base helpers, plumbing) is recorded honestly with
+`datum_*` base helpers, plumbing) is recorded honestly with
 `class: null` and a reason — never force-fitted.
 
 ## Dispatch metadata
