@@ -144,6 +144,17 @@ C-symbol guessing. A function with no prefix match (operator overloads,
 `datum_*` base helpers, plumbing) is recorded honestly with
 `class: null` and a reason — never force-fitted.
 
+`objectModel.classes.<Class>.cType` names what the class's instances are a
+pointer to, since a binding declares every wrapper in terms of it and
+working it out per binding is what makes a class the binding cannot type
+until it is edited. It is read from the signatures MEOS publishes: a
+receiver-role method — accessor, predicate, conversion, restriction,
+output — takes the value it is called on first, so the pointee of that
+parameter names the type. A class holding constructors alone takes the
+answer of the subtype it is a product of (`TFloatInst` → `TInstant`), and
+any other its parent's, which is the same C type by construction. All 105
+classes resolve one, over the 21 C types MEOS's own signatures name.
+
 ## Dispatch metadata
 
 For 4 of the 6 temporal-type families the per-member argument→backing
