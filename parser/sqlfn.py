@@ -617,6 +617,50 @@ def lint_positional_sqlfn(idl):
     return bad
 
 
+# A MEOS-C function's name ends in the container it takes — `_tstzset` a timestamptz
+# set, `_tstzspanset` a span set — and its @csqlfn must name a wrapper over that same
+# container. A copy-paste from the neighbouring block names the sibling container's
+# wrapper instead, and nothing catches it: the wrapper exists, it is reachable, and its
+# arity matches, so the catalog silently carries the SQL surface of the wrong overload
+# (trgeometry_at_tstzset answering atTime(trgeometry, tstzspanset), leaving the
+# timestamptz-set overload named by nothing).
+# A CONCRETE function name over a GENERIC wrapper is the norm rather than a mistag —
+# `adjacent_span_timestamptz` names `Adjacent_span_value` because one wrapper serves
+# every base type — so both sides are read as a container FAMILY and only a
+# disagreement between families is reported. That is what separates the seven real
+# mistags from the forty names whose suffixes merely differ.
+_CONTAINER_FAMILY = {
+    "tstzspanset": "spanset", "tstzspan": "span", "tstzset": "set",
+    "timestamptz": "value", "spanset": "spanset", "span": "span",
+    "set": "set", "value": "value",
+}
+_CONTAINER_SUFFIX = tuple(sorted(_CONTAINER_FAMILY, key=len, reverse=True))
+
+
+def _container_family(name):
+    """The container family the name ends in, or None when it names no container."""
+    low = name.lower()
+    for suf in _CONTAINER_SUFFIX:
+        if low.endswith("_" + suf):
+            return _CONTAINER_FAMILY[suf]
+    return None
+
+
+def lint_container_family_csqlfn(idl):
+    """Return [(meos_c_name, wrapper)] where the container family the function's name
+    ends in contradicts the family its resolved wrapper ends in — a source @csqlfn
+    mistag naming the sibling container's wrapper."""
+    bad = []
+    for f in idl["functions"]:
+        wrapper = f.get("mdbC")
+        if not wrapper:
+            continue
+        fam_fn, fam_wrapper = _container_family(f["name"]), _container_family(wrapper)
+        if fam_fn and fam_wrapper and fam_fn != fam_wrapper:
+            bad.append((f["name"], wrapper))
+    return bad
+
+
 def lint_sqlfn_case_collisions(idl, multi=None):
     """Return [(lower, [spelling, ...])] for @sqlfn names that collide
     case-insensitively but differ in case (e.g. tDistance vs tdistance).
