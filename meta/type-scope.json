@@ -91,6 +91,46 @@
       "types": ["trgeometry"],
       "note": "Serves trgeometry alone; states no validity check."
     },
+    "trgeometry_at_value": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone. Its operand is a Temporal *, and the only parameter naming a type is the pose restricted to, so the parameter types name the value rather than the temporal type."
+    },
+    "trgeometry_minus_value": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its parameter types name the pose, not the temporal type."
+    },
+    "trgeometry_at_timestamptz": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its parameter types name the timestamp, not the temporal type."
+    },
+    "trgeometry_minus_timestamptz": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its parameter types name the timestamp, not the temporal type."
+    },
+    "trgeometry_at_geom": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its parameter types name the geometry restricted to, not the temporal type."
+    },
+    "trgeometry_minus_geom": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its parameter types name the geometry, not the temporal type."
+    },
+    "trgeometry_at_stbox": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its parameter types name the box and the border flag, not the temporal type."
+    },
+    "trgeometry_minus_stbox": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its parameter types name the box and the border flag, not the temporal type."
+    },
+    "trgeometry_as_text": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its only remaining parameter is the digit count, whose type names nothing it serves."
+    },
+    "trgeometry_as_ewkt": {
+      "types": ["trgeometry"],
+      "note": "Serves trgeometry alone; its only remaining parameter is the digit count, whose type names nothing it serves."
+    },
 
     "tintbox_shift_scale": {
       "types": ["tbox"],
