@@ -469,14 +469,26 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
             # function keeps all of them and stamps the name whenever it differs.
             fam_names = {s["sqlName"] for s in sigs}
             multiname = len(fam_names) > 1 or (scoped and fam_names != {f["sqlfn"]})
+            # The CREATE FUNCTION statements are what the extension deploys, so when
+            # an unshared wrapper's signatures all carry ONE SQL name, that name is
+            # this function's SQL surface whatever its tag spells. A tag names the
+            # family rather than the function for the five topological bounding-box
+            # backings — `@sqlfn contains_bbox` over a wrapper the extension exposes
+            # as `contains`, the suffix separating `contains` from `contains_rid` in
+            # the tag namespace — and trails the surface for a name still awaiting a
+            # rename. Comparing against the tag alone drops every signature in both
+            # cases, leaving the arity of a surface the catalog then cannot state.
+            surface = f["sqlfn"]
+            if surface not in fam_names and len(fam_names) == 1:
+                surface = next(iter(fam_names))
             own = []
             for s in sigs:
-                if not multiname and s["sqlName"] != f["sqlfn"]:
+                if not multiname and s["sqlName"] != surface:
                     continue
                 entry = {"args": s["args"], "ret": s["ret"]}
                 if any(d is not None for d in s["argDefaults"]):
                     entry["argDefaults"] = s["argDefaults"]
-                if multiname:
+                if multiname or s["sqlName"] != f["sqlfn"]:
                     entry["sqlName"] = s["sqlName"]
                 own.append(entry)
             if own:
