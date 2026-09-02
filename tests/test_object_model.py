@@ -195,6 +195,45 @@ class AttachTests(unittest.TestCase):
         self.assertNotIn("ooExclude", meths["temporal_num_instants"])
         self.assertTrue(meths["temporal_inst_n"].get("ooExclude"))
 
+    def test_class_ctype_comes_from_the_receiver(self):
+        # A receiver-role method takes the value it is called on first, so its
+        # pointee names what the class's instances are — which is what a
+        # binding declares every wrapper in terms of.
+        om = attach_object_model({"functions": [
+            {"name": "cbuffer_srid",
+             "params": [{"name": "cbuf", "cType": "const Cbuffer *"}]},
+            {"name": "geom_to_geog",
+             "params": [{"name": "geo", "cType": "const GSERIALIZED *"}]},
+        ]}, MODEL, None)["objectModel"]
+        self.assertEqual(om["classes"]["Cbuffer"]["cType"], "Cbuffer")
+        self.assertEqual(om["classes"]["Geometry"]["cType"], "GSERIALIZED")
+
+    def test_a_constructor_only_class_takes_its_subtypes_ctype(self):
+        # `tfloatinst_make` builds a value out of a base value and a time, so
+        # its first parameter says nothing about the class; the concrete class
+        # is the product of a leaf and a subtype, and the subtype answers.
+        om = attach_object_model({"functions": [
+            {"name": "tfloatinst_make",
+             "params": [{"name": "d", "cType": "double"},
+                        {"name": "t", "cType": "TimestampTz"}]},
+            {"name": "tinstant_value",
+             "params": [{"name": "inst", "cType": "const TInstant *"}]},
+        ]}, MODEL, None)["objectModel"]
+        self.assertEqual(om["classes"]["TFloatInst"]["cType"], "TInstant")
+
+    def test_a_class_with_no_receiver_takes_its_parents_ctype(self):
+        # A collection leaf whose only method builds a set out of geographies
+        # says nothing about itself either, and it is no product of a subtype;
+        # its parent answers, which is the same C type by construction.
+        om = attach_object_model({"functions": [
+            {"name": "geogset_make",
+             "params": [{"name": "values", "cType": "const GSERIALIZED **"},
+                        {"name": "count", "cType": "int"}]},
+            {"name": "set_num_values",
+             "params": [{"name": "s", "cType": "const Set *"}]},
+        ]}, MODEL, None)["objectModel"]
+        self.assertEqual(om["classes"]["GeogSet"]["cType"], "Set")
+
     def test_tree_derived(self):
         om = self._attach(["temporal_merge"])["objectModel"]
         lat = om["lattice"]

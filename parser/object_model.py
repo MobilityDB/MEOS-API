@@ -70,6 +70,23 @@ _SUBTYPE_SUFFIX = [("seqset", "SeqSet", "TSequenceSet"),
 _COMPANION_PREFIX_ALIASES = {"GeomSet": ["geomset", "geoset"]}
 
 
+#: The roles whose first parameter is the value the method is called on. A
+#: constructor builds one out of something else and an aggregate takes the
+#: accumulator, so neither says what the class's instances are.
+_RECEIVER_ROLES = frozenset({"accessor", "predicate", "conversion",
+                             "restriction", "output"})
+
+_QUALIFIER_RE = re.compile(r"\b(?:const|struct)\b")
+
+
+def _pointee(c_type: str) -> str | None:
+    """The type a single-pointer C declaration points at, or None."""
+    bare = _QUALIFIER_RE.sub("", c_type).strip()
+    if bare.endswith("*") and bare.count("*") == 1:
+        return bare[:-1].strip()
+    return None
+
+
 def _companion_families(model: dict) -> list:
     """The companion hierarchies the model carries, in file order.
 
@@ -410,6 +427,56 @@ def derive_membership(nodes: dict, cat_src: str, basetypes: dict) -> None:
             spec["cBaseType"] = basetypes[temptype]
 
 
+def _class_ctypes(classes: dict, functions: dict, parents: dict,
+                  subtype_classes: dict) -> dict:
+    """The C type each class's instances are a pointer to.
+
+    A binding declares every wrapper in terms of it, so leaving it to each
+    binding to work out is what makes a class a binding cannot type unless it
+    is edited. It is read here from the signatures MEOS already publishes: a
+    receiver-role method takes the value it is called on first, so the pointee
+    of that parameter names the type, and the class's own methods answer for
+    it. A class whose methods build values rather than take them — the
+    concrete `<leaf><subtype>` classes hold constructors alone — takes the
+    answer of the subtype it is a product of, and any other class its parent's,
+    which is the same C type by construction.
+    """
+    own = {}
+    for cls, spec in classes.items():
+        seen = {}
+        for method in spec["methods"]:
+            if method["role"] not in _RECEIVER_ROLES:
+                continue
+            fn = functions.get(method["function"])
+            params = fn.get("params") if fn else None
+            if not params:
+                continue
+            pointee = _pointee(params[0]["cType"])
+            if pointee:
+                seen[pointee] = seen.get(pointee, 0) + 1
+        ranked = sorted(seen.items(), key=lambda kv: -kv[1])
+        if ranked and (len(ranked) == 1 or ranked[0][1] > ranked[1][1]):
+            own[cls] = ranked[0][0]
+
+    resolved: dict = {}
+
+    def resolve(cls, walked=frozenset()):
+        if cls in resolved:
+            return resolved[cls]
+        if cls in own:
+            resolved[cls] = own[cls]
+        elif cls in subtype_classes:
+            resolved[cls] = resolve(subtype_classes[cls], walked | {cls})
+        else:
+            parent = parents.get(cls)
+            resolved[cls] = (resolve(parent, walked | {cls})
+                             if parent and parent not in walked | {cls}
+                             else None)
+        return resolved[cls]
+
+    return {cls: resolve(cls) for cls in classes}
+
+
 def attach_object_model(idl: dict, path: Path,
                         mobilitydb_src: Path | None = None) -> dict:
     """Attach ``idl["objectModel"]`` from the canonical lattice file."""
@@ -485,6 +552,24 @@ def attach_object_model(idl: dict, path: Path,
         if "concreteOf" in tgt:
             function_to_class[name]["concreteOf"] = tgt["concreteOf"]
             function_to_class[name]["subtype"] = tgt["subtype"]
+
+    # What each class's instances are a pointer to, so a binding declares its
+    # wrappers from the model rather than from a map of its own.
+    parents = {n: s.get("parent") for n, s in lat.items()}
+    for fam in _companion_families(model):
+        for n, s in model["companions"][fam]["nodes"].items():
+            if not n.startswith("_"):
+                parents[n] = s.get("parent")
+    subtype_classes = {}
+    for leaf in [n for n, s in lat.items() if s["kind"] == "leaf"]:
+        for _tok, suffix, subtype in _SUBTYPE_SUFFIX:
+            if leaf + suffix in classes:
+                subtype_classes[leaf + suffix] = subtype
+    ctypes = _class_ctypes(classes, {f["name"]: f for f in functions},
+                           parents, subtype_classes)
+    for cls, ctype in ctypes.items():
+        if ctype:
+            classes[cls]["cType"] = ctype
 
     # Error contract
     errors = dict(model["errors"])
