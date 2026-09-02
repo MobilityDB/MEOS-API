@@ -368,7 +368,20 @@
       "spanset",
       "set",
       "tbox",
-      "stbox"
+      "stbox",
+      "geo",
+      "geom",
+      "geog",
+      "text",
+      "jsonb",
+      "cbuffer",
+      "npoint",
+      "nsegment",
+      "pose",
+      "posechain",
+      "pcpoint",
+      "pcpatch",
+      "raquet"
     ]
   },
   "companions": {
@@ -539,6 +552,140 @@
           "kind": "leaf",
           "parent": "SpanSet",
           "temptype": "T_TSTZSPANSET"
+        }
+      }
+    },
+    "Value": {
+      "_comment": "A base value crosses the MEOS boundary as a POINTER unless basetype_byvalue() names its type, and a method taking or answering one cannot be typed without a class for it. Parallel hierarchy, as Box and Collection are. temptypes gated against the MeosType enum, and the by-reference base types gated for COVERAGE against basetype_byvalue().",
+      "root": "Value",
+      "nodes": {
+        "Value": {
+          "kind": "root",
+          "parent": null,
+          "doc": "Base values MEOS passes by reference."
+        },
+        "Text": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "text"
+          ],
+          "temptype": "T_TEXT",
+          "doc": "PostgreSQL text, the base type of TText and TextSet."
+        },
+        "Jsonb": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "jsonb"
+          ],
+          "temptype": "T_JSONB",
+          "conditional": "JSON",
+          "doc": "PostgreSQL jsonb, the base type of TJsonb and JsonbSet."
+        },
+        "Geo": {
+          "kind": "abstract",
+          "parent": "Value",
+          "prefixes": [
+            "geo"
+          ],
+          "doc": "PostGIS-derived values, both of them a GSERIALIZED. Parent of Geometry and Geography exactly as TGeo parents TGeometry and TGeography, so a signature naming the C type alone is typed by the parent and the two spellings stay distinct classes."
+        },
+        "Geometry": {
+          "kind": "leaf",
+          "parent": "Geo",
+          "prefixes": [
+            "geom"
+          ],
+          "temptype": "T_GEOMETRY",
+          "traits": [
+            "geometryBased"
+          ]
+        },
+        "Geography": {
+          "kind": "leaf",
+          "parent": "Geo",
+          "prefixes": [
+            "geog"
+          ],
+          "temptype": "T_GEOGRAPHY",
+          "traits": [
+            "geodetic"
+          ]
+        },
+        "Cbuffer": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "cbuffer"
+          ],
+          "temptype": "T_CBUFFER",
+          "conditional": "CBUFFER"
+        },
+        "Npoint": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "npoint"
+          ],
+          "temptype": "T_NPOINT",
+          "conditional": "NPOINT"
+        },
+        "Nsegment": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "nsegment"
+          ],
+          "temptype": "T_NSEGMENT",
+          "conditional": "NPOINT",
+          "doc": "A segment of a network route. A MeosType no membership predicate admits, so the coverage gate does not demand it; the 20 signatures naming it do."
+        },
+        "Pose": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "pose"
+          ],
+          "temptype": "T_POSE",
+          "conditional": "POSE"
+        },
+        "PoseChain": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "posechain"
+          ],
+          "temptype": "T_POSECHAIN",
+          "conditional": "POSE"
+        },
+        "Pcpoint": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "pcpoint"
+          ],
+          "temptype": "T_PCPOINT",
+          "conditional": "POINTCLOUD"
+        },
+        "Pcpatch": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "pcpatch"
+          ],
+          "temptype": "T_PCPATCH",
+          "conditional": "POINTCLOUD"
+        },
+        "Raquet": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "raquet"
+          ],
+          "temptype": "T_RAQUET",
+          "conditional": "RASTER",
+          "doc": "A raster tile. A MeosType no membership predicate admits, as Nsegment is."
         }
       }
     }

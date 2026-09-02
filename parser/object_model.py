@@ -69,6 +69,15 @@ _SUBTYPE_SUFFIX = [("seqset", "SeqSet", "TSequenceSet"),
 # lower-cased node name (verified against the headers, not guessed).
 _COMPANION_PREFIX_ALIASES = {"GeomSet": ["geomset", "geoset"]}
 
+
+def _companion_families(model: dict) -> list:
+    """The companion hierarchies the model carries, in file order.
+
+    Read from the model rather than named here, so a hierarchy it gains is
+    classified, trees derived and published with no edit in this file.
+    """
+    return [k for k in model["companions"] if not k.startswith("_")]
+
 _MEOS_ERROR_RE = re.compile(r"\bmeos_error\s*\(\s*[^,]+,\s*([A-Z][A-Z0-9_]+)")
 _ENSURE_CALL_RE = re.compile(r"\b(ensure_[a-z0-9_]+)\s*\(")
 _FUNC_SIG_RE = re.compile(r"^([A-Za-z_][\w \t\*]*?\b)?([A-Za-z_]\w*)\s*\(")
@@ -121,7 +130,7 @@ def _candidates(model: dict) -> list:
         if v["prefix"]:
             out.append((v["prefix"], {"class": v["class"], "scope": "subtype",
                                       "axis": "subtype"}))
-    for fam in ("Box", "Collection"):
+    for fam in _companion_families(model):
         fnodes = {k: x for k, x in model["companions"][fam]["nodes"].items()
                   if not k.startswith("_")}
         for name, spec in fnodes.items():
@@ -315,8 +324,11 @@ class MembershipUnavailable(RuntimeError):
 _PREDICATE_TEMPTYPE_RE = re.compile(r"\bT_T[A-Z0-9_]+\b")
 
 #: The tdoubleN types exist for temporal aggregation and are not part of the
-#: published model, so a predicate admitting them contributes the rest.
+#: published model, so a predicate admitting them contributes the rest. Their
+#: base types are internal for the same reason and `meos_basetype` says so in
+#: its own comment.
 _INTERNAL_TEMPTYPES = frozenset({"T_TDOUBLE2", "T_TDOUBLE3", "T_TDOUBLE4"})
+_INTERNAL_BASETYPES = frozenset({"T_DOUBLE2", "T_DOUBLE3", "T_DOUBLE4"})
 
 
 def _predicate_body(cat_src: str, name: str) -> str:
@@ -334,6 +346,34 @@ def _predicate_body(cat_src: str, name: str) -> str:
             return cat_src[i:j + 1]
         j += 1
     return cat_src[i:]
+
+
+_PREDICATE_TYPE_RE = re.compile(r"\bT_[A-Z0-9_]+\b")
+
+
+def predicate_types(cat_src: str, name: str) -> list:
+    """Every MeosType a membership predicate admits, in MeosType order."""
+    seen, out = set(), []
+    for t in _PREDICATE_TYPE_RE.findall(_predicate_body(cat_src, name)):
+        if t not in _INTERNAL_TEMPTYPES and t not in seen:
+            seen.add(t)
+            out.append(t)
+    if not out:
+        raise MembershipUnavailable(f"`{name}` admits no type")
+    return out
+
+
+def byreference_basetypes(cat_src: str) -> list:
+    """The base types whose values cross the MEOS boundary as a pointer.
+
+    `basetype_byvalue` names the ones a Datum carries whole; every other base
+    type is reached through a pointer, so a method taking or answering one
+    needs a class for it. Both predicates are MEOS's to state, which is why
+    this reads them instead of listing the answer.
+    """
+    byvalue = set(predicate_types(cat_src, "basetype_byvalue"))
+    return [t for t in predicate_types(cat_src, "meos_basetype")
+            if t not in byvalue and t not in _INTERNAL_BASETYPES]
 
 
 def predicate_temptypes(cat_src: str, name: str) -> list:
@@ -400,7 +440,7 @@ def attach_object_model(idl: dict, path: Path,
         membership = {"status": "source-unavailable", "source": None}
 
     lat = _tree(lattice_nodes)
-    for fam in ("Box", "Collection"):
+    for fam in _companion_families(model):
         _tree({k: v for k, v in model["companions"][fam]["nodes"].items()
                if not k.startswith("_")})
 
@@ -461,10 +501,10 @@ def attach_object_model(idl: dict, path: Path,
     leaves = sorted(n for n, s in lat.items() if s["kind"] == "leaf")
     abstracts = sorted(n for n, s in lat.items()
                        if s["kind"] in ("root", "abstract"))
+    companion_nodes = {n for fam in _companion_families(model)
+                       for n in model["companions"][fam]["nodes"]}
     concretes = sorted(c for c in classes
-                       if c not in lat
-                       and c not in model["companions"]["Box"]["nodes"]
-                       and c not in model["companions"]["Collection"]["nodes"])
+                       if c not in lat and c not in companion_nodes)
 
     idl["objectModel"] = {
         "provenance": model["provenance"],

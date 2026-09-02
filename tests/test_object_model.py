@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from parser.typerelations import temptype_basetypes
-from parser.object_model import (MembershipUnavailable, derive_membership,
-                                  predicate_temptypes)
+from parser.object_model import (MembershipUnavailable, byreference_basetypes,
+                                  derive_membership, predicate_temptypes)
 from parser.object_model import (
     _scan_errors, attach_object_model, find_mobilitydb_src)
 
@@ -80,7 +80,9 @@ class ModelFileTests(unittest.TestCase):
                 self.assertIsNotNone(s.get("predicate"), n)
 
     def test_companions_are_well_formed_trees(self):
-        for fam in ("Box", "Collection"):
+        fams = _nodes(self.d["companions"])
+        self.assertEqual(set(fams), {"Box", "Collection", "Value"})
+        for fam in fams:
             nodes = _nodes(self.d["companions"][fam]["nodes"])
             roots = [n for n, s in nodes.items() if s["parent"] is None]
             self.assertEqual(len(roots), 1, fam)
@@ -498,6 +500,36 @@ class DriftGate(unittest.TestCase):
                          "with the reason it has none")
         self.assertEqual(claimed - admitted, set(),
                          "leaf classes modelling a type MEOS does not admit")
+
+    def test_every_byreference_base_type_has_a_value_class(self):
+        # The Value hierarchy exists so a method taking or answering a base
+        # value can be typed, and a base value crosses the boundary as a
+        # pointer unless `basetype_byvalue` names its type. So the types that
+        # predicate does NOT name are exactly the ones needing a class, and
+        # MEOS gaining one reaches here with no edit in the model file.
+        #
+        # Coverage, not membership: the extras below are types no membership
+        # predicate admits, so nothing derives them and the file states them.
+        needed = set(byreference_basetypes(self.cat))
+        self.assertTrue(needed, "no base type crosses by reference")
+
+        nodes = _nodes(self.attached["companions"]["Value"]["nodes"])
+        seen = {}
+        for node, spec in nodes.items():
+            if spec["kind"] != "leaf":
+                continue
+            tt = spec["temptype"]
+            self.assertNotIn(tt, seen,
+                             f"{tt} is claimed by both {seen.get(tt)} and {node}")
+            seen[tt] = node
+
+        self.assertEqual(needed - set(seen), set(),
+                         "a base type MEOS passes by reference has no Value "
+                         "class, so every method naming it stays untypable")
+        self.assertEqual(set(seen) - needed, {"T_NSEGMENT", "T_RAQUET"},
+                         "the Value classes MEOS admits without making them "
+                         "base types moved; each is a MeosType a signature "
+                         "names, and this states which")
 
     def test_leaf_base_types_match_catalog(self):
         # The relation is a `.temptype_basetype` field of the type-indexed
