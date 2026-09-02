@@ -121,7 +121,39 @@ jobs:
             echo "::error::the check passed a log carrying no summary at all"
             exit 1
           fi
-          echo "the check refuses a skip, a shrunken suite, and a log with no summary"
+
+          # The Go dialect, which MobilityAPI tees. It carries no counts of its
+          # own: the totals are the tally of the result lines `go test -v`
+          # writes, subtests included. The positive control comes first, so a
+          # regex that matched nothing would fail here rather than read as a
+          # clean log below.
+          {
+            printf -- '--- PASS: TestOne (0.01s)\n'
+            printf -- '    --- PASS: TestOne/case (0.00s)\n'
+            printf -- '--- PASS: TestTwo (0.00s)\n'
+          } > "$RUNNER_TEMP/fx-go-ok.log"
+          if ! tools/check-test-outcome.py "$RUNNER_TEMP/fx-go-ok.log" --min-tests 3; then
+            echo "::error::the check refused a Go log that satisfies both rules"
+            exit 1
+          fi
+          {
+            cat "$RUNNER_TEMP/fx-go-ok.log"
+            printf -- '--- SK''IP: TestThree (0.00s)\n'
+          } > "$RUNNER_TEMP/fx-go-skip.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-go-skip.log" --min-tests 3; then
+            echo "::error::the check passed a Go log reporting a skip"
+            exit 1
+          fi
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-go-ok.log" --min-tests 4; then
+            echo "::error::the check passed a Go suite below its floor"
+            exit 1
+          fi
+          printf 'ok  \tgithub.com/x/y\t0.42s\n' > "$RUNNER_TEMP/fx-go-quiet.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-go-quiet.log" --min-tests 3; then
+            echo "::error::the check passed a Go log written without -v, which carries no counts"
+            exit 1
+          fi
+          echo "the check refuses a skip, a shrunken suite, and a log with no summary, in every dialect it reads"
 
       - name: Upload meos-idl.json as artefact
         if: always()

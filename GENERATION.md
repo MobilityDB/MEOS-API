@@ -215,10 +215,19 @@ refused, deleting a test is the remaining way to stop running it.
 ```
 
 Pipe the build through `tee` to produce that log, and keep `set -o pipefail` so
-the build's own failure is not masked by `tee` succeeding. The check reads both
-the surefire and the pytest summary dialects, and sums every module's line: a
+the build's own failure is not masked by `tee` succeeding. The check reads the
+surefire, pytest and Go summary dialects, and sums every module's line: a
 multi-module build prints one summary per module, so the last line alone
 understates the total.
+
+The Go dialect carries no counts of its own. `go test -v` writes one result
+line per test and per subtest, and the totals are their tally, subtests
+included: a `t.Run` whose body skips is as unrun as its parent would be, and
+deleting a case from a table-driven test moves the total exactly as deleting a
+function does. A run without `-v` writes only `ok <pkg> 0.42s`, which carries
+neither a total nor a skip count, so such a log is refused as carrying no
+summary rather than read as a clean one. A Go consumer therefore tees
+`go test -v`.
 
 Raise the floor when the suite grows. Lowering it is a deliberate act that
 belongs in the same commit as the removal it accounts for.
