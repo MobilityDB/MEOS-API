@@ -195,6 +195,23 @@ class AttachTests(unittest.TestCase):
         self.assertNotIn("ooExclude", meths["temporal_num_instants"])
         self.assertTrue(meths["temporal_inst_n"].get("ooExclude"))
 
+    def test_ooname_drops_the_prefix_the_classifier_matched(self):
+        # A class reached by a prefix that is not its lower-cased name —
+        # `geom_*` for Geometry, `geog_*` for Geography, `geoset_*` for
+        # GeomSet — otherwise keeps that prefix in the member name, so the
+        # method reads `geometry.geomBuffer()`.
+        om = attach_object_model({"functions": [
+            {"name": "geom_from_hexewkb"}, {"name": "geog_from_hexewkb"},
+            {"name": "geoset_start_value"}, {"name": "set_set_subspan"},
+        ]}, MODEL, None)["objectModel"]
+        names = {m["function"]: m["ooName"]
+                 for s in om["classes"].values() for m in s["methods"]}
+        self.assertEqual(names["geom_from_hexewkb"], "fromHexewkb")
+        self.assertEqual(names["geog_from_hexewkb"], "fromHexewkb")
+        self.assertEqual(names["geoset_start_value"], "startValue")
+        # One token is dropped, not every repetition of it.
+        self.assertEqual(names["set_set_subspan"], "setSubspan")
+
     def test_class_ctype_comes_from_the_receiver(self):
         # A receiver-role method takes the value it is called on first, so its
         # pointee names what the class's instances are — which is what a
