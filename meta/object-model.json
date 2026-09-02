@@ -411,6 +411,16 @@
           ],
           "temptype": "T_STBOX",
           "doc": "Space x time box (bbox of TSpatial)."
+        },
+        "TPCBox": {
+          "kind": "leaf",
+          "parent": "Box",
+          "prefixes": [
+            "tpcbox"
+          ],
+          "temptype": "T_TPCBOX",
+          "conditional": "POINTCLOUD",
+          "doc": "Point-cloud x time box (bbox of TPcpoint and TPcpatch)."
         }
       }
     },

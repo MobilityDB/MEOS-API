@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.typerelations import temptype_basetypes
+from parser.typerelations import bbox_types, temptype_basetypes
 from parser.object_model import (MembershipUnavailable, byreference_basetypes,
                                   derive_membership, predicate_temptypes)
 from parser.object_model import (
@@ -500,6 +500,23 @@ class DriftGate(unittest.TestCase):
                          "with the reason it has none")
         self.assertEqual(claimed - admitted, set(),
                          "leaf classes modelling a type MEOS does not admit")
+
+    def test_every_bbox_type_has_a_companion_class(self):
+        # A temporal value stores a box, and `MEOS_RELTYPE_CATALOG` names which
+        # one per type in its `type_bboxtype` column. Every box named there is
+        # a class a method returns, so the column is the coverage oracle: a box
+        # type MEOS gains fails here until a companion class carries it.
+        boxes = set(bbox_types(self.cat))
+        self.assertTrue(boxes, "the relation catalog names no bounding box")
+        claimed = {spec["temptype"]
+                   for fam in _nodes(self.attached["companions"])
+                   for spec in _nodes(
+                       self.attached["companions"][fam]["nodes"]).values()
+                   if spec["kind"] == "leaf"}
+        self.assertEqual(boxes - claimed, set(),
+                         "a box type the relation catalog names has no "
+                         "companion class, so the method answering it is "
+                         "untypable")
 
     def test_every_byreference_base_type_has_a_value_class(self):
         # The Value hierarchy exists so a method taking or answering a base

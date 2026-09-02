@@ -108,7 +108,7 @@ MEOS is a closed algebra: temporal operations return and consume spans,
 sets and boxes (`tnumber_to_span` → a `Span`, `temporal_time` → a
 `TsTzSpanSet`, `tnumber_to_tbox` → `TBox`). The methods cannot be typed
 without these, so `objectModel.companions` carries three parallel
-hierarchies — `Box` (`TBox`, `STBox`), `Collection`
+hierarchies — `Box` (`TBox`, `STBox`, `TPCBox`), `Collection`
 (`Set`/`Span`/`SpanSet` with the concrete int/bigint/float/text/date/
 tstz/geo/… leaves) and `Value` — and `objectModel.algebra` records which
 companion a temporal family yields.
@@ -125,6 +125,13 @@ that set from the two predicates and fails until each has a class, so a
 base type MEOS adds reaches the model with no edit to the file.
 `Nsegment` and `Raquet` are the two MeosTypes no membership predicate
 admits; the model states them, and the same gate states that it does.
+
+`Box` is covered the same way, from the `type_bboxtype` column of
+`MEOS_RELTYPE_CATALOG`: it names the box each type stores, so its
+distinct values are the box types a method answers, and
+`DriftGate::test_every_bbox_type_has_a_companion_class` holds the
+companions to them. `T_TSTZSPAN` among them is a `Collection` class, so
+the gate reads every hierarchy rather than `Box` alone.
 
 ## Method assignment
 
