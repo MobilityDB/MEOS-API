@@ -11,6 +11,7 @@ from parser.typerecover import recover_collapsed_types, normalize_canonical
 from parser.header_types import reconcile
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
+from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import merge_boundargs
 from parser.enrich import enrich_idl
@@ -205,6 +206,13 @@ def main():
         # FUNCTION the wrapper backs rather than the aggregate above it.
         idl, naggfn = attach_sqlaggfn_map(idl, MEOS_SRC, MDB_SRC)
         print(f"      Attached {naggfn} @sqlaggfn SQL aggregate names", file=sys.stderr)
+        # Whether the answer can be ABSENT, which no C return type states: the PG
+        # wrapper guards PG_RETURN_NULL with the condition, and that guard is the
+        # SQL contract. It rides the same @csqlfn chain, so it runs after sqlfn
+        # has set `mdbC`. Without it a binding has to invent a convention for
+        # absence, and each one invents a different one.
+        idl, nnullres = attach_null_result(idl, MDB_SRC)
+        print(f"      Attached {nnullres} nullable-result guards", file=sys.stderr)
         # Guard: a copy-paste @csqlfn in meos/src can point an ever/always function at
         # the opposite-prefix wrapper (eintersects_* tagged #Aintersects_*), flipping its
         # SQL name and breaking the binding overload dispatch. The parser is faithful, so
