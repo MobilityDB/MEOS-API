@@ -163,17 +163,37 @@ class ShapeInferTests(unittest.TestCase):
             self.assertNotIn("inputArrays", f.get("shape", {}))
 
     def test_an_out_array_is_not_read_as_an_input_one(self):
-        # `jsonb_each(jb, Jsonb **values, int *count)` writes `values` back, and
-        # its length being BY POINTER is what says so.
+        # `temporal_time_split(temp, ..., TimestampTz **bins, int *count)` writes
+        # `bins` back, and its length being BY POINTER is what says so.
         idl = {"functions": [_fn(
-            "jsonb_each", "text **",
-            [("jb", "const Jsonb *"), ("values", "Jsonb **"),
+            "temporal_time_split", "Temporal **",
+            [("temp", "const Temporal *"), ("bins", "TimestampTz **"),
              ("count", "int *")])]}
         idl, stats = infer_shapes(idl)
         shape = idl["functions"][0]["shape"]
         self.assertEqual(stats["inputArrays"], 0)
         self.assertNotIn("inputArrays", shape)
-        self.assertEqual(shape["outputArrays"], [{"param": "values"}])
+        self.assertEqual(shape["outputArrays"], [{"param": "bins"}])
+
+    def test_an_array_of_bare_meos_values_is_not_callee_allocated(self):
+        # `jsonb_each(jb, Jsonb **values, int *count)` fills an array the CALLER
+        # allocates: stripping the write-back and the array levels leaves `Jsonb`,
+        # a value MEOS holds by reference, so `values` cannot be the address of an
+        # array MEOS made.  Its callee-allocated sibling spells the same element
+        # `SpanSet ***periods`.  A binding reading this one as callee-allocated
+        # hands MEOS one element's worth of storage for `count` of them.
+        idl = {"functions": [_fn(
+            "jsonb_each", "text **",
+            [("jb", "const Jsonb *"), ("values", "Jsonb **"),
+             ("count", "int *")]),
+            _fn("tdwithin_tgeoarr_tgeoarr", "int *",
+                [("arr1", "const Temporal **"), ("count1", "int"),
+                 ("periods", "SpanSet ***"), ("count", "int *")])]}
+        idl, stats = infer_shapes(idl)
+        self.assertNotIn("outputArrays", idl["functions"][0]["shape"])
+        self.assertEqual(idl["functions"][1]["shape"]["outputArrays"],
+                         [{"param": "periods"}])
+        self.assertEqual(stats["outputArrays"], 1)
 
 
 if __name__ == "__main__":
