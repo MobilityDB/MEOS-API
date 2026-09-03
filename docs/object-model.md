@@ -113,7 +113,7 @@ hierarchies — `Box` (`TBox`, `STBox`, `TPCBox`), `Collection`
 tstz/geo/… leaves) and `Value` — and `objectModel.algebra` records which
 companion a temporal family yields.
 
-`Value` holds the base values themselves: `Text`, `Jsonb`, `Geo` over
+`Value` holds the base values themselves: `Text`, `Jsonb`, `JsonPath`, `Geo` over
 `Geometry` and `Geography` (both a `GSERIALIZED`, parented exactly as
 `TGeo` parents `TGeometry` and `TGeography`), `Cbuffer`, `Npoint`,
 `Nsegment`, `Pose`, `PoseChain`, `Pcpoint`, `Pcpatch` and `Raquet`. A
@@ -123,8 +123,9 @@ a `uint64`, need no class and the ten by-reference base types do.
 `DriftGate::test_every_byreference_base_type_has_a_value_class` derives
 that set from the two predicates and fails until each has a class, so a
 base type MEOS adds reaches the model with no edit to the file.
-`Nsegment` and `Raquet` are the two MeosTypes no membership predicate
-admits; the model states them, and the same gate states that it does.
+`Nsegment`, `Raquet` and `JsonPath` are the MeosTypes no membership
+predicate admits; the model states them, and the same gate states that it
+does.
 
 `Box` is covered the same way, from the `type_bboxtype` column of
 `MEOS_RELTYPE_CATALOG`: it names the box each type stores, so its
