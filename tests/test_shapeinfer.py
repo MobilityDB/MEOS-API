@@ -5,7 +5,7 @@ hand-maintained meta stub.  The discriminator is the *count* parameter's form:
 
 * a written-back out-array pairs with a by-pointer ``int *count`` (the callee
   fills the length) -> ``outputArrays`` + ``arrayReturn.lengthFrom``
-* a read-only in-array pairs with a by-value ``int count`` -> left untouched
+* a read-only in-array pairs with a by-value ``int count`` -> ``inputArrays``
 
 Plain unittest, no pytest dependency; fully synthetic IDL, no build artifacts.
 """
@@ -95,17 +95,22 @@ class ShapeInferTests(unittest.TestCase):
         idl, _ = infer_shapes(idl)
         self.assertNotIn("groupSize", idl["functions"][0]["shape"]["arrayReturn"])
 
-    def test_input_array_with_value_count_untouched(self):
+    def test_input_array_with_value_count_is_read_not_written(self):
         # tsequence_make-style: ** input array carries its length BY VALUE
         idl = {"functions": [_fn(
             "tsequence_make", "TSequence *",
             [("instants", "const TInstant **"), ("count", "int"),
              ("lower_inc", "bool")])]}
         idl, stats = infer_shapes(idl)
-        self.assertNotIn("shape", idl["functions"][0])
+        shape = idl["functions"][0]["shape"]
         self.assertEqual(stats["outputArrays"], 0)
+        self.assertNotIn("outputArrays", shape)
+        self.assertEqual(shape["inputArrays"], [{
+            "param": "instants",
+            "lengthFrom": {"kind": "param", "name": "count"},
+            "element": {"c": "TInstant *", "canonical": "TInstant *"}}])
 
-    def test_nonconst_input_array_with_value_count_untouched(self):
+    def test_nonconst_input_array_with_value_count_is_read_not_written(self):
         # tsequenceset_make_gaps-style: non-const ** but BY-VALUE count => input
         idl = {"functions": [_fn(
             "tsequenceset_make_gaps", "TSequenceSet *",
@@ -113,7 +118,62 @@ class ShapeInferTests(unittest.TestCase):
              ("maxt", "const Interval *")])]}
         idl, stats = infer_shapes(idl)
         self.assertEqual(stats["outputArrays"], 0)
-        self.assertNotIn("shape", idl["functions"][0])
+        self.assertEqual(
+            idl["functions"][0]["shape"]["inputArrays"][0]["param"], "instants")
+
+    def test_a_length_is_read_by_position_not_by_its_name(self):
+        # The names disagree across the surface — `ngeoms`, `keys_len`, `size`
+        # — and each is the length of the array before it.
+        idl = {"functions": [
+            _fn("geo_cluster_kmeans", "int *",
+                [("geoms", "const GSERIALIZED **"), ("ngeoms", "uint32_t"),
+                 ("k", "uint32_t"), ("count", "int *")]),
+            _fn("jsonb_delete_array", "Jsonb *",
+                [("jb", "const Jsonb *"), ("keys_elems", "text **"),
+                 ("keys_len", "int")]),
+            _fn("set_from_wkb", "Set *",
+                [("wkb", "const uint8_t *"), ("size", "size_t")]),
+        ]}
+        idl, stats = infer_shapes(idl)
+        lengths = {f["name"]: f["shape"]["inputArrays"][0]["lengthFrom"]["name"]
+                   for f in idl["functions"]}
+        self.assertEqual(lengths, {"geo_cluster_kmeans": "ngeoms",
+                                   "jsonb_delete_array": "keys_len",
+                                   "set_from_wkb": "size"})
+        self.assertEqual(stats["inputArrays"], 3)
+        # The byte buffer's element is the scalar itself, not a pointer to one.
+        self.assertEqual(
+            idl["functions"][2]["shape"]["inputArrays"][0]["element"]["c"],
+            "uint8_t")
+
+    def test_a_value_beside_a_number_is_not_an_array(self):
+        # `text_left(text *txt, int n)` takes ONE text and a character count;
+        # a pointer to a MEOS value type beside an integer says nothing about
+        # an array, and only a pointer to a C scalar does.
+        idl = {"functions": [
+            _fn("text_left", "text *", [("txt", "text *"), ("n", "int")]),
+            _fn("jsonb_hash_extended", "uint64_t",
+                [("jb", "const Jsonb *"), ("seed", "uint64_t")]),
+            _fn("interval_in", "Interval *",
+                [("str", "const char *"), ("typmod", "int32")]),
+        ]}
+        idl, stats = infer_shapes(idl)
+        self.assertEqual(stats["inputArrays"], 0)
+        for f in idl["functions"]:
+            self.assertNotIn("inputArrays", f.get("shape", {}))
+
+    def test_an_out_array_is_not_read_as_an_input_one(self):
+        # `jsonb_each(jb, Jsonb **values, int *count)` writes `values` back, and
+        # its length being BY POINTER is what says so.
+        idl = {"functions": [_fn(
+            "jsonb_each", "text **",
+            [("jb", "const Jsonb *"), ("values", "Jsonb **"),
+             ("count", "int *")])]}
+        idl, stats = infer_shapes(idl)
+        shape = idl["functions"][0]["shape"]
+        self.assertEqual(stats["inputArrays"], 0)
+        self.assertNotIn("inputArrays", shape)
+        self.assertEqual(shape["outputArrays"], [{"param": "values"}])
 
 
 if __name__ == "__main__":

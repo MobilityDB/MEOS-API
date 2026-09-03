@@ -129,11 +129,13 @@ def main():
               file=sys.stderr)
 
     # 1d. Generate the codegen `shape` from the signatures + Doxygen, replacing
-    #     the hand-maintained meta stub.  outputArrays/arrayReturn come from the
-    #     parameter forms; nullable comes from the C `@param ... may be NULL` SoT.
+    #     the hand-maintained meta stub.  inputArrays/outputArrays/arrayReturn
+    #     come from the parameter forms; nullable comes from the C
+    #     `@param ... may be NULL` SoT.
     idl, sh = infer_shapes(idl)
     print(f"      inferred shape: {sh['arrayReturn']} array returns, "
-          f"{sh['outputArrays']} output arrays", file=sys.stderr)
+          f"{sh['outputArrays']} output arrays, "
+          f"{sh['inputArrays']} input arrays", file=sys.stderr)
     # The `may be NULL` / `@param[out]` Doxygen tags live in the MEOS C *source*
     # (meos/src/**/*.c), not the parsed header tree. On the build-libmeos path
     # HEADERS_DIR is the INSTALLED headers (generated meos_export.h, no src/), so
