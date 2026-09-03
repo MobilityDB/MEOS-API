@@ -96,7 +96,7 @@ jobs:
       # carries, or a change to them is not exercised until after it merges.
       # Consumers use the action; this repository owns the rules.
       - name: Refuse a skip, and a suite that shrank
-        run: tools/check-test-outcome.py "$RUNNER_TEMP/pytest.log" --min-tests 307
+        run: tools/check-test-outcome.py "$RUNNER_TEMP/pytest.log" --min-tests 314
 
       # The rules earn their place by refusing a log that carries what they
       # name. Both fixtures are written here rather than tracked, and the
