@@ -36,6 +36,19 @@ temporal_append_tinstant(const TInstant *inst, const Interval *maxt, int interp)
 {
   return NULL;
 }
+
+/**
+ * @brief Interpolate between two geography points
+ * @param[in] p1 First point
+ * @param[in] s Spheroid, may be @p NULL when the sphere is meant
+ * @param[in] tol Tolerance, or \\p NULL for the default
+ */
+int
+interpolate_point4d_spheroid(const POINT4D *p1, const SPHEROID *s,
+  const double *tol)
+{
+  return 0;
+}
 '''
 
 
@@ -56,6 +69,14 @@ class NullableTests(unittest.TestCase):
         self.assertEqual(nul["temporal_append_tinstant"], ["maxt"])
         # `temp`, `inst`, `interp` carry no NULL note -> not nullable
         self.assertNotIn("temp", nul["temporal_as_mfjson"])
+
+    def test_a_null_note_reads_through_the_markup_around_it(self):
+        # Doxygen marks up the literal it names, and `NULL`, @p NULL and \p NULL
+        # are one note. A parameter whose note goes unread reaches every binding
+        # as one that must be supplied.
+        nul = extract_nullable(self.tmp.name)
+        self.assertEqual(nul["interpolate_point4d_spheroid"], ["s", "tol"])
+        self.assertNotIn("p1", nul["interpolate_point4d_spheroid"])
 
     def test_merge_only_existing_params(self):
         idl = {"functions": [

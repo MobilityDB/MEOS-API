@@ -27,8 +27,13 @@ _FUNC = re.compile(
 _PARAM = re.compile(
     r'@param\[[^\]]*\]\s+(?P<names>\w+(?:\s*,\s*\w+)*)\s+(?P<desc>.*?)'
     r'(?=\n\s*\*\s*@|\*/|\Z)', re.S)
-_NULLISH = re.compile(r'may be\s+`?NULL`?|can be\s+`?NULL`?|`?NULL`?\s+is allowed'
-                      r'|or\s+`?NULL`?', re.I)
+# Doxygen marks up a parameter or literal it names — ``NULL``, `NULL`, @p NULL,
+# \p NULL — and every one of those spellings is the same note. Reading only the
+# bare and backticked forms drops the ones an author marked up, and a parameter
+# whose note is unread reaches every binding as one that must be supplied.
+_MARKED_NULL = r'(?:[@\\]p\s+)?`?NULL`?'
+_NULLISH = re.compile(rf'may be\s+{_MARKED_NULL}|can be\s+{_MARKED_NULL}'
+                      rf'|{_MARKED_NULL}\s+is allowed|or\s+{_MARKED_NULL}', re.I)
 
 
 def extract_nullable(meos_root: str | Path) -> dict[str, list[str]]:
