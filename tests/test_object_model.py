@@ -599,7 +599,8 @@ class DriftGate(unittest.TestCase):
         self.assertEqual(needed - set(seen), set(),
                          "a base type MEOS passes by reference has no Value "
                          "class, so every method naming it stays untypable")
-        self.assertEqual(set(seen) - needed, {"T_NSEGMENT", "T_RAQUET"},
+        self.assertEqual(set(seen) - needed,
+                         {"T_NSEGMENT", "T_RAQUET", "T_JSONPATH"},
                          "the Value classes MEOS admits without making them "
                          "base types moved; each is a MeosType a signature "
                          "names, and this states which")

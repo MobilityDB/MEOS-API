@@ -593,6 +593,16 @@
           "conditional": "JSON",
           "doc": "PostgreSQL jsonb, the base type of TJsonb and JsonbSet."
         },
+        "JsonPath": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "jsonpath"
+          ],
+          "temptype": "T_JSONPATH",
+          "conditional": "JSON",
+          "doc": "A path into a jsonb value. A MeosType no membership predicate admits, as Nsegment and Raquet are; the nine signatures naming it are what need it."
+        },
         "Geo": {
           "kind": "abstract",
           "parent": "Value",
