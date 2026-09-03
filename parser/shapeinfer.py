@@ -49,10 +49,26 @@ def _out_count_param(func: dict) -> str | None:
 
 
 def _is_written_back_array(p: dict) -> bool:
-    """A non-const double (or higher) pointer parameter the callee allocates
-    and writes back, i.e. a parallel output array."""
+    """A non-const pointer parameter the callee ALLOCATES and writes back, i.e.
+    a parallel output array.
+
+    The callee writes ``*p = <the array>``, and an array of ``E`` is spelled
+    ``E *``, so such a parameter is spelled ``E **`` — one pointer level for the
+    array and one for the write-back.  Stripping both leaves ``E``, and ``E`` is
+    what says whether the callee can have allocated the array at all: a binding
+    reads an array of by-value scalars (``TimestampTz **bins`` -> ``TimestampTz``)
+    or an array of pointers (``SpanSet ***result`` -> ``SpanSet *``), and nothing
+    else.  A MEOS value type left bare — ``Jsonb **values`` -> ``Jsonb`` — is
+    neither: MEOS holds such a value by reference, never by value in an array,
+    so that parameter is an array the CALLER allocates and the callee only
+    fills.  Reading it as callee-allocated makes every binding hand the callee
+    one element's worth of storage and take the first element it writes for the
+    address of the array."""
     ct = p.get("cType", "")
-    return "**" in ct and not ct.lstrip().startswith("const")
+    if "**" not in ct or ct.lstrip().startswith("const"):
+        return False
+    element = _strip_one_ptr(_strip_one_ptr(ct))
+    return element.endswith("*") or _bare(element) in _ELEMENT_SCALARS
 
 
 def _strip_one_ptr(ctype: str) -> str:
