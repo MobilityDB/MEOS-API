@@ -726,6 +726,15 @@
           "temptype": null,
           "doc": "MEOS's in-memory R-tree over spans, boxes and their kin. MEOS registers it in no enum, so it names no temptype."
         },
+        "RTreeNNCursor": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "rtree_nn_cursor"
+          ],
+          "temptype": null,
+          "doc": "A walk over an R-tree's entries in order of distance from a query. MEOS registers it in no enum, so it names no temptype."
+        },
         "SPTree": {
           "kind": "leaf",
           "parent": "Value",
@@ -734,6 +743,15 @@
           ],
           "temptype": null,
           "doc": "MEOS's in-memory SP-tree, the R-tree's sibling over the same key types. MEOS registers it in no enum, so it names no temptype."
+        },
+        "SPNNCursor": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "sptree_nn_cursor"
+          ],
+          "temptype": null,
+          "doc": "The SP-tree's nearest-neighbour walk, the R-tree cursor's sibling. MEOS registers it in no enum, so it names no temptype."
         },
         "MeosArray": {
           "kind": "leaf",
