@@ -9,8 +9,8 @@ description: >-
 
   The rules themselves are tools/check-test-outcome.py in this repository, the
   one runnable definition this action and a developer both call, so the CI
-  answer and the by-hand answer cannot differ. It reads surefire and pytest
-  summaries and sums every module's line.
+  answer and the by-hand answer cannot differ. It reads the surefire, pytest,
+  Go, VSTest and Catch2 summaries, and sums every module's line.
 
 inputs:
   log:

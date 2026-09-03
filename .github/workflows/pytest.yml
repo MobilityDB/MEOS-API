@@ -96,7 +96,7 @@ jobs:
       # carries, or a change to them is not exercised until after it merges.
       # Consumers use the action; this repository owns the rules.
       - name: Refuse a skip, and a suite that shrank
-        run: tools/check-test-outcome.py "$RUNNER_TEMP/pytest.log" --min-tests 293
+        run: tools/check-test-outcome.py "$RUNNER_TEMP/pytest.log" --min-tests 300
 
       # The rules earn their place by refusing a log that carries what they
       # name. Both fixtures are written here rather than tracked, and the
@@ -176,6 +176,34 @@ jobs:
             > "$RUNNER_TEMP/fx-vstest-empty.log"
           if tools/check-test-outcome.py "$RUNNER_TEMP/fx-vstest-empty.log" --min-tests 1; then
             echo "::error::the check passed a VSTest run over an assembly holding no test"
+            exit 1
+          fi
+          # The Catch2 dialect, which the DuckDB test runner writes and a
+          # MobilityDuck suite tees. The passing form's test-case count
+          # EXCLUDES the skipped cases, so the floor is read off the sum.
+          printf 'All tests passed (2695 assertions in 102 test cases)\n' \
+            > "$RUNNER_TEMP/fx-catch-ok.log"
+          if ! tools/check-test-outcome.py "$RUNNER_TEMP/fx-catch-ok.log" --min-tests 102; then
+            echo "::error::the check refused a Catch2 log that satisfies both rules"
+            exit 1
+          fi
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-catch-ok.log" --min-tests 103; then
+            echo "::error::the check passed a Catch2 suite below its floor"
+            exit 1
+          fi
+          printf 'All tests passed (3 skip''ped tests, 2695 assertions in 99 test cases)\n' \
+            > "$RUNNER_TEMP/fx-catch-skip.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-catch-skip.log" --min-tests 102; then
+            echo "::error::the check passed a Catch2 log reporting skipped tests"
+            exit 1
+          fi
+          # The failure table carries `101 passed`, which the pytest pattern
+          # matches too; reading it as pytest would report 101 as the total.
+          printf 'test cases: 102 | 101 passed | 1 failed\n' \
+            > "$RUNNER_TEMP/fx-catch-table.log"
+          if tools/check-test-outcome.py "$RUNNER_TEMP/fx-catch-table.log" --min-tests 102 \
+               | grep -q 'pytest'; then
+            echo "::error::the check read a Catch2 failure table as pytest"
             exit 1
           fi
           echo "the check refuses a skip, a shrunken suite, and a log with no summary, in every dialect it reads"
