@@ -28,6 +28,15 @@
 # reading only the last understates the total (measured: MobilityKafka prints 7
 # and 4, so its total is 11 rather than the 4 a tail would report).
 #
+# The Catch2 dialect reads the runner DuckDB builds, under which a
+# MobilityDuck sqllogictest FILE is one test case. ITS SKIP COUNT CANNOT SEE A
+# `mode skip`: that directive silences the statements after it while the file
+# still reports as a passing test case, so a suite can retire assertions
+# wholesale and this dialect reads `0 skipped` over it. What the dialect does
+# hold for such a consumer is the FLOOR — the total moves when a whole file
+# leaves the suite. A sqllogictest consumer needs a census of `mode skip` in the
+# test SOURCES beside this, and a green answer here is not evidence about them.
+#
 # The Go dialect prints no counts at all: `go test -v` writes one result line
 # per test and per subtest, and the totals are their tally. A run without -v
 # writes only `ok <pkg> 0.42s`, which carries neither a total nor a skip count,
@@ -69,6 +78,28 @@ VSTEST = re.compile(
     r"(?:Passed|Failed)!\s+-\s+Failed:\s*(\d+),\s*Passed:\s*(\d+),"
     r"\s*Skipped:\s*(\d+),\s*Total:\s*(\d+)")
 
+# `All tests passed (2695 assertions in 102 test cases)` — what the Catch2
+# console reporter writes when nothing failed, carrying a leading
+# `3 skipped tests, ` when any were. The test-case count it prints EXCLUDES the
+# skipped ones, so the total is the two added: the reporter writes
+# `testCases.passed - skippedTests` there.
+CATCH_PASSED = re.compile(
+    r"All tests passed\s*\(\s*(?:(\d+)\s+skipped tests?,\s*)?"
+    r"(\d+)\s+assertions?\s+in\s+(\d+)\s+test cases?\s*\)")
+
+# `test cases: 102 | 101 passed | 1 failed` — the table the same reporter writes
+# when anything failed. Here the leading number IS the whole total, skips
+# included, and a column whose count is zero is omitted rather than printed, so
+# the skipped column is read out of the tail when it is there at all. That
+# column sums expected failures with skips; both are tests that did not assert,
+# and the guard treats them alike.
+CATCH_TOTALS = re.compile(r"\btest cases:\s*(\d+)((?:\s*\|\s*\d+\s+\w+)*)")
+
+# `All tests were skipped (total skipped 7)` — the one form that reports no
+# passing count at all, written when every test skipped.
+CATCH_ALL_SKIPPED = re.compile(
+    r"All tests were skipped\s*\(\s*total skipped\s*(\d+)\s*\)")
+
 
 def read_summaries(text: str):
     """Return (total, skipped, dialect, lines) summed over every summary found."""
@@ -103,6 +134,35 @@ def read_summaries(text: str):
             lines.append(raw.strip())
     if lines:
         return total, skipped, "vstest", lines
+
+    # Catch2 is read BEFORE pytest, and the order is load-bearing: the failure
+    # table's `101 passed` satisfies the pytest pattern, so a failing Catch2 run
+    # read pytest-first reports the passing count as the total and misses both
+    # the failures and the skips.
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        m = CATCH_ALL_SKIPPED.search(line)
+        if m:
+            every = int(m.group(1))
+            total += every
+            skipped += every
+            lines.append(line.strip())
+            continue
+        m = CATCH_PASSED.search(line)
+        if m:
+            some = int(m.group(1) or 0)
+            total += int(m.group(3)) + some
+            skipped += some
+            lines.append(line.strip())
+            continue
+        m = CATCH_TOTALS.search(line)
+        if m:
+            total += int(m.group(1))
+            column = re.search(r"(\d+)\s+skipped", m.group(2))
+            skipped += int(column.group(1)) if column else 0
+            lines.append(line.strip())
+    if lines:
+        return total, skipped, "catch2", lines
 
     for raw in text.splitlines():
         m = PYTEST.search(raw)

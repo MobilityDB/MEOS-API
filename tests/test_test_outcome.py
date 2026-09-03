@@ -76,6 +76,57 @@ class DialectTests(unittest.TestCase):
         self.assertEqual(2, len(lines))
 
 
+class Catch2Tests(unittest.TestCase):
+    """The Catch2 console reporter, which DuckDB's test runner writes."""
+
+    def test_catch2_reads_the_line_a_mobilityduck_run_writes(self):
+        # Verbatim from a MobilityDuck CI run of its 102 sqllogictest files.
+        total, skipped, dialect, _ = outcome.read_summaries(
+            "All tests passed (2695 assertions in 102 test cases)\n")
+        self.assertEqual(("catch2", 102, 0), (dialect, total, skipped))
+
+    def test_catch2_adds_the_skipped_cases_the_passing_count_excludes(self):
+        # The reporter prints `testCases.passed - skippedTests`, so 99 printed
+        # beside 3 skipped is a suite of 102.
+        total, skipped, dialect, _ = outcome.read_summaries(
+            "All tests passed (3 skipped tests, 2695 assertions in "
+            "99 test cases)\n")
+        self.assertEqual(("catch2", 102, 3), (dialect, total, skipped))
+
+    def test_catch2_reads_the_singular_forms(self):
+        total, skipped, dialect, _ = outcome.read_summaries(
+            "All tests passed (1 skipped test, 1 assertion in 1 test case)\n")
+        self.assertEqual(("catch2", 2, 1), (dialect, total, skipped))
+
+    def test_catch2_reads_the_failure_table(self):
+        log = (
+            "test cases: 102 | 101 passed | 1 failed\n"
+            "assertions: 2695 | 2694 passed | 1 failed\n"
+        )
+        total, skipped, dialect, _ = outcome.read_summaries(log)
+        self.assertEqual(("catch2", 102, 0), (dialect, total, skipped))
+
+    def test_catch2_reads_the_skipped_column_when_the_table_carries_one(self):
+        # A column whose count is zero is omitted, so the skipped column is
+        # present only when it is not zero, and the leading total includes it.
+        log = "test cases: 102 | 99 passed | 1 failed | 2 skipped\n"
+        total, skipped, dialect, _ = outcome.read_summaries(log)
+        self.assertEqual(("catch2", 102, 2), (dialect, total, skipped))
+
+    def test_catch2_reads_a_wholly_skipped_run(self):
+        total, skipped, dialect, _ = outcome.read_summaries(
+            "All tests were skipped (total skipped 7)\n")
+        self.assertEqual(("catch2", 7, 7), (dialect, total, skipped))
+
+    def test_catch2_is_read_before_pytest(self):
+        # THE ORDER IS THE TEST: `101 passed` in the failure table satisfies the
+        # pytest pattern too, and pytest-first would report 101 as the total,
+        # missing the failure and any skip beside it.
+        log = "test cases: 102 | 101 passed | 1 failed\n"
+        total, _, dialect, _ = outcome.read_summaries(log)
+        self.assertEqual(("catch2", 102), (dialect, total))
+
+
 class NoSummaryTests(unittest.TestCase):
     """A log carrying no summary at all names no dialect, which is a failure."""
 
