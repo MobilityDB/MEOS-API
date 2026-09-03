@@ -6,6 +6,7 @@ codegens need is fully derivable from the headers — no hand-maintained table:
     TYPE  *f(..., int *count)                 -> returns an array of ``count``
     TYPE **f(..., TYPE **extra, int *count)   -> primary array return PLUS one
                                                   or more parallel out-arrays
+    f(..., TYPE **values, int count, ...)     -> reads an array of ``count``
 
 The output length is always passed *by pointer* (``int *count``); an *input*
 array instead carries its length *by value* (``int count``).  That pointer/value
@@ -65,6 +66,71 @@ def _strip_one_ptr(ctype: str) -> str:
     return s
 
 
+#: The C scalars an array of by-value elements is made of.  A pointer to one of
+#: these beside a length is an array; a pointer to a MEOS value type beside an
+#: integer is a value and a number, as ``text_left(text *txt, int n)`` is.
+#: ``char *`` is a string in every binding and never an array of characters.
+_ELEMENT_SCALARS = frozenset({
+    "bool", "int8", "int8_t", "uint8", "uint8_t", "short", "int16", "int16_t",
+    "uint16", "uint16_t", "int", "int32", "int32_t", "uint32", "uint32_t",
+    "float", "Oid", "DateADT", "long", "int64", "int64_t", "uint64",
+    "uint64_t", "double", "float8", "Datum", "Timestamp", "TimestampTz",
+    "TimeADT", "TimeOffset", "size_t",
+})
+
+#: The by-value integer spellings a length is written in.
+_LENGTH_TYPES = frozenset({
+    "int", "int32", "int32_t", "uint32", "uint32_t", "int64", "int64_t",
+    "uint64", "uint64_t", "size_t", "int16",
+})
+
+
+def _bare(ctype: str) -> str:
+    return " ".join((ctype or "").replace("const ", "").split())
+
+
+def _input_arrays(func: dict) -> list:
+    """The array ARGUMENTS a function reads, with the parameter each takes its
+    length from.
+
+    An input array is a parameter that is an array of pointers (``TYPE **``) or
+    of by-value scalars (``uint8_t *``, ``int64_t *``), immediately followed by
+    a by-value integer.  That the length is by VALUE is what tells an argument
+    apart from a written-back out-array, whose length is by POINTER — the same
+    distinction this module already reads in the other direction.
+
+    Without it a binding matches the LENGTH PARAMETER'S NAME, and the names
+    disagree: ``count``, ``size``, ``ngeoms``, ``keys_len``, ``path_len``,
+    ``pixels_size``, ``wkb_size``, ``count1``.  Every one of them is a length,
+    and a binding that knows only some of them silently drops the rest.
+    """
+    params = func.get("params", [])
+    out = []
+    for i, prm in enumerate(params[:-1]):
+        ctype = _bare(prm.get("cType"))
+        if _bare(params[i + 1].get("cType")) not in _LENGTH_TYPES:
+            continue
+        if ctype.endswith("**"):
+            if ctype in ("char **", "void **"):
+                continue
+        elif not (ctype.endswith("*")
+                  and ctype[:-1].strip() in _ELEMENT_SCALARS):
+            continue
+        out.append({
+            "param": prm["name"],
+            "lengthFrom": {"kind": "param", "name": params[i + 1]["name"]},
+            # The element reads as the return's does — the type with one
+            # pointer level off and no `const`, which belongs to the argument
+            # rather than to the element type a binding marshals.
+            "element": {
+                "c": _strip_one_ptr(_bare(prm.get("cType"))),
+                "canonical": _strip_one_ptr(
+                    _bare(prm.get("canonical") or prm.get("cType"))),
+            },
+        })
+    return out
+
+
 def _is_index_pair_return(func: dict, count: str) -> bool:
     """Whether the ``int *`` return is a FLATTENED array of index PAIRS.
 
@@ -98,11 +164,15 @@ def infer_shapes(idl: dict) -> tuple[dict, dict]:
     """Populate ``func['shape']`` with ``arrayReturn``/``outputArrays`` derived
     from the signatures.  Returns ``(idl, stats)``.  Idempotent and additive:
     only the array-output families are touched, everything else is untouched."""
-    n_arr = n_oa = 0
+    n_arr = n_oa = n_ia = 0
     for func in idl["functions"]:
+        inputs = _input_arrays(func)
+        if inputs:
+            func.setdefault("shape", {})["inputArrays"] = inputs
+            n_ia += len(inputs)
         count = _out_count_param(func)
         if not count:
-            continue  # not array-returning; nothing to infer
+            continue  # not array-returning; nothing more to infer
         shape = func.setdefault("shape", {})
         # The primary pointer return takes its length from the output count.
         rtype = func.get("returnType", {})
@@ -134,4 +204,5 @@ def infer_shapes(idl: dict) -> tuple[dict, dict]:
         if out:
             shape["outputArrays"] = out
             n_oa += len(out)
-    return idl, {"arrayReturn": n_arr, "outputArrays": n_oa}
+    return idl, {"arrayReturn": n_arr, "outputArrays": n_oa,
+                 "inputArrays": n_ia}
