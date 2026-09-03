@@ -566,7 +566,7 @@
       }
     },
     "Value": {
-      "_comment": "A base value crosses the MEOS boundary as a POINTER unless basetype_byvalue() names its type, and a method taking or answering one cannot be typed without a class for it. Parallel hierarchy, as Box and Collection are. temptypes gated against the MeosType enum, and the by-reference base types gated for COVERAGE against basetype_byvalue().",
+      "_comment": "A value crosses the MEOS boundary as a POINTER unless basetype_byvalue() names its type, and a method taking or answering one cannot be typed without a class for it. To a binding a pointer to a struct is one thing — an instance it holds and calls through — whether MEOS publishes the struct's layout or forward-declares it, so the schema, the trees and the array sit here beside the base values rather than in a hierarchy of their own. Parallel hierarchy, as Box and Collection are. temptypes gated against the MeosType enum where MEOS registers one, and the by-reference base types gated for COVERAGE against basetype_byvalue().",
       "root": "Value",
       "nodes": {
         "Value": {
@@ -706,6 +706,43 @@
           "temptype": "T_RAQUET",
           "conditional": "RASTER",
           "doc": "A raster tile. A MeosType no membership predicate admits, as Nsegment is."
+        },
+        "Pcschema": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "meos_pc_schema"
+          ],
+          "temptype": null,
+          "conditional": "POINTCLOUD",
+          "doc": "The dimension schema a point cloud value is read through. Every pcpoint and pcpatch accessor takes one, and the process-global cache answers it for a pcid. MEOS registers it in no enum, so it names no temptype."
+        },
+        "RTree": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "rtree"
+          ],
+          "temptype": null,
+          "doc": "MEOS's in-memory R-tree over spans, boxes and their kin. MEOS registers it in no enum, so it names no temptype."
+        },
+        "SPTree": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "sptree"
+          ],
+          "temptype": null,
+          "doc": "MEOS's in-memory SP-tree, the R-tree's sibling over the same key types. MEOS registers it in no enum, so it names no temptype."
+        },
+        "MeosArray": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "meos_array"
+          ],
+          "temptype": null,
+          "doc": "The growable array MEOS builds its own results in. MEOS registers it in no enum, so it names no temptype."
         }
       }
     }

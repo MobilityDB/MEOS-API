@@ -113,7 +113,7 @@ hierarchies — `Box` (`TBox`, `STBox`, `TPCBox`), `Collection`
 tstz/geo/… leaves) and `Value` — and `objectModel.algebra` records which
 companion a temporal family yields.
 
-`Value` holds the base values themselves: `Text`, `Jsonb`, `JsonPath`, `Geo` over
+`Value` holds the values a method names: `Text`, `Jsonb`, `JsonPath`, `Geo` over
 `Geometry` and `Geography` (both a `GSERIALIZED`, parented exactly as
 `TGeo` parents `TGeometry` and `TGeography`), `Cbuffer`, `Npoint`,
 `Nsegment`, `Pose`, `PoseChain`, `Pcpoint`, `Pcpatch` and `Raquet`. A
@@ -125,7 +125,13 @@ that set from the two predicates and fails until each has a class, so a
 base type MEOS adds reaches the model with no edit to the file.
 `Nsegment`, `Raquet` and `JsonPath` are the MeosTypes no membership
 predicate admits; the model states them, and the same gate states that it
-does.
+does. `Pcschema`, `RTree`, `SPTree` and `MeosArray` go further: MEOS
+registers them in no enum at all, and they say so with a null `temptype`
+rather than by leaving the field out. To a binding a pointer to a struct
+is one thing — an instance it holds and calls through — whether MEOS
+publishes the struct's layout or forward-declares it, which is why they
+sit here rather than in a hierarchy of their own; GoMEOS's own wrapper
+table draws no such line either.
 
 `Box` is covered the same way, from the `type_bboxtype` column of
 `MEOS_RELTYPE_CATALOG`: it names the box each type stores, so its
