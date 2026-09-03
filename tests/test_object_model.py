@@ -241,7 +241,8 @@ class AttachTests(unittest.TestCase):
         unregistered = {n for n, s in nodes.items()
                         if s["kind"] == "leaf" and s["temptype"] is None}
         self.assertEqual(unregistered,
-                         {"Pcschema", "RTree", "SPTree", "MeosArray"})
+                         {"Pcschema", "RTree", "RTreeNNCursor", "SPTree",
+                          "SPNNCursor", "MeosArray"})
 
     def test_a_function_named_as_its_own_prefix_still_has_a_member_name(self):
         # `meos_pc_schema` IS its class's prefix, so dropping the prefix leaves
