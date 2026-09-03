@@ -162,6 +162,44 @@ class ShapeInferTests(unittest.TestCase):
         for f in idl["functions"]:
             self.assertNotIn("inputArrays", f.get("shape", {}))
 
+    def test_a_run_of_arrays_shares_the_length_that_follows_it(self):
+        # `jsonb_make_two_arg(text **keys, text **values, int count)` pairs the
+        # two arrays element by element and counts them once, so `count` is the
+        # length of BOTH; reading only the array it sits beside drops the other.
+        idl = {"functions": [_fn(
+            "jsonb_make_two_arg", "Jsonb *",
+            [("keys", "text **"), ("values", "text **"), ("count", "int")]),
+            _fn("tpointseq_make_coords", "TSequence *",
+                [("xcoords", "const double *"), ("ycoords", "const double *"),
+                 ("zcoords", "const double *"), ("times", "const TimestampTz *"),
+                 ("count", "int"), ("srid", "int32_t")])]}
+        idl, stats = infer_shapes(idl)
+        self.assertEqual(
+            [(a["param"], a["lengthFrom"]["name"])
+             for a in idl["functions"][0]["shape"]["inputArrays"]],
+            [("keys", "count"), ("values", "count")])
+        self.assertEqual(
+            [(a["param"], a["lengthFrom"]["name"])
+             for a in idl["functions"][1]["shape"]["inputArrays"]],
+            [("xcoords", "count"), ("ycoords", "count"),
+             ("zcoords", "count"), ("times", "count")])
+        self.assertEqual(stats["inputArrays"], 6)
+
+    def test_an_array_counted_on_its_own_keeps_its_own_length(self):
+        # The counter-case the run rule must not swallow: a family that counts
+        # each array separately declares each one beside ITS length, so every
+        # run is one long and each array keeps the count it is declared with.
+        idl = {"functions": [_fn(
+            "edwithin_tgeoarr_tgeoarr", "int *",
+            [("arr1", "const Temporal **"), ("count1", "int"),
+             ("arr2", "const Temporal **"), ("count2", "int"),
+             ("dist", "double"), ("count", "int *")])]}
+        idl, _ = infer_shapes(idl)
+        self.assertEqual(
+            [(a["param"], a["lengthFrom"]["name"])
+             for a in idl["functions"][0]["shape"]["inputArrays"]],
+            [("arr1", "count1"), ("arr2", "count2")])
+
     def test_an_out_array_is_not_read_as_an_input_one(self):
         # `temporal_time_split(temp, ..., TimestampTz **bins, int *count)` writes
         # `bins` back, and its length being BY POINTER is what says so.

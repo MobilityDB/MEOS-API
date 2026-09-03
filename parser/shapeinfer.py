@@ -110,40 +110,57 @@ def _input_arrays(func: dict) -> list:
     length from.
 
     An input array is a parameter that is an array of pointers (``TYPE **``) or
-    of by-value scalars (``uint8_t *``, ``int64_t *``), immediately followed by
-    a by-value integer.  That the length is by VALUE is what tells an argument
-    apart from a written-back out-array, whose length is by POINTER — the same
-    distinction this module already reads in the other direction.
+    of by-value scalars (``uint8_t *``, ``int64_t *``), followed by a by-value
+    integer.  That the length is by VALUE is what tells an argument apart from
+    a written-back out-array, whose length is by POINTER — the same distinction
+    this module already reads in the other direction.
 
     Without it a binding matches the LENGTH PARAMETER'S NAME, and the names
     disagree: ``count``, ``size``, ``ngeoms``, ``keys_len``, ``path_len``,
     ``pixels_size``, ``wkb_size``, ``count1``.  Every one of them is a length,
     and a binding that knows only some of them silently drops the rest.
+
+    A RUN of arrays shares the one length that follows it.  Arrays read in
+    parallel are declared together and counted once — ``jsonb_make_two_arg(text
+    **keys, text **values, int count)`` pairs the two element by element, and
+    ``tpointseq_make_coords`` reads four — so the length belongs to every array
+    of the run, not only to the one the count happens to sit beside.  Where a
+    family counts each array separately the run is one long and this says what
+    it always said: ``edwithin_tgeoarr_tgeoarr(arr1, count1, arr2, count2, …)``
+    keeps ``arr1`` on ``count1``.
     """
     params = func.get("params", [])
-    out = []
-    for i, prm in enumerate(params[:-1]):
+
+    def is_array(prm) -> bool:
         ctype = _bare(prm.get("cType"))
-        if _bare(params[i + 1].get("cType")) not in _LENGTH_TYPES:
-            continue
         if ctype.endswith("**"):
-            if ctype in ("char **", "void **"):
-                continue
-        elif not (ctype.endswith("*")
-                  and ctype[:-1].strip() in _ELEMENT_SCALARS):
+            return ctype not in ("char **", "void **")
+        return ctype.endswith("*") and ctype[:-1].strip() in _ELEMENT_SCALARS
+
+    out = []
+    start = 0
+    while start < len(params):
+        if not is_array(params[start]):
+            start += 1
             continue
-        out.append({
-            "param": prm["name"],
-            "lengthFrom": {"kind": "param", "name": params[i + 1]["name"]},
-            # The element reads as the return's does — the type with one
-            # pointer level off and no `const`, which belongs to the argument
-            # rather than to the element type a binding marshals.
-            "element": {
-                "c": _strip_one_ptr(_bare(prm.get("cType"))),
-                "canonical": _strip_one_ptr(
-                    _bare(prm.get("canonical") or prm.get("cType"))),
-            },
-        })
+        end = start
+        while end < len(params) and is_array(params[end]):
+            end += 1
+        if end < len(params) and _bare(params[end].get("cType")) in _LENGTH_TYPES:
+            for prm in params[start:end]:
+                out.append({
+                    "param": prm["name"],
+                    "lengthFrom": {"kind": "param", "name": params[end]["name"]},
+                    # The element reads as the return's does — the type with one
+                    # pointer level off and no `const`, which belongs to the
+                    # argument rather than to the element type a binding marshals.
+                    "element": {
+                        "c": _strip_one_ptr(_bare(prm.get("cType"))),
+                        "canonical": _strip_one_ptr(
+                            _bare(prm.get("canonical") or prm.get("cType"))),
+                    },
+                })
+        start = end
     return out
 
 
