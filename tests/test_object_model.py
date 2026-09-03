@@ -90,7 +90,12 @@ class ModelFileTests(unittest.TestCase):
                 if s["parent"]:
                     self.assertIn(s["parent"], nodes)
                 if s["kind"] == "leaf":
+                    # A leaf names the ONE type it models, and a null says MEOS
+                    # registers it in no enum — stated rather than left out,
+                    # since an absent field reads the same as one nobody wrote.
                     self.assertIn("temptype", s, n)
+                    if s["temptype"] is None:
+                        self.assertTrue(s.get("doc"), n)
 
     def test_traits_are_not_inheritance(self):
         # geometry/geodetic is a TRAIT axis, never a parent (no diamond).
@@ -211,6 +216,43 @@ class AttachTests(unittest.TestCase):
         self.assertEqual(names["geoset_start_value"], "startValue")
         # One token is dropped, not every repetition of it.
         self.assertEqual(names["set_set_subspan"], "setSubspan")
+
+    def test_a_class_nothing_is_called_on_takes_what_it_makes(self):
+        # Nothing is called ON a point-cloud schema — every accessor takes one
+        # as an ARGUMENT — so what the class MAKES says what it is, and the
+        # `char *` among those answers says nothing, being a string.
+        om = attach_object_model({"functions": [
+            {"name": "meos_pc_schema", "returnType": {"c": "PCSCHEMA *"},
+             "params": [{"name": "pcid", "cType": "uint32_t"}]},
+            {"name": "meos_pc_schema_xml", "returnType": {"c": "const char *"},
+             "params": [{"name": "pcid", "cType": "uint32_t"}]},
+            {"name": "meos_pc_schema_compression",
+             "returnType": {"c": "const char *"},
+             "params": [{"name": "pcid", "cType": "uint32_t"}]},
+        ]}, MODEL, None)["objectModel"]
+        self.assertEqual(om["classes"]["Pcschema"]["cType"], "PCSCHEMA")
+
+    def test_a_type_meos_registers_in_no_enum_still_gets_a_class(self):
+        # A pointer to a struct is one thing to a binding whether MEOS
+        # publishes the layout or forward-declares it, so these sit in `Value`
+        # beside the base values and say with a null that they name no type.
+        nodes = _nodes(json.loads(MODEL.read_text())["companions"]["Value"]
+                       ["nodes"])
+        unregistered = {n for n, s in nodes.items()
+                        if s["kind"] == "leaf" and s["temptype"] is None}
+        self.assertEqual(unregistered,
+                         {"Pcschema", "RTree", "SPTree", "MeosArray"})
+
+    def test_a_function_named_as_its_own_prefix_still_has_a_member_name(self):
+        # `meos_pc_schema` IS its class's prefix, so dropping the prefix leaves
+        # nothing — the one case the override table exists for.
+        om = attach_object_model({"functions": [
+            {"name": "meos_pc_schema"}, {"name": "meos_pc_schema_ndims"},
+        ]}, MODEL, None)["objectModel"]
+        names = {m["function"]: m["ooName"]
+                 for m in om["classes"]["Pcschema"]["methods"]}
+        self.assertEqual(names, {"meos_pc_schema": "get",
+                                 "meos_pc_schema_ndims": "ndims"})
 
     def test_class_ctype_comes_from_the_receiver(self):
         # A receiver-role method takes the value it is called on first, so its
@@ -568,7 +610,7 @@ class DriftGate(unittest.TestCase):
                    for fam in _nodes(self.attached["companions"])
                    for spec in _nodes(
                        self.attached["companions"][fam]["nodes"]).values()
-                   if spec["kind"] == "leaf"}
+                   if spec["kind"] == "leaf" and spec.get("temptype")}
         self.assertEqual(boxes - claimed, set(),
                          "a box type the relation catalog names has no "
                          "companion class, so the method answering it is "
@@ -592,6 +634,11 @@ class DriftGate(unittest.TestCase):
             if spec["kind"] != "leaf":
                 continue
             tt = spec["temptype"]
+            if tt is None:
+                # A type MEOS registers in no enum: a class for it is still
+                # needed to type the methods naming it, and the coverage this
+                # gate measures is over the types MEOS DOES register.
+                continue
             self.assertNotIn(tt, seen,
                              f"{tt} is claimed by both {seen.get(tt)} and {node}")
             seen[tt] = node

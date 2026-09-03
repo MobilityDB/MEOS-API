@@ -78,6 +78,17 @@ _RECEIVER_ROLES = frozenset({"accessor", "predicate", "conversion",
 
 _QUALIFIER_RE = re.compile(r"\b(?:const|struct)\b")
 
+#: What a class's instances are never a pointer to. A `char *` is a string in
+#: every binding and a scalar pointer is a buffer or an out-parameter, so
+#: neither says anything about the type a class stands for.
+_NOT_A_CLASS_POINTEE = frozenset({
+    "char", "void", "bool", "int", "int8", "int8_t", "uint8", "uint8_t",
+    "short", "int16", "int16_t", "uint16", "uint16_t", "int32", "int32_t",
+    "uint32", "uint32_t", "float", "Oid", "DateADT", "long", "int64",
+    "int64_t", "uint64", "uint64_t", "double", "float8", "Datum", "Timestamp",
+    "TimestampTz", "TimeADT", "TimeOffset", "size_t",
+})
+
 
 def _pointee(c_type: str) -> str | None:
     """The type a single-pointer C declaration points at, or None."""
@@ -210,8 +221,13 @@ _OONAME_EXCLUDE_SUFFIXES = ("_transfn", "_finalfn", "_combinefn")
 
 # Editorial name fixes for the rare cases mechanical derivation gets wrong.
 # Deliberately minimal — the clean derived name is canonical, so legacy
-# binding spellings are not carried forward.
-_OONAME_OVERRIDES: dict[str, str] = {}
+# binding spellings are not carried forward. What belongs here is a function the
+# derivation cannot name at all: one whose whole name IS its class's prefix, so
+# dropping the prefix leaves nothing.
+_OONAME_OVERRIDES: dict[str, str] = {
+    # `meos_pc_schema(pcid)` answers the schema the cache holds for a pcid.
+    "meos_pc_schema": "get",
+}
 
 
 def _strip_class_token(fn_name: str, cls: str, prefix: str = "") -> str:
@@ -445,25 +461,31 @@ def _class_ctypes(classes: dict, functions: dict, parents: dict,
     of that parameter names the type, and the class's own methods answer for
     it. A class whose methods build values rather than take them — the
     concrete `<leaf><subtype>` classes hold constructors alone — takes the
-    answer of the subtype it is a product of, and any other class its parent's,
-    which is the same C type by construction.
+    answer of the subtype it is a product of, then what its own methods RETURN,
+    and any other class its parent's, which is the same C type by construction.
     """
-    own = {}
+    own, made = {}, {}
     for cls, spec in classes.items():
-        seen = {}
+        seen, answered = {}, {}
         for method in spec["methods"]:
+            fn = functions.get(method["function"])
+            if not fn:
+                continue
+            pointee = _pointee(fn.get("returnType", {}).get("c", ""))
+            if pointee and pointee not in _NOT_A_CLASS_POINTEE:
+                answered[pointee] = answered.get(pointee, 0) + 1
             if method["role"] not in _RECEIVER_ROLES:
                 continue
-            fn = functions.get(method["function"])
-            params = fn.get("params") if fn else None
+            params = fn.get("params")
             if not params:
                 continue
             pointee = _pointee(params[0]["cType"])
             if pointee:
                 seen[pointee] = seen.get(pointee, 0) + 1
-        ranked = sorted(seen.items(), key=lambda kv: -kv[1])
-        if ranked and (len(ranked) == 1 or ranked[0][1] > ranked[1][1]):
-            own[cls] = ranked[0][0]
+        for source, out in ((seen, own), (answered, made)):
+            ranked = sorted(source.items(), key=lambda kv: -kv[1])
+            if ranked and (len(ranked) == 1 or ranked[0][1] > ranked[1][1]):
+                out[cls] = ranked[0][0]
 
     resolved: dict = {}
 
@@ -474,6 +496,11 @@ def _class_ctypes(classes: dict, functions: dict, parents: dict,
             resolved[cls] = own[cls]
         elif cls in subtype_classes:
             resolved[cls] = resolve(subtype_classes[cls], walked | {cls})
+        elif cls in made:
+            # No method takes one, so what the class MAKES says what it is —
+            # a type MEOS only ever hands over, never calls a method on, is
+            # reached that way and no other.
+            resolved[cls] = made[cls]
         else:
             parent = parents.get(cls)
             resolved[cls] = (resolve(parent, walked | {cls})
