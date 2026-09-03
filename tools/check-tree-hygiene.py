@@ -13,7 +13,10 @@
 #                  The tracked copy answered for fewer families than the catalog
 #                  the generator reads, so the two runs bound different surfaces.
 #   skipped-tests  -DskipTests and -Dmaven.test.skip in build commands, a jar
-#                  published from a suite that never ran.
+#                  published from a suite that never ran; and a sqllogictest
+#                  `mode skip`, which silences the statements after it while the
+#                  file still reports as a passing test case, so no summary and
+#                  therefore no log-reading check can see it.
 #   stale-pin      a Dockerfile cloning MobilityDB at a release branch and a
 #                  personal fork, while the jar in the same image is generated
 #                  from the catalog of master.
@@ -49,13 +52,30 @@ BUILD_OUTPUT_GLOBS = (
     "dependency-reduced-pom.xml", "*/dependency-reduced-pom.xml",
 )
 
-# A suite that does not run cannot witness the surface the jar carries.
+# The consequence each skip construct carries, named once and shared by the
+# entries that earn it.
+JAR = ("a jar whose tests did not run witnesses no surface")
+SILENT = ("the file still reports as one passing test case, so the run's own "
+          "summary reads no skips over it")
+
+# A suite that does not run cannot witness the surface it is there to cover.
+# Each entry carries the consequence it earns, because the two dialects fail
+# differently: a build flag publishes an artefact from a suite that never ran,
+# while a sqllogictest directive leaves the suite running and silent.
 SKIP_PATTERNS = (
-    (re.compile(r"-DskipTests\b"), "-DskipTests"),
-    (re.compile(r"-Dmaven\.test\.skip\b"), "-Dmaven.test.skip"),
-    (re.compile(r"<skipTests>"), "<skipTests>"),
-    (re.compile(r"<maven\.test\.skip>"), "<maven.test.skip>"),
-    (re.compile(r"\bskipITs\b"), "skipITs"),
+    (re.compile(r"-DskipTests\b"), "-DskipTests", JAR),
+    (re.compile(r"-Dmaven\.test\.skip\b"), "-Dmaven.test.skip", JAR),
+    (re.compile(r"<skipTests>"), "<skipTests>", JAR),
+    (re.compile(r"<maven\.test\.skip>"), "<maven.test.skip>", JAR),
+    (re.compile(r"\bskipITs\b"), "skipITs", JAR),
+    # sqllogictest, which MobilityDuck's suite is written in. The directive
+    # silences every statement after it to the end of the file or to a
+    # `mode unskip`, and NOTHING REPORTS IT: the file still counts as one
+    # passing test case, so the runner's own summary reads `0 skipped` over it
+    # and only a census of the sources can see it. Anchored to the start of a
+    # line because that is where the directive stands; a prose mention of it
+    # inside a comment is not one.
+    (re.compile(r"^\s*mode\s+skip\b"), "mode skip", SILENT),
 )
 
 # The chain derives every artifact from one MobilityDB commit on master. A clone
@@ -85,6 +105,9 @@ WORKFLOW_REF_RE = re.compile(
 TEXT_SUFFIXES = {
     ".sh", ".bash", ".yml", ".yaml", ".xml", ".md", ".py", ".java", ".sql",
     ".txt", ".cfg", ".toml", ".properties", ".json", ".conf", "",
+    # sqllogictest, which carries a suite as text and would otherwise be read
+    # by no rule at all.
+    ".test",
 }
 
 
@@ -166,12 +189,11 @@ def check_skipped_tests(root, files, allow):
         if path == ALLOW_FILE or path.endswith("check-tree-hygiene.py"):
             continue
         for n, line in enumerate(read_lines(root, path), 1):
-            for pattern, name in SKIP_PATTERNS:
+            for pattern, name, why in SKIP_PATTERNS:
                 if pattern.search(line):
                     found.append(Finding(
                         "skipped-tests", path, n,
-                        f"`{name}` keeps the suite from running; a jar whose "
-                        f"tests did not run witnesses no surface"))
+                        f"`{name}` keeps the suite from running; {why}"))
     return found
 
 

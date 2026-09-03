@@ -48,6 +48,13 @@ jobs:
             > "$FIX/Dockerfile.fixture"
           echo "mvn package $SKIP" > "$FIX/build.sh"
           echo "nothing references the fixture image" > "$FIX/README.md"
+          # A sqllogictest file silenced from its directive onward. The runner
+          # still reports it as one passing test case, so this census is the
+          # only thing that sees it.
+          MODE="mode ""skip"
+          mkdir -p "$FIX/test/sql"
+          printf 'statement ok\nSELECT 1;\n\n%s\n\nquery I\nSELECT 2;\n----\n2\n' \
+            "$MODE" > "$FIX/test/sql/fixture.test"
           git -C "$FIX" add -A
           if python3 "$GITHUB_WORKSPACE/tools/check-tree-hygiene.py" --root "$FIX"; then
             echo "::error::the check passed a tree carrying build output, a stale pin, a skipped suite and an orphan image"
