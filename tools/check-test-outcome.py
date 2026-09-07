@@ -78,6 +78,20 @@ VSTEST = re.compile(
     r"(?:Passed|Failed)!\s+-\s+Failed:\s*(\d+),\s*Passed:\s*(\d+),"
     r"\s*Skipped:\s*(\d+),\s*Total:\s*(\d+)")
 
+# `tests 4` / `skipped 1` / `todo 1` — the counters `node --test` writes at the
+# end of a run under its default reporter, each behind an information glyph.
+# Mirrors the VSTEST block above: one dialect, its own constants.
+#
+# `tests` is the whole total, and the not-run tests are the sum of TWO
+# counters. A run of 2 passing, 1 skipped and 1 deferred prints `tests 4`,
+# `pass 2`, `skipped 1`, `todo 1` — the two are disjoint from `pass` and from
+# each other, so a reader watching `skipped` alone certifies a suite whose
+# every test is deferred. Node prints a deferred test with a TICK, which is
+# exactly the "reads as a pass" shape this tool exists to refuse.
+NODETEST_TESTS = re.compile(r"^\s*\S?\s*tests\s+(\d+)\s*$")
+NODETEST_SKIPPED = re.compile(r"^\s*\S?\s*skipped\s+(\d+)\s*$")
+NODETEST_DEFERRED = re.compile(r"^\s*\S?\s*todo\s+(\d+)\s*$")
+
 # `All tests passed (2695 assertions in 102 test cases)` — what the Catch2
 # console reporter writes when nothing failed, carrying a leading
 # `3 skipped tests, ` when any were. The test-case count it prints EXCLUDES the
@@ -134,6 +148,34 @@ def read_summaries(text: str):
             lines.append(raw.strip())
     if lines:
         return total, skipped, "vstest", lines
+
+    # node:test is read BEFORE pytest for the same reason Catch2 is: node's
+    # `pass 2` line does not satisfy the pytest pattern, but its `duration_ms`
+    # and per-test lines sit in the same log as anything else the job printed,
+    # and reading the counters as a block keeps a partial match from standing in
+    # for the summary. All three counters come from ONE run, so a log carrying
+    # `tests` without `skipped` is a truncated log rather than a clean one.
+    deferred = 0
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        m = NODETEST_TESTS.search(line)
+        if m:
+            total += int(m.group(1))
+            lines.append(line.strip())
+            continue
+        m = NODETEST_SKIPPED.search(line)
+        if m:
+            skipped += int(m.group(1))
+            lines.append(line.strip())
+            continue
+        m = NODETEST_DEFERRED.search(line)
+        if m:
+            deferred += int(m.group(1))
+            lines.append(line.strip())
+    if lines:
+        # A deferred test asserts nothing and node prints it with a tick, so it
+        # counts as skipped rather than as a category of its own.
+        return total, skipped + deferred, "node:test", lines
 
     # Catch2 is read BEFORE pytest, and the order is load-bearing: the failure
     # table's `101 passed` satisfies the pytest pattern, so a failing Catch2 run
