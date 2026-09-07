@@ -141,5 +141,32 @@ class NoSummaryTests(unittest.TestCase):
         self.assertIsNone(outcome.read_summaries(log)[2])
 
 
+class NoFlagPermitsASkipTests(unittest.TestCase):
+    """No option tolerates a skip, and none may be added back.
+
+    A flag that makes skips acceptable is the whole rule's escape hatch: the
+    repository holding it can pass the flag and report success over a suite that
+    covers nothing. Refusing the flag at the parser is what makes the rule
+    unconditional, and this test is what keeps it refused."""
+
+    def _parser_options(self):
+        parser = outcome.build_parser()
+        return {opt for action in parser._actions for opt in action.option_strings}
+
+    def test_the_parser_offers_no_option_tolerating_a_skip(self):
+        options = self._parser_options()
+        # A positive control: the parser is real and does carry its own options.
+        self.assertIn("--min-tests", options)
+        permissive = {o for o in options
+                      if "skip" in o.lower() or "ignore" in o.lower()}
+        self.assertEqual(set(), permissive)
+
+    def test_a_skip_fails_whatever_the_floor(self):
+        log = ("Passed!  - Failed:     0, Passed:    66, Skipped:     1, "
+               "Total:    67, Duration: 1 s - Suite.dll (net8.0)\n")
+        total, skipped, dialect, _ = outcome.read_summaries(log)
+        self.assertEqual(("vstest", 67, 1), (dialect, total, skipped))
+
+
 if __name__ == "__main__":
     unittest.main()
