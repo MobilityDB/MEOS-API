@@ -44,7 +44,7 @@
 # consumer tees must come from `go test -v`.
 #
 # Usage:
-#   tools/check-test-outcome.py <build.log> [--min-tests N] [--allow-skips]
+#   tools/check-test-outcome.py <build.log> [--min-tests N]
 #
 # Exit status is 0 when the log satisfies both rules and 1 otherwise.
 
@@ -176,14 +176,22 @@ def read_summaries(text: str):
     return 0, 0, None, []
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, as its own function so a test can read the options.
+
+    There is deliberately no option that tolerates a skip. A flag permitting one
+    is the rule's escape hatch — the repository holding it passes the flag and
+    reports success over a suite that covers nothing — so the absence is a
+    property the suite asserts rather than a convention."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("log", help="build log carrying the test summary")
     ap.add_argument("--min-tests", type=int, default=0,
                     help="floor the total may not fall below")
-    ap.add_argument("--allow-skips", action="store_true",
-                    help="report skips without failing (never in CI)")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     path = Path(args.log)
     if not path.exists():
@@ -209,7 +217,7 @@ def main() -> int:
 
     failed = False
 
-    if skipped and not args.allow_skips:
+    if skipped:
         for line in text.splitlines():
             s = line.strip()
             if (s.startswith("SKIPPED") or " SKIPPED " in s
@@ -230,13 +238,6 @@ def main() -> int:
 
     if failed:
         return 1
-    if skipped:
-        # Only --allow-skips reaches here with a non-zero count, and saying
-        # "nothing skipped" over it would misreport the one run that tolerates
-        # them.
-        print(f"check-test-outcome: {skipped} skipped, tolerated by "
-              f"--allow-skips; the suite did not shrink")
-        return 0
     print("check-test-outcome: nothing skipped, and the suite did not shrink")
     return 0
 
