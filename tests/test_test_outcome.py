@@ -141,6 +141,36 @@ class NoSummaryTests(unittest.TestCase):
         self.assertIsNone(outcome.read_summaries(log)[2])
 
 
+class NodeTestTests(unittest.TestCase):
+    """`node --test` counts the not-run tests in TWO places.
+
+    Every string below is copied from a real `node --test` run, not composed
+    from the documentation."""
+
+    CLEAN = ("ℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\n"
+             "ℹ cancelled 0\nℹ skipped 0\nℹ todo 0\n"
+             "ℹ duration_ms 92.5\n")
+
+    def test_a_clean_run_reads_its_total(self):
+        total, skipped, dialect, _ = outcome.read_summaries(self.CLEAN)
+        self.assertEqual(("node:test", 2, 0), (dialect, total, skipped))
+
+    def test_a_deferred_test_counts_as_skipped(self):
+        # 2 passing, 1 skipped and 1 deferred: node prints the deferred one with
+        # a TICK and counts it in neither `pass` nor `skipped`, so a reader
+        # watching `skipped` alone would report 1 over 2 tests that never ran.
+        log = ("ℹ tests 4\nℹ suites 1\nℹ pass 2\nℹ fail 0\n"
+               "ℹ cancelled 0\nℹ skipped 1\nℹ todo 1\n")
+        total, skipped, dialect, _ = outcome.read_summaries(log)
+        self.assertEqual(("node:test", 4, 2), (dialect, total, skipped))
+
+    def test_node_is_read_before_pytest(self):
+        # A node log that also carries a pytest-shaped phrase must still read as
+        # node:test, or the total becomes whatever that phrase names.
+        log = "collected: 9 passed in 0.1s\n" + self.CLEAN
+        self.assertEqual("node:test", outcome.read_summaries(log)[2])
+
+
 class NoFlagPermitsASkipTests(unittest.TestCase):
     """No option tolerates a skip, and none may be added back.
 
