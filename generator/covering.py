@@ -2,30 +2,44 @@
 
 Projects the ``temporalCovering`` block of the MEOS catalog
 (``meos-idl.json``, produced by ``parser/covering.py``) onto the canonical,
-language-agnostic covering-column contract: per temporal type, the ordered
-covering columns with the fully-composed MEOS expression that derives each
-from the value.
+language-agnostic covering-column contract of TemporalParquet 2.0.0: per
+temporal type, each covering struct column with its name, its fields in
+order, and the fully-composed MEOS expression that derives each field from
+the value, plus the plain columns beside them.
 
 Every binding generator (PyMEOS, JMEOS, MobilityDuck, MobilitySpark, …)
-renders this same contract in its own idiom — a DuckDB ``GENERATED`` column,
-a Spark UDF projection, a PyMEOS writer — so a temporal table prunes the
+renders this same contract in its own idiom — a DuckDB struct column, a
+Spark UDF projection, a PyMEOS writer — so a temporal table prunes the
 same way on every platform (Iceberg manifest + Parquet row-group min/max).
-The ``VALUE`` placeholder is the temporal column reference the binding
-substitutes.
+Two placeholders are the binding's to substitute: ``VALUE`` is the temporal
+column reference, and ``{col}`` in a covering's column name is the temporal
+column's name.
 
-Pure ``dict`` → ``dict``; no libclang and no MEOS runtime.
+Pure ``dict`` → ``dict``: it reads the catalog only and needs no MEOS runtime.
 """
 
 from __future__ import annotations
 
 
 def _column_expr(column: dict, box_from: str) -> str:
-    """Compose the MEOS expression that derives one covering column from the
-    temporal value (``VALUE``). A ``box`` column is read off the value's box;
-    a ``value`` column is read off the value directly."""
+    """Compose the MEOS expression that derives one field from the temporal
+    value (``VALUE``). A ``box`` field is read off the value's box; a
+    ``value`` field is read off the value directly."""
     if column["source"] == "value":
         return f"{column['accessor']}(VALUE)"
     return f"{column['accessor']}({box_from}(VALUE))"
+
+
+def _field(field: dict, box_from: str) -> dict:
+    """Project one covering field or plain column."""
+    entry = {
+        "name": field["name"],
+        "sqlType": field["sqlType"],
+        "expr": _column_expr(field, box_from),
+    }
+    if field.get("when"):
+        entry["when"] = field["when"]
+    return entry
 
 
 def build_covering_projection(catalog: dict) -> dict:
@@ -38,20 +52,19 @@ def build_covering_projection(catalog: dict) -> dict:
     for tname, spec in cov["byType"].items():
         box = spec.get("box")
         box_from = box["from"] if box else None
-        columns = []
-        for col in spec["columns"]:
-            entry = {
-                "name": col["name"],
-                "sqlType": col["sqlType"],
-                "expr": _column_expr(col, box_from),
+        coverings = [
+            {
+                "key": covering["key"],
+                "column": covering["column"],
+                "fields": [_field(f, box_from) for f in covering["fields"]],
             }
-            if col.get("when"):
-                entry["when"] = col["when"]
-            columns.append(entry)
+            for covering in spec["coverings"]
+        ]
         types[tname] = {
             "class": spec["class"],
             "boxType": box["type"] if box else None,
-            "columns": columns,
+            "coverings": coverings,
+            "columns": [_field(c, box_from) for c in spec.get("columns", [])],
         }
 
     return {
