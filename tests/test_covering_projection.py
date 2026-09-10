@@ -58,11 +58,21 @@ class ProjectionTests(unittest.TestCase):
         t = p["types"]["tfloat"]
         self.assertEqual(t["boxType"], "TBOX")
         self.assertEqual([c["key"] for c in t["coverings"]], ["vspan", "tspan"])
-        vspan = {f["name"]: f for f in _covering(p, "tfloat", "vspan")["fields"]}
-        self.assertEqual(vspan["vmin"]["expr"], "tbox_xmin(tnumber_to_tbox(VALUE))")
         tspan = {f["name"]: f for f in _covering(p, "tfloat", "tspan")["fields"]}
         self.assertEqual(tspan["tmax"]["expr"], "tbox_tmax(tnumber_to_tbox(VALUE))")
         self.assertEqual(t["columns"], [])
+
+    def test_number_value_bounds_per_base_type(self):
+        # each numeric type reads its value bounds off the value, typed as
+        # its base type
+        p = _projected()
+        for tname, sql_type in (("tint", "int"), ("tbigint", "bigint"),
+                                ("tfloat", "double")):
+            vspan = _covering(p, tname, "vspan")
+            self.assertEqual(
+                [(f["name"], f["sqlType"], f["expr"]) for f in vspan["fields"]],
+                [("vmin", sql_type, f"{tname}_min_value(VALUE)"),
+                 ("vmax", sql_type, f"{tname}_max_value(VALUE)")])
 
     def test_time_only_composition(self):
         p = _projected()

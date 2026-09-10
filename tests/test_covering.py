@@ -30,6 +30,10 @@ def _attach_variant(testcase, mutate):
         p.unlink()
 
 
+def _covering(cov, tname, key):
+    return next(c for c in cov["byType"][tname]["coverings"] if c["key"] == key)
+
+
 class AttachTests(unittest.TestCase):
     def test_attaches_and_indexes(self):
         idl = attach_temporal_covering({"functions": []}, MAP)
@@ -57,8 +61,7 @@ class AttachTests(unittest.TestCase):
 
     def test_bbox_is_a_geoparquet_bounding_box_column(self):
         cov = attach_temporal_covering({}, MAP)["temporalCovering"]
-        bbox = next(c for c in cov["byType"]["tgeompoint"]["coverings"]
-                    if c["key"] == "bbox")
+        bbox = _covering(cov, "tgeompoint", "bbox")
         self.assertEqual(bbox["column"], "{col}_bbox")
         self.assertEqual(tuple(f["name"] for f in bbox["fields"]), BBOX_3D)
         self.assertEqual({f["sqlType"] for f in bbox["fields"]}, {"double"})
@@ -66,13 +69,32 @@ class AttachTests(unittest.TestCase):
             [f["name"] for f in bbox["fields"] if f.get("when") == "hasZ"],
             ["zmin", "zmax"])
 
+    def test_vspan_bounds_are_of_the_base_type(self):
+        # the value bounds are read off the value in its base type, so a
+        # bigint bound stays exact and no bound is rounded inward
+        cov = attach_temporal_covering({}, MAP)["temporalCovering"]
+        expected = {
+            "tint":    ("int",    "tint_min_value",    "tint_max_value"),
+            "tbigint": ("bigint", "tbigint_min_value", "tbigint_max_value"),
+            "tfloat":  ("double", "tfloat_min_value",  "tfloat_max_value"),
+        }
+        for tname, (sql_type, vmin, vmax) in expected.items():
+            vspan = _covering(cov, tname, "vspan")
+            self.assertEqual(vspan["column"], "{col}_vspan")
+            self.assertEqual(
+                [(f["name"], f["sqlType"], f["accessor"], f["source"])
+                 for f in vspan["fields"]],
+                [("vmin", sql_type, vmin, "value"),
+                 ("vmax", sql_type, vmax, "value")])
+
     def test_symbols_collected(self):
         cov = attach_temporal_covering({}, MAP)["temporalCovering"]
         # the value codec, both box converters, and the field accessors are
         # in the audit set
         for sym in ("temporal_as_hexwkb", "temporal_from_hexwkb",
                     "tspatial_to_stbox", "tnumber_to_tbox", "stbox_xmin",
-                    "stbox_tmin", "tbox_xmin", "tspatial_srid",
+                    "stbox_tmin", "tbox_tmin", "tspatial_srid",
+                    "tint_min_value", "tbigint_max_value", "tfloat_min_value",
                     "temporal_start_timestamptz"):
             self.assertIn(sym, cov["symbols"])
 
@@ -109,6 +131,13 @@ class AttachTests(unittest.TestCase):
             number["coverings"].append(copy.deepcopy(number["coverings"][1]))
         with self.assertRaises(ValueError):
             _attach_variant(self, dup)
+
+    def test_by_type_missing_a_type_rejected(self):
+        # a per-type covering must give fields for every type of its class
+        def drop(d):
+            del d["classes"]["number"]["coverings"][0]["byType"]["tbigint"]
+        with self.assertRaises(ValueError):
+            _attach_variant(self, drop)
 
 
 class SchemaTests(unittest.TestCase):

@@ -47,10 +47,20 @@
       "srid": null,
       "types": ["tint", "tfloat", "tbigint"],
       "coverings": [
-        {"key": "vspan", "column": "{col}_vspan", "fields": [
-          {"name": "vmin", "sqlType": "double", "accessor": "tbox_xmin", "source": "box"},
-          {"name": "vmax", "sqlType": "double", "accessor": "tbox_xmax", "source": "box"}
-        ]},
+        {"key": "vspan", "column": "{col}_vspan", "byType": {
+          "tint": [
+            {"name": "vmin", "sqlType": "int",    "accessor": "tint_min_value",    "source": "value"},
+            {"name": "vmax", "sqlType": "int",    "accessor": "tint_max_value",    "source": "value"}
+          ],
+          "tfloat": [
+            {"name": "vmin", "sqlType": "double", "accessor": "tfloat_min_value",  "source": "value"},
+            {"name": "vmax", "sqlType": "double", "accessor": "tfloat_max_value",  "source": "value"}
+          ],
+          "tbigint": [
+            {"name": "vmin", "sqlType": "bigint", "accessor": "tbigint_min_value", "source": "value"},
+            {"name": "vmax", "sqlType": "bigint", "accessor": "tbigint_max_value", "source": "value"}
+          ]
+        }},
         {"key": "tspan", "column": "{col}_tspan", "fields": [
           {"name": "tmin", "sqlType": "timestamptz", "accessor": "tbox_tmin", "source": "box"},
           {"name": "tmax", "sqlType": "timestamptz", "accessor": "tbox_tmax", "source": "box"}
@@ -83,6 +93,7 @@
     "Each covering is a struct column at the root of the schema; `{col}` in its `column` is the name of the temporal column it covers. The statistics of its fields give Iceberg manifest-level file pruning and Parquet row-group min/max pruning, with no spatial-aware engine.",
     "The `bbox` covering is a GeoParquet bounding box column: its fields are DOUBLE, in the order xmin, ymin, [zmin,] xmax, ymax[, zmax], it has the repetition of its temporal column, and it holds a value exactly when the temporal column does.",
     "zmin/zmax are emitted only for 3D values (`when: hasZ`); the bbox of a 2D value has four fields.",
+    "The `vspan` bounds are of the base type of each number type (int, bigint, double), read off the value, so a bigint bound stays exact and no bound is rounded inward; a covering whose fields differ by type gives them per type (`byType`), one that holds for the whole class gives them once (`fields`).",
     "`columns` are plain columns at the root beside the coverings; the spatial class carries `srid` there.",
     "`source: box` accessors take the box returned by `class.box.from(value)`; `source: value` accessors take the temporal value directly.",
     "This descriptor is type-agnostic per class exactly as `portable-aliases.json` is type-agnostic per operator family — codegen consumes it identically across every binding."

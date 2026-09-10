@@ -33,6 +33,16 @@ in its class:
 the order shown, it has the repetition of its temporal column, and it holds a
 value exactly when the temporal column does. `zmin`/`zmax` are emitted only
 for 3D values (`when: hasZ`). `srid` is a plain column beside the coverings.
+
+`{col}_vspan` holds the value bounds in the base type of the temporal type,
+read off the value with `tint_min_value`/`tint_max_value` (`int`),
+`tbigint_min_value`/`tbigint_max_value` (`bigint`) and
+`tfloat_min_value`/`tfloat_max_value` (`double`). A bound that went through
+`double` would lose exactness above 2^53 for `tbigint`, and a minimum
+rounded upwards would let pruning skip a matching row. Because the three
+number types differ in base type, the `vspan` covering gives its fields per
+type (`byType`); a covering whose fields hold for the whole class gives them
+once (`fields`).
 The canonical value column is unchanged and lossless; covering columns are
 denormalised derivations of the value's box.
 
