@@ -2,7 +2,7 @@
 python3 tests/test_covering_projection.py
 
 Also the CI gate: when the enriched catalog with `temporalCovering` is
-present, every covered type projects to a well-formed covering expression
+present, every covered type projects to well-formed covering columns
 composed against the value.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.covering import attach_temporal_covering
+from parser.covering import attach_temporal_covering, BBOX_2D, BBOX_3D
 from generator.covering import build_covering_projection
 
 MAP = ROOT / "meta" / "temporal-covering.json"
@@ -25,25 +25,52 @@ def _projected():
     return build_covering_projection(attach_temporal_covering({}, MAP))
 
 
+def _covering(projection, tname, key):
+    return next(c for c in projection["types"][tname]["coverings"]
+                if c["key"] == key)
+
+
 class ProjectionTests(unittest.TestCase):
     def test_spatial_box_composition(self):
-        cols = {c["name"]: c
-                for c in _projected()["types"]["tgeompoint"]["columns"]}
-        # box columns compose accessor(box_from(VALUE))
-        self.assertEqual(cols["xmin"]["expr"],
+        p = _projected()
+        bbox = _covering(p, "tgeompoint", "bbox")
+        self.assertEqual(bbox["column"], "{col}_bbox")
+        # the fields are in GeoParquet bounding box order
+        self.assertEqual(tuple(f["name"] for f in bbox["fields"]), BBOX_3D)
+        fields = {f["name"]: f for f in bbox["fields"]}
+        # box fields compose accessor(box_from(VALUE))
+        self.assertEqual(fields["xmin"]["expr"],
                          "stbox_xmin(tspatial_to_stbox(VALUE))")
-        self.assertEqual(cols["xmin"]["sqlType"], "double")
-        # srid is read off the value, not the box
-        self.assertEqual(cols["srid"]["expr"], "tspatial_srid(VALUE)")
+        self.assertEqual(fields["xmin"]["sqlType"], "double")
         # zmin is conditional on 3D
-        self.assertEqual(cols["zmin"]["when"], "hasZ")
+        self.assertEqual(fields["zmin"]["when"], "hasZ")
+        tspan = _covering(p, "tgeompoint", "tspan")
+        self.assertEqual(tspan["column"], "{col}_tspan")
+        self.assertEqual([f["expr"] for f in tspan["fields"]],
+                         ["stbox_tmin(tspatial_to_stbox(VALUE))",
+                          "stbox_tmax(tspatial_to_stbox(VALUE))"])
+        # srid is a plain column read off the value, not the box
+        cols = {c["name"]: c for c in p["types"]["tgeompoint"]["columns"]}
+        self.assertEqual(cols["srid"]["expr"], "tspatial_srid(VALUE)")
 
     def test_number_box_composition(self):
-        t = _projected()["types"]["tfloat"]
-        cols = {c["name"]: c for c in t["columns"]}
+        p = _projected()
+        t = p["types"]["tfloat"]
         self.assertEqual(t["boxType"], "TBOX")
-        self.assertEqual(cols["vmin"]["expr"], "tbox_xmin(tnumber_to_tbox(VALUE))")
-        self.assertEqual(cols["tmax"]["expr"], "tbox_tmax(tnumber_to_tbox(VALUE))")
+        self.assertEqual([c["key"] for c in t["coverings"]], ["vspan", "tspan"])
+        vspan = {f["name"]: f for f in _covering(p, "tfloat", "vspan")["fields"]}
+        self.assertEqual(vspan["vmin"]["expr"], "tbox_xmin(tnumber_to_tbox(VALUE))")
+        tspan = {f["name"]: f for f in _covering(p, "tfloat", "tspan")["fields"]}
+        self.assertEqual(tspan["tmax"]["expr"], "tbox_tmax(tnumber_to_tbox(VALUE))")
+        self.assertEqual(t["columns"], [])
+
+    def test_time_only_composition(self):
+        p = _projected()
+        t = p["types"]["tbool"]
+        self.assertIsNone(t["boxType"])
+        self.assertEqual([c["key"] for c in t["coverings"]], ["tspan"])
+        tspan = {f["name"]: f for f in _covering(p, "tbool", "tspan")["fields"]}
+        self.assertEqual(tspan["tmin"]["expr"], "temporal_start_timestamptz(VALUE)")
 
     def test_count_and_codec(self):
         p = _projected()
@@ -61,16 +88,22 @@ class LiveProjectionGate(unittest.TestCase):
         cat = attach_temporal_covering(json.loads(_CATALOG.read_text()), MAP)
         p = build_covering_projection(cat)
         self.assertEqual(p["count"], 13)
-        # time-only types (tbool/ttext) project to tmin/tmax via the value, no box
+        # time-only types (tbool/ttext) project to a tspan read off the value
         self.assertEqual(p["types"]["tbool"]["boxType"], None)
         self.assertEqual(
-            {c["name"] for c in p["types"]["tbool"]["columns"]}, {"tmin", "tmax"})
+            [f["name"] for f in _covering(p, "tbool", "tspan")["fields"]],
+            ["tmin", "tmax"])
         for spec in p["types"].values():
-            self.assertTrue(spec["columns"])
-            for c in spec["columns"]:
-                # composed against the value, balanced parentheses
-                self.assertIn("(VALUE)", c["expr"])
-                self.assertEqual(c["expr"].count("("), c["expr"].count(")"))
+            self.assertTrue(spec["coverings"])
+            for covering in spec["coverings"]:
+                self.assertTrue(covering["column"].startswith("{col}_"))
+                if covering["key"] == "bbox":
+                    names = tuple(f["name"] for f in covering["fields"])
+                    self.assertIn(names, (BBOX_2D, BBOX_3D))
+                for f in covering["fields"] + spec["columns"]:
+                    # composed against the value, balanced parentheses
+                    self.assertIn("(VALUE)", f["expr"])
+                    self.assertEqual(f["expr"].count("("), f["expr"].count(")"))
 
 
 if __name__ == "__main__":
