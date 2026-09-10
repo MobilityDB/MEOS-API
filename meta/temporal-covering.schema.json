@@ -13,11 +13,16 @@
       "required": ["name", "sqlType", "accessor", "source"],
       "properties": {
         "name":     {"type": "string", "pattern": "^[a-z][a-z0-9]*$"},
-        "sqlType":  {"enum": ["double", "int", "timestamptz"]},
+        "sqlType":  {"enum": ["double", "int", "bigint", "timestamptz"]},
         "accessor": {"type": "string"},
         "source":   {"enum": ["box", "value"]},
         "when":     {"enum": ["hasZ"]}
       }
+    },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/field"}
     }
   },
   "properties": {
@@ -83,14 +88,20 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["key", "column", "fields"],
+              "required": ["key", "column"],
+              "oneOf": [
+                {"required": ["fields"]},
+                {"required": ["byType"]}
+              ],
               "properties": {
                 "key":    {"enum": ["bbox", "tspan", "vspan"]},
                 "column": {"type": "string", "pattern": "^\\{col\\}_[a-z]+$"},
-                "fields": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {"$ref": "#/$defs/field"}
+                "fields": {"$ref": "#/$defs/fields"},
+                "byType": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "propertyNames": {"pattern": "^t[a-z0-9]+$"},
+                  "additionalProperties": {"$ref": "#/$defs/fields"}
                 }
               }
             }

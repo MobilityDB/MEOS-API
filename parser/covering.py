@@ -6,15 +6,18 @@ TemporalParquet 2.0.0.
 #870 TemporalParquet / #913 Temporal Data Lake): per temporal-type *class*
 (spatial → STBOX, number → TBOX, timeOnly → no box) it names the box
 converter, the SRID accessor, the covering struct columns with their fields
-and MEOS accessors, and the plain columns beside them. Folding it into the
-catalog means every binding/engine generates the *identical* covering
-schema, so a temporal table prunes the same way on every platform (Iceberg
-manifest pruning + Parquet row-group min/max) with no spatial-aware engine.
+and MEOS accessors, and the plain columns beside them. A covering gives its
+fields once for the whole class, or per type (`byType`) where the types of a
+class differ in base type. Folding it into the catalog means every
+binding/engine generates the *identical* covering schema, so a temporal
+table prunes the same way on every platform (Iceberg manifest pruning +
+Parquet row-group min/max) with no spatial-aware engine.
 
 This is curated canonical data, not a heuristic — it is preserved verbatim
-and only *derived* lookups are added (a flat `byType` index and the set of
-referenced C symbols), so a generator never has to re-derive the mapping.
-Pure dict → dict; no libclang.
+and only *derived* lookups are added (a flat `byType` index, where every
+covering carries the fields of that type, and the set of referenced C
+symbols), so a generator never has to re-derive the mapping. Pure dict →
+dict; no header parsing.
 """
 
 import json
@@ -25,29 +28,59 @@ BBOX_2D = ("xmin", "ymin", "xmax", "ymax")
 BBOX_3D = ("xmin", "ymin", "zmin", "xmax", "ymax", "zmax")
 
 
-def _check_coverings(class_name: str, coverings: list) -> None:
-    """Reject a class whose coverings a generator could not render as the
-    TemporalParquet 2.0.0 covering columns."""
-    keys = [c["key"] for c in coverings]
+def _resolve(class_name: str, types: list, covering: dict) -> dict:
+    """Return, per type of the class, the fields a covering holds."""
+    has_fields, has_by_type = "fields" in covering, "byType" in covering
+    if has_fields == has_by_type:
+        raise ValueError(
+            f"temporal-covering: class {class_name!r} covering "
+            f"{covering['key']!r} gives neither or both of fields and byType")
+    if has_fields:
+        return {t: covering["fields"] for t in types}
+    by_type = covering["byType"]
+    if set(by_type) != set(types):
+        raise ValueError(
+            f"temporal-covering: class {class_name!r} covering "
+            f"{covering['key']!r} gives fields for {sorted(by_type)}, where "
+            f"the class holds {sorted(types)}")
+    return by_type
+
+
+def _check_bbox(class_name: str, fields: list) -> None:
+    """Reject bbox fields that are not a GeoParquet bounding box column's."""
+    names = tuple(f["name"] for f in fields)
+    planar = tuple(f["name"] for f in fields if f.get("when") != "hasZ")
+    if names not in (BBOX_2D, BBOX_3D) or planar != BBOX_2D:
+        raise ValueError(
+            f"temporal-covering: class {class_name!r} declares the bbox "
+            f"fields {names}, where a GeoParquet bounding box column has "
+            f"{BBOX_2D} or {BBOX_3D}, the z fields only for 3D values")
+    if any(f["sqlType"] != "double" for f in fields):
+        raise ValueError(
+            f"temporal-covering: class {class_name!r} declares a bbox "
+            f"field that is not double")
+
+
+def _coverings_by_type(class_name: str, spec: dict) -> dict:
+    """Return, per type of the class, its coverings with their fields."""
+    keys = [c["key"] for c in spec["coverings"]]
     if len(keys) != len(set(keys)):
         raise ValueError(
             f"temporal-covering: class {class_name!r} declares a covering "
             f"twice ({keys})")
-    for covering in coverings:
-        if covering["key"] != "bbox":
-            continue
-        fields = covering["fields"]
-        names = tuple(f["name"] for f in fields)
-        planar = tuple(f["name"] for f in fields if f.get("when") != "hasZ")
-        if names not in (BBOX_2D, BBOX_3D) or planar != BBOX_2D:
-            raise ValueError(
-                f"temporal-covering: class {class_name!r} declares the bbox "
-                f"fields {names}, where a GeoParquet bounding box column has "
-                f"{BBOX_2D} or {BBOX_3D}, the z fields only for 3D values")
-        if any(f["sqlType"] != "double" for f in fields):
-            raise ValueError(
-                f"temporal-covering: class {class_name!r} declares a bbox "
-                f"field that is not double")
+    result = {t: [] for t in spec["types"]}
+    for covering in spec["coverings"]:
+        fields_by_type = _resolve(class_name, spec["types"], covering)
+        for t in spec["types"]:
+            fields = fields_by_type[t]
+            if covering["key"] == "bbox":
+                _check_bbox(class_name, fields)
+            result[t].append({
+                "key": covering["key"],
+                "column": covering["column"],
+                "fields": fields,
+            })
+    return result
 
 
 def attach_temporal_covering(idl: dict, path: Path) -> dict:
@@ -62,7 +95,7 @@ def attach_temporal_covering(idl: dict, path: Path) -> dict:
     # two classes claiming the same type would make codegen ambiguous.
     by_type = {}
     for class_name, spec in classes.items():
-        _check_coverings(class_name, spec["coverings"])
+        coverings = _coverings_by_type(class_name, spec)
         for t in spec["types"]:
             if t in by_type:
                 raise ValueError(
@@ -72,7 +105,7 @@ def attach_temporal_covering(idl: dict, path: Path) -> dict:
                 "class": class_name,
                 "box": spec.get("box"),
                 "srid": spec.get("srid"),
-                "coverings": spec["coverings"],
+                "coverings": coverings[t],
                 "columns": spec.get("columns", []),
             }
 
@@ -84,11 +117,12 @@ def attach_temporal_covering(idl: dict, path: Path) -> dict:
             symbols.add(spec["box"]["from"])
         if spec.get("srid"):
             symbols.add(spec["srid"])
-        for covering in spec["coverings"]:
-            for field in covering["fields"]:
-                symbols.add(field["accessor"])
         for col in spec.get("columns", []):
             symbols.add(col["accessor"])
+    for entry in by_type.values():
+        for covering in entry["coverings"]:
+            for field in covering["fields"]:
+                symbols.add(field["accessor"])
 
     idl["temporalCovering"] = {
         "provenance": data["provenance"],
