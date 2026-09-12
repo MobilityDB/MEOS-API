@@ -32,6 +32,14 @@ naming one of those parameters resolves to the literal behind it.  Two wrappers
 sharing a helper (``…_object_field`` and ``…_object_field_text``) bind the same
 parameter to different literals, so the pair is read as the one SQL surface each
 wrapper names rather than merged.
+
+A wrapper can also supply the value of an argument the SQL signature omits:
+``Tspatial_as_text_common`` starts ``dbl_dig_for_wkt`` from
+``OUT_DEFAULT_DECIMAL_DIGITS`` and reads argument 1 only under
+``if (PG_NARGS() > 1 && ! PG_ARGISNULL(1))``, so ``asEWKT(th3index)`` calls
+``tspatial_as_ewkt(temp, OUT_DEFAULT_DECIMAL_DIGITS)``.  Such a local is recorded on
+each SQL signature stating at most ``k`` arguments, where it is the literal the MEOS
+call reads; a signature stating argument ``k`` passes the caller's value.
 """
 from __future__ import annotations
 
@@ -176,11 +184,73 @@ def _literal(arg: str) -> str | None:
     return None
 
 
+def _guards(body: str) -> list[tuple[int, int, int]]:
+    """``(k, start, end)`` for every statement ``body`` runs only under
+    ``if (PG_NARGS() > k ...)``: the span of the brace block or of the single statement
+    the test guards."""
+    out: list[tuple[int, int, int]] = []
+    for m in re.finditer(r"\bif\s*\(", body):
+        depth, i = 0, m.end() - 1
+        for i in range(m.end() - 1, len(body)):
+            if body[i] == "(":
+                depth += 1
+            elif body[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+        g = re.match(r"\s*PG_NARGS\s*\(\s*\)\s*>\s*(\d+)\s*(?:&&|$)",
+                     body[m.end():i])
+        if not g:
+            continue
+        j = i + 1
+        while j < len(body) and body[j].isspace():
+            j += 1
+        if body.startswith("{", j):
+            end = j + len(_body(body, j)) + 2
+        else:
+            end = body.find(";", j) + 1
+        out.append((int(g.group(1)), j, end))
+    return out
+
+
+def _guarded_default(body: str, var: str) -> tuple[int, str] | None:
+    """``(k, literal)`` when local ``var`` starts from a literal and every later assignment
+    of it sits under ``if (PG_NARGS() > k ...)``.  A SQL signature omitting argument ``k``
+    never runs those assignments, so the MEOS call reads the literal, as a SQL DEFAULT
+    would supply it: ``Tspatial_as_text_common`` starts ``dbl_dig_for_wkt`` from
+    ``OUT_DEFAULT_DECIMAL_DIGITS`` and reads argument 1 only when the call carries it."""
+    v = re.escape(var)
+    if re.search(r"&\s*" + v + r"\b|(?<![\w.>])" + v +
+                 r"\s*(?:\+\+|--|(?:[-+*/%&|^]|<<|>>)=)|(?:\+\+|--)\s*" + v + r"\b",
+                 body):
+        return None
+    assigns = list(re.finditer(r"(?<![\w.>])" + v + r"\s*=(?!=)", body))
+    if len(assigns) < 2:
+        return None
+    guards = _guards(body)
+    init = re.match(r"\s*([^;]+?)\s*;", body[assigns[0].end():])
+    lit = _literal(init.group(1)) if init else None
+    if lit is None or any(s <= assigns[0].start() < e for _, s, e in guards):
+        return None
+    ks = set()
+    for a in assigns[1:]:
+        hit = [k for k, s, e in guards if s <= a.start() < e]
+        if not hit:
+            return None
+        ks.update(hit)
+    return (ks.pop(), lit) if len(ks) == 1 else None
+
+
 def _wrapper_bound(body: str, func: dict, drift: list,
                    documented: dict[str, set],
-                   subst: dict[str, str] | None = None) -> dict[str, str]:
+                   subst: dict[str, str] | None = None,
+                   guarded: dict[str, tuple[int, str]] | None = None) -> dict[str, str]:
     """The literals wrapper ``body`` binds in its call to ``func['name']``, keyed by
     ``func``'s parameter name. Empty if the wrapper does not call ``func`` by name.
+
+    A local the wrapper reads from argument ``k`` only when the call carries it
+    (``_guarded_default``) is caller-sourced for a signature stating ``k`` and a literal
+    for one omitting it; it goes into ``guarded`` as ``{param: (k, literal)}``.
 
     ``documented`` maps a MEOS function to the set of its ``@param``-documented parameter
     names (``parser.outparam.extract_param_names``). A bare-identifier argument bound to a
@@ -206,6 +276,11 @@ def _wrapper_bound(body: str, func: dict, drift: list,
             # a helper parameter the delegating wrapper bound to a literal
             bound[pname] = subst[a]
             continue
+        if a in assigned and _IDENT.match(a) and guarded is not None:
+            dflt = _guarded_default(body, a)
+            if dflt is not None:
+                guarded.setdefault(pname, dflt)
+                continue
         if a.startswith("&") or "PG_GETARG" in a or a in assigned:
             continue  # out-param or caller-sourced local
         lit = _literal(a)
@@ -219,24 +294,29 @@ def _wrapper_bound(body: str, func: dict, drift: list,
 
 
 def _group_bound(body: str, group: list, helpers: dict, drift: list,
-                 documented: dict[str, set]) -> dict[str, str]:
-    """The literals wrapper ``body`` binds, keyed by parameter name, read from its call to
-    whichever member of ``group`` it names (branches such as the RGEO ternary agree, and
-    the first wins), or from its delegation to a shared helper when it names none."""
+                 documented: dict[str, set]):
+    """``(bound, guarded)``: the literals wrapper ``body`` binds, keyed by parameter name,
+    and the ``{param: (k, literal)}`` it supplies when the call omits argument ``k``, read
+    from its call to whichever member of ``group`` it names (branches such as the RGEO
+    ternary agree, and the first wins), or from its delegation to a shared helper when it
+    names none."""
     bound: dict[str, str] = {}
+    guarded: dict[str, tuple[int, str]] = {}
     for func in group:
-        for k, v in _wrapper_bound(body, func, drift, documented).items():
+        for k, v in _wrapper_bound(body, func, drift, documented,
+                                   guarded=guarded).items():
             bound.setdefault(k, v)
-    if bound:
-        return bound
+    if bound or guarded:
+        return bound, guarded
     # The wrapper names no MEOS call of its own: it delegates, and the literal it binds
     # sits at that delegation.
     hbody, subst = _delegated(body, helpers)
     if hbody is not None:
         for func in group:
-            for k, v in _wrapper_bound(hbody, func, drift, documented, subst).items():
+            for k, v in _wrapper_bound(hbody, func, drift, documented, subst,
+                                       guarded).items():
                 bound.setdefault(k, v)
-    return bound
+    return bound, guarded
 
 
 def _signature_wrapper(func: dict, sig: dict, claimed: list, w2sig: dict) -> str | None:
@@ -310,18 +390,27 @@ def merge_boundargs(idl: dict, mdb_src: str | Path,
         if not ws:
             continue
         pnames = {p.get("name") for p in func.get("params", [])}
-        own = {w: {k: v for k, v in (wbound.get(w) or {}).items() if k in pnames}
-               for w in ws}
+
+        def own(w, sig=None):
+            bound, guarded = wbound.get(w) or ({}, {})
+            out = {k: v for k, v in bound.items() if k in pnames}
+            if sig is not None:
+                nargs = len(sig.get("args") or ())
+                out.update({k: lit for k, (pos, lit) in guarded.items()
+                            if k in pnames and nargs <= pos})
+            return out
+
         sigs = func.get("sqlSignatures") or []
-        sig_ws = [_signature_wrapper(func, s, ws, w2sig) or ws[0] for s in sigs] or ws[:1]
-        if len({tuple(sorted(own[w].items())) for w in sig_ws}) == 1:
-            bound = own[sig_ws[0]]
+        sig_ws = [_signature_wrapper(func, s, ws, w2sig) or ws[0] for s in sigs]
+        per_sig = [own(w, s) for s, w in zip(sigs, sig_ws)] or [own(ws[0])]
+        if len({tuple(sorted(b.items())) for b in per_sig}) == 1:
+            bound = per_sig[0]
             if bound:
                 func.setdefault("shape", {})["boundArgs"] = bound
                 n += len(bound)
             continue
-        for s, w in zip(sigs, sig_ws):
-            if own[w]:
-                s["boundArgs"] = own[w]
-                n += len(own[w])
+        for s, b in zip(sigs, per_sig):
+            if b:
+                s["boundArgs"] = b
+                n += len(b)
     return idl, n, list(dict.fromkeys(drift))
