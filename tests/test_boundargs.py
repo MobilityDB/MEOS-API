@@ -7,11 +7,12 @@ input-side sibling of ``shape.outParams``.
 
 Plain unittest, no pytest dependency; writes a tiny synthetic wrapper tree.
 """
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from parser.boundargs import extract_wrappers, merge_boundargs
+from parser.boundargs import extract_wrappers, merge_boundargs, resolve_bound_names
 
 # A synthetic MobilityDB wrapper source (mobilitydb/src/**/*.c shape).
 SAMPLE = '''
@@ -508,6 +509,80 @@ class GuardedDefaultTests(unittest.TestCase):
              "sqlSignatures": [{"args": ["tgeompoint"], "ret": "geometry"}]})
         self.assertNotIn("shape", idl["functions"][0])
         self.assertEqual(n, 0)
+
+
+class BoundNameValueTests(unittest.TestCase):
+    """A bound literal naming a macro of a header the parse did not read gets its value."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        # The family of a recorded macro comes from MobilityDB's ALL list, read from the
+        # checkout MDB_SRC_ROOT names, as provisioning exports it.
+        (Path(self.tmp.name) / "CMakeLists.txt").write_text(
+            "if(ALL)\n  foreach(_family H3 POINTCLOUD)\n  endforeach()\nendif()\n")
+        self._root = os.environ.get("MDB_SRC_ROOT")
+        os.environ["MDB_SRC_ROOT"] = self.tmp.name
+        self._clear_family_caches()
+        inc = Path(self.tmp.name) / "include" / "temporal"
+        inc.mkdir(parents=True)
+        (inc / "temporal.h").write_text(
+            "#define REST_AT         true\n"
+            "#define REST_MINUS      false\n"
+            "#define OUT_DEFAULT_DECIMAL_DIGITS 15   /* digits */\n"
+            "#define SHADOWED 1\n"
+            "#define GUARDED(x) (x)\n")
+        (inc / "other.h").write_text("#define SHADOWED 2\n")
+
+    def tearDown(self):
+        if self._root is None:
+            os.environ.pop("MDB_SRC_ROOT", None)
+        else:
+            os.environ["MDB_SRC_ROOT"] = self._root
+        self._clear_family_caches()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _clear_family_caches():
+        from parser.extractors import _guard_families
+        from parser.families import all_families, header_family, subdir_family
+        for cached in (all_families, subdir_family, header_family, _guard_families):
+            cached.cache_clear()
+
+    def _resolve(self):
+        idl = {"macros": [{"name": "WKB_NDR", "value": 8}],
+               "enums": [{"name": "interpType", "values": [{"name": "LINEAR", "value": 3}]}],
+               "functions": [
+                   {"name": "temporal_restrict_value", "params": [],
+                    "sqlSignatures": [
+                        {"args": ["tint", "integer"], "boundArgs": {"atfunc": "REST_AT"}},
+                        {"args": ["tint", "integer"], "boundArgs": {"atfunc": "REST_MINUS"}}]},
+                   {"name": "tbox_out", "params": [],
+                    "shape": {"boundArgs": {
+                        "maxdd": "OUT_DEFAULT_DECIMAL_DIGITS", "variant": "WKB_NDR",
+                        "interp": "LINEAR", "s": "NULL", "x": "SHADOWED", "y": "GUARDED",
+                        "z": "MISSING"}}}]}
+        return resolve_bound_names(idl, Path(self.tmp.name) / "include")
+
+    def test_names_gain_their_values(self):
+        idl, n, _ = self._resolve()
+        vals = {m["name"]: m["value"] for m in idl["macros"]}
+        self.assertIs(vals["REST_AT"], True)
+        self.assertIs(vals["REST_MINUS"], False)
+        self.assertEqual(vals["OUT_DEFAULT_DECIMAL_DIGITS"], 15)
+        self.assertEqual(n, 3)
+
+    def test_known_names_and_null_are_not_recorded(self):
+        idl, _, _ = self._resolve()
+        names = [m["name"] for m in idl["macros"]]
+        self.assertEqual(names.count("WKB_NDR"), 1)
+        self.assertNotIn("LINEAR", names)
+        self.assertNotIn("NULL", names)
+
+    def test_names_without_one_literal_stay_unresolved(self):
+        # SHADOWED is defined twice with different values, GUARDED is function-like and
+        # MISSING has no definition
+        _, _, unresolved = self._resolve()
+        self.assertEqual(unresolved, ["GUARDED", "MISSING", "SHADOWED"])
 
 
 if __name__ == "__main__":

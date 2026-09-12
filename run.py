@@ -13,7 +13,7 @@ from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
-from parser.boundargs import merge_boundargs
+from parser.boundargs import merge_boundargs, resolve_bound_names
 from parser.enrich import enrich_idl
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
@@ -285,6 +285,14 @@ def main():
                   f"(neither caller arg, out-param, nor literal — inspect):", file=sys.stderr)
             for fn, pn, reason in ba_drift:
                 print(f"          {fn}({pn}) — {reason}", file=sys.stderr)
+        # A bound literal can name a macro of a header the parse does not read (the
+        # installed headers carry none of temporal/temporal.h); its value comes from the
+        # source headers, so the catalog states what every bound literal is.
+        idl, nbv, bv_unresolved = resolve_bound_names(idl, SRC_ROOT / "meos" / "include")
+        print(f"      Macro values of bound literal names: {nbv}", file=sys.stderr)
+        if bv_unresolved:
+            print(f"      ⚠ {len(bv_unresolved)} bound literal name(s) without a value: "
+                  f"{', '.join(bv_unresolved)}", file=sys.stderr)
 
 
     # Surface any forward-declared external ABI struct pointer in the API, so a

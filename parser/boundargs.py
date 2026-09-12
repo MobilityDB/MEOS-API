@@ -414,3 +414,77 @@ def merge_boundargs(idl: dict, mdb_src: str | Path,
                 s["boundArgs"] = b
                 n += len(b)
     return idl, n, list(dict.fromkeys(drift))
+
+
+# `#define NAME <literal>`: an object-like macro whose body is one integer, float or
+# boolean literal, the form every bound flag and default takes (`#define REST_AT true`,
+# `#define OUT_DEFAULT_DECIMAL_DIGITS 15`). A function-like macro has `(` right after its
+# name and does not match.
+_DEFINE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(?P<name>[A-Z][A-Z0-9_]*)[ \t]+"
+                     r"(?P<val>[^\s/]+)[ \t]*(?:/[*/].*)?$", re.M)
+
+
+def _define_value(tok: str):
+    """The JSON value of a macro body, or None when it is not a single literal."""
+    if tok in ("true", "TRUE"):
+        return True
+    if tok in ("false", "FALSE"):
+        return False
+    try:
+        return int(tok, 0)
+    except ValueError:
+        pass
+    try:
+        return float(tok)
+    except ValueError:
+        return None
+
+
+def resolve_bound_names(idl: dict, include_root: str | Path) -> tuple[dict, int, list]:
+    """Carry in ``idl["macros"]`` the value of every macro a bound literal names.
+
+    A ``boundArgs`` value can be a macro name (``atfunc: REST_AT``, ``maxdd:
+    OUT_DEFAULT_DECIMAL_DIGITS``) defined in a header the parse does not read: the installed
+    headers a libmeos build parses carry none of ``temporal/temporal.h``, so a binding
+    generator reading that catalog finds the name and no value for it. Each name that is
+    neither a catalog macro nor an enum member is looked up among the ``#define`` lines of
+    the MEOS source headers under ``include_root`` and, when every definition gives it the
+    same single literal, recorded as a macro with that value (``true`` and ``false`` as
+    booleans).
+
+    Returns ``(idl, count, unresolved)``: the number of names recorded, and the names left
+    without a value (no definition, a body that is not one literal, or definitions that
+    disagree)."""
+    from parser.extractors import _family_of
+    known = {m["name"] for m in idl.get("macros", [])}
+    known |= {v["name"] for e in idl.get("enums", []) for v in e.get("values") or []
+              if isinstance(v, dict)}
+    wanted = set()
+    for f in idl.get("functions", []):
+        maps = [(f.get("shape") or {}).get("boundArgs") or {}]
+        maps += [s.get("boundArgs") or {} for s in f.get("sqlSignatures") or []]
+        for b in maps:
+            wanted |= {v for v in b.values()
+                       if _ENUM.match(v) and v not in ("NULL", "TRUE", "FALSE")
+                       and v not in known}
+    defs: dict[str, list] = {}
+    for h in sorted(Path(include_root).rglob("*.h")):
+        text = h.read_text(errors="ignore")
+        for m in _DEFINE.finditer(text):
+            if m.group("name") in wanted:
+                line = text.count("\n", 0, m.start()) + 1
+                defs.setdefault(m.group("name"), []).append(
+                    (_define_value(m.group("val")), h, line))
+    n, unresolved = 0, []
+    for name in sorted(wanted):
+        vals = [v for v, _, _ in defs.get(name, [])]
+        if not vals or None in vals or any(type(v) is not type(vals[0]) or v != vals[0]
+                                           for v in vals):
+            unresolved.append(name)
+            continue
+        val, h, line = defs[name][0]
+        idl.setdefault("macros", []).append({
+            "name": name, "file": h.name, "family": _family_of(str(h), line),
+            "vendored": False, "value": val})
+        n += 1
+    return idl, n, unresolved
