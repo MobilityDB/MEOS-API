@@ -272,7 +272,9 @@ def main():
         # sibling of `shape.outParams`, so a binding emits the literal it can no
         # longer read off the (narrower) SQL signature. A function whose wrappers
         # bind different literals (one per operand order) carries them on each SQL
-        # signature instead. Needs `mdbC` and `sqlSignatures` (step 4).
+        # signature instead, and so does the literal a wrapper starts a local from when
+        # it reads argument k only under `PG_NARGS() > k`: it is what a signature
+        # stating at most k arguments passes. Needs `mdbC` and `sqlSignatures` (step 4).
         idl, nba, ba_drift = merge_boundargs(idl, MDB_SRC,
                                              extract_param_names(_doxy_root),
                                              sql_src=SQL_SRC, meos_src=MEOS_SRC)

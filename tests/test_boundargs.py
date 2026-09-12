@@ -375,5 +375,140 @@ class SiblingWrapperTests(unittest.TestCase):
         self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], {"invert": "INVERT"})
 
 
+GUARDED_WRAPPERS = '''
+Datum
+Tspatial_as_text_common(FunctionCallInfo fcinfo, bool extended)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  int dbl_dig_for_wkt = OUT_DEFAULT_DECIMAL_DIGITS;
+  if (PG_NARGS() > 1 && ! PG_ARGISNULL(1))
+    dbl_dig_for_wkt = PG_GETARG_INT32(1);
+  char *str = extended ? tspatial_as_ewkt(temp, dbl_dig_for_wkt) :
+    tspatial_as_text(temp, dbl_dig_for_wkt);
+  PG_RETURN_TEXT_P(cstring_to_text(str));
+}
+
+Datum
+Tspatial_as_ewkt(PG_FUNCTION_ARGS)
+{
+  return Tspatial_as_text_common(fcinfo, true);
+}
+
+Datum
+Tgeo_scale(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  double scale = PG_GETARG_FLOAT8(1);
+  GSERIALIZED *sorigin = NULL;
+  if (PG_NARGS() > 2 && !PG_ARGISNULL(2))
+  {
+    sorigin = PG_GETARG_GSERIALIZED_P(2);
+  }
+  Temporal *result = tgeo_scale(temp, scale, sorigin);
+  PG_RETURN_TEMPORAL_P(result);
+}
+
+Datum
+Tgeo_interp(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  interpType interp = STEP;
+  if (PG_NARGS() > 1 && ! PG_ARGISNULL(1))
+    interp = PG_GETARG_INT32(1);
+  else
+    interp = LINEAR;
+  Temporal *result = tgeo_interp(temp, interp);
+  PG_RETURN_TEMPORAL_P(result);
+}
+
+Datum
+Tgeo_union(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  bool unary_union = temptype_supports_linear(temp->temptype);
+  if (PG_NARGS() > 1 && ! PG_ARGISNULL(1))
+    unary_union = PG_GETARG_BOOL(1);
+  GSERIALIZED *result = tgeo_union(temp, unary_union);
+  PG_RETURN_GSERIALIZED_P(result);
+}
+'''
+
+
+class GuardedDefaultTests(unittest.TestCase):
+    """A local the wrapper reads from argument k only when the call carries it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        src = Path(self.tmp.name) / "src"
+        src.mkdir()
+        (src / "guarded.c").write_text(GUARDED_WRAPPERS)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _merge(self, func):
+        return merge_boundargs({"functions": [func]}, self.tmp.name)
+
+    def test_signature_omitting_the_argument_carries_the_default(self):
+        idl, n, drift = self._merge(
+            {"name": "tspatial_as_ewkt", "mdbC": "Tspatial_as_ewkt",
+             "params": [{"name": "temp"}, {"name": "maxdd"}],
+             "sqlSignatures": [{"args": ["tgeompoint", "integer"], "ret": "text"},
+                               {"args": ["th3index"], "ret": "text"}]})
+        f = idl["functions"][0]
+        self.assertEqual([s.get("boundArgs") for s in f["sqlSignatures"]],
+                         [None, {"maxdd": "OUT_DEFAULT_DECIMAL_DIGITS"}])
+        self.assertNotIn("boundArgs", f.get("shape", {}))
+        self.assertEqual((n, drift), (1, []))
+
+    def test_every_signature_omitting_it_keeps_the_function_level_map(self):
+        idl, n, _ = self._merge(
+            {"name": "tspatial_as_ewkt", "mdbC": "Tspatial_as_ewkt",
+             "params": [{"name": "temp"}, {"name": "maxdd"}],
+             "sqlSignatures": [{"args": ["th3index"], "ret": "text"},
+                               {"args": ["tquadbin"], "ret": "text"}]})
+        f = idl["functions"][0]
+        self.assertEqual(f["shape"]["boundArgs"], {"maxdd": "OUT_DEFAULT_DECIMAL_DIGITS"})
+        self.assertFalse([s for s in f["sqlSignatures"] if "boundArgs" in s])
+
+    def test_every_signature_stating_it_binds_nothing(self):
+        idl, n, _ = self._merge(
+            {"name": "tspatial_as_ewkt", "mdbC": "Tspatial_as_ewkt",
+             "params": [{"name": "temp"}, {"name": "maxdd"}],
+             "sqlSignatures": [{"args": ["tgeompoint", "integer"], "ret": "text"}]})
+        f = idl["functions"][0]
+        self.assertNotIn("shape", f)
+        self.assertEqual(n, 0)
+
+    def test_guarded_block_and_null_initializer(self):
+        idl, _, _ = self._merge(
+            {"name": "tgeo_scale", "mdbC": "Tgeo_scale",
+             "params": [{"name": "temp"}, {"name": "scale"}, {"name": "sorigin"}],
+             "sqlSignatures": [{"args": ["tgeometry", "float"], "ret": "tgeometry"},
+                               {"args": ["tgeometry", "float", "geometry"],
+                                "ret": "tgeometry"}]})
+        f = idl["functions"][0]
+        self.assertEqual([s.get("boundArgs") for s in f["sqlSignatures"]],
+                         [{"sorigin": "NULL"}, None])
+
+    def test_assignment_outside_the_guard_is_not_a_default(self):
+        # the else branch assigns LINEAR when the argument is omitted, so STEP is not what
+        # the call reads
+        idl, n, _ = self._merge(
+            {"name": "tgeo_interp", "mdbC": "Tgeo_interp",
+             "params": [{"name": "temp"}, {"name": "interp"}],
+             "sqlSignatures": [{"args": ["tgeompoint"], "ret": "tgeompoint"}]})
+        self.assertNotIn("shape", idl["functions"][0])
+        self.assertEqual(n, 0)
+
+    def test_computed_initializer_is_not_a_default(self):
+        idl, n, _ = self._merge(
+            {"name": "tgeo_union", "mdbC": "Tgeo_union",
+             "params": [{"name": "temp"}, {"name": "unary_union"}],
+             "sqlSignatures": [{"args": ["tgeompoint"], "ret": "geometry"}]})
+        self.assertNotIn("shape", idl["functions"][0])
+        self.assertEqual(n, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
