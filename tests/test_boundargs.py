@@ -244,5 +244,136 @@ class BoundArgsTests(unittest.TestCase):
         self.assertIn(("foo_from_array", "count", "unclassified-arg: count"), drift)
 
 
+SIBLING_WRAPPERS = '''
+Datum
+Concat_jsonb_jsonbset(PG_FUNCTION_ARGS)
+{
+  Jsonb *jb = PG_GETARG_JSONB_P(0);
+  Set *s = PG_GETARG_SET_P(1);
+  Set *result = concat_jsonbset_jsonb(s, jb, INVERT);
+  PG_RETURN_SET_P(result);
+}
+
+Datum
+Concat_jsonbset_jsonb(PG_FUNCTION_ARGS)
+{
+  Set *s = PG_GETARG_SET_P(0);
+  Jsonb *jb = PG_GETARG_JSONB_P(1);
+  Set *result = concat_jsonbset_jsonb(s, jb, INVERT_NO);
+  PG_RETURN_SET_P(result);
+}
+
+Datum
+Round_left(PG_FUNCTION_ARGS)
+{
+  Set *s = PG_GETARG_SET_P(0);
+  Set *result = set_round_to(s, 6);
+  PG_RETURN_SET_P(result);
+}
+
+Datum
+Round_right(PG_FUNCTION_ARGS)
+{
+  Set *s = PG_GETARG_SET_P(0);
+  Set *result = set_round_to(s, 6);
+  PG_RETURN_SET_P(result);
+}
+'''
+
+SIBLING_SQL = '''
+CREATE FUNCTION setConcat(jsonb, jsonbset)
+  RETURNS jsonbset
+  AS 'MODULE_PATHNAME', 'Concat_jsonb_jsonbset'
+  LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION setConcat(jsonbset, jsonb)
+  RETURNS jsonbset
+  AS 'MODULE_PATHNAME', 'Concat_jsonbset_jsonb'
+  LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION roundLeft(floatset)
+  RETURNS floatset
+  AS 'MODULE_PATHNAME', 'Round_left'
+  LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION roundRight(floatset)
+  RETURNS floatset
+  AS 'MODULE_PATHNAME', 'Round_right'
+  LANGUAGE C IMMUTABLE STRICT;
+'''
+
+SIBLING_MEOS = '''
+/**
+ * @brief Concatenate a JSONB value to every element of a JSONB set
+ * @csqlfn #Concat_jsonb_jsonbset() #Concat_jsonbset_jsonb()
+ */
+Set *
+concat_jsonbset_jsonb(const Set *s, const Jsonb *jb, bool invert)
+{
+  return NULL;
+}
+
+/**
+ * @brief Round the elements of a set
+ * @csqlfn #Round_left() #Round_right()
+ */
+Set *
+set_round_to(const Set *s, int maxdd)
+{
+  return NULL;
+}
+'''
+
+
+class SiblingWrapperTests(unittest.TestCase):
+    """One MEOS function behind two wrappers, one per SQL signature."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        for sub, name, text in (("src", "concat.c", SIBLING_WRAPPERS),
+                                ("sql", "concat.in.sql", SIBLING_SQL),
+                                ("meos", "concat_meos.c", SIBLING_MEOS)):
+            (root / sub).mkdir()
+            (root / sub / name).write_text(text)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _merge(self):
+        root = Path(self.tmp.name)
+        idl = {"functions": [
+            {"name": "concat_jsonbset_jsonb", "mdbC": "Concat_jsonb_jsonbset",
+             "sqlfn": "setConcat",
+             "params": [{"name": "s"}, {"name": "jb"}, {"name": "invert"}],
+             "sqlSignatures": [{"args": ["jsonb", "jsonbset"], "ret": "jsonbset"},
+                               {"args": ["jsonbset", "jsonb"], "ret": "jsonbset"}]},
+            {"name": "set_round_to", "mdbC": "Round_left", "sqlfn": "roundLeft",
+             "params": [{"name": "s"}, {"name": "maxdd"}],
+             "sqlSignatures": [{"args": ["floatset"], "ret": "floatset"},
+                               {"args": ["floatset"], "ret": "floatset",
+                                "sqlName": "roundRight"}]}]}
+        return merge_boundargs(idl, root / "src", sql_src=root / "sql",
+                               meos_src=root / "meos")
+
+    def test_each_signature_carries_its_own_wrappers_literal(self):
+        idl, n, drift = self._merge()
+        concat = idl["functions"][0]
+        self.assertEqual([s.get("boundArgs") for s in concat["sqlSignatures"]],
+                         [{"invert": "INVERT"}, {"invert": "INVERT_NO"}])
+        self.assertNotIn("boundArgs", concat.get("shape", {}))
+
+    def test_wrappers_that_agree_keep_the_function_level_map(self):
+        idl, n, drift = self._merge()
+        rnd = idl["functions"][1]
+        self.assertEqual(rnd["shape"]["boundArgs"], {"maxdd": "6"})
+        self.assertFalse([s for s in rnd["sqlSignatures"] if "boundArgs" in s])
+        self.assertEqual(n, 3)
+
+    def test_without_the_sources_only_the_primary_wrapper_is_read(self):
+        idl = {"functions": [
+            {"name": "concat_jsonbset_jsonb", "mdbC": "Concat_jsonb_jsonbset",
+             "params": [{"name": "s"}, {"name": "jb"}, {"name": "invert"}]}]}
+        idl, n, drift = merge_boundargs(idl, Path(self.tmp.name) / "src")
+        self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], {"invert": "INVERT"})
+
+
 if __name__ == "__main__":
     unittest.main()

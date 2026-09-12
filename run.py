@@ -270,11 +270,14 @@ def main():
         # it as a SQL argument (valueAtTimestamp hides `strict=true`). Capture those
         # bound literals from the wrapper body as `shape.boundArgs`, the input-side
         # sibling of `shape.outParams`, so a binding emits the literal it can no
-        # longer read off the (narrower) SQL signature. Needs `mdbC` (step 4).
+        # longer read off the (narrower) SQL signature. A function whose wrappers
+        # bind different literals (one per operand order) carries them on each SQL
+        # signature instead. Needs `mdbC` and `sqlSignatures` (step 4).
         idl, nba, ba_drift = merge_boundargs(idl, MDB_SRC,
-                                             extract_param_names(_doxy_root))
-        print(f"      Bound-literal args from PG wrappers `shape.boundArgs`: {nba}",
-              file=sys.stderr)
+                                             extract_param_names(_doxy_root),
+                                             sql_src=SQL_SRC, meos_src=MEOS_SRC)
+        print(f"      Bound-literal args from PG wrappers (`shape.boundArgs` and "
+              f"per-signature `boundArgs`): {nba}", file=sys.stderr)
         if ba_drift:
             print(f"      ⚠ {len(ba_drift)} wrapper call arg(s) unclassified "
                   f"(neither caller arg, out-param, nor literal — inspect):", file=sys.stderr)

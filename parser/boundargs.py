@@ -218,17 +218,63 @@ def _wrapper_bound(body: str, func: dict, drift: list,
     return bound
 
 
-def merge_boundargs(idl: dict, mdb_src: str | Path,
-                    documented: dict[str, set] | None = None) -> tuple[dict, int, list]:
-    """Fold wrapper-bound literals into each function's ``shape.boundArgs``.
+def _group_bound(body: str, group: list, helpers: dict, drift: list,
+                 documented: dict[str, set]) -> dict[str, str]:
+    """The literals wrapper ``body`` binds, keyed by parameter name, read from its call to
+    whichever member of ``group`` it names (branches such as the RGEO ternary agree, and
+    the first wins), or from its delegation to a shared helper when it names none."""
+    bound: dict[str, str] = {}
+    for func in group:
+        for k, v in _wrapper_bound(body, func, drift, documented).items():
+            bound.setdefault(k, v)
+    if bound:
+        return bound
+    # The wrapper names no MEOS call of its own: it delegates, and the literal it binds
+    # sits at that delegation.
+    hbody, subst = _delegated(body, helpers)
+    if hbody is not None:
+        for func in group:
+            for k, v in _wrapper_bound(hbody, func, drift, documented, subst).items():
+                bound.setdefault(k, v)
+    return bound
 
-    Functions are grouped by the PG wrapper they share (``mdbC``). Every function in a
-    group has the SAME SQL contract, so a literal the wrapper binds (keyed by parameter
-    name) applies to ALL of them — crucially the per-base-type collapse siblings
-    (``tbool``/``tint``/… ``_value_at_timestamptz``) that a binding dispatches to for a
-    typed result but that the wrapper never calls by name (it calls the generic
-    ``temporal_value_at_timestamptz``). Only members that actually own a parameter of that
-    name receive the literal.
+
+def _signature_wrapper(func: dict, sig: dict, claimed: list, w2sig: dict) -> str | None:
+    """The wrapper whose CREATE FUNCTION states ``sig``: the first of ``claimed`` that
+    registers it, as ``attach_sqlfn_map`` keeps the first of two wrappers registering
+    the same overload. None when no claimed wrapper states it."""
+    key = (sig.get("sqlName") or func.get("sqlfn"), tuple(sig.get("args") or ()),
+           sig.get("ret"))
+    for w in claimed:
+        for s in w2sig.get(w) or ():
+            if (s["sqlName"], tuple(s["args"]), s["ret"]) == key:
+                return w
+    return None
+
+
+def merge_boundargs(idl: dict, mdb_src: str | Path,
+                    documented: dict[str, set] | None = None,
+                    sql_src: str | Path | None = None,
+                    meos_src: str | Path | None = None) -> tuple[dict, int, list]:
+    """Fold wrapper-bound literals into ``shape.boundArgs`` or, where a function's
+    wrappers disagree, into each SQL signature's ``boundArgs``.
+
+    Every function sharing a PG wrapper has the SAME SQL contract, so a literal the
+    wrapper binds (keyed by parameter name) applies to all of them — crucially the
+    per-base-type collapse siblings (``tbool``/``tint``/… ``_value_at_timestamptz``) that
+    a binding dispatches to for a typed result but that the wrapper never calls by name
+    (it calls the generic ``temporal_value_at_timestamptz``). Only members that actually
+    own a parameter of that name receive the literal.
+
+    One MEOS function can back several wrappers, one per operand order or per
+    ever/always half, and each binds its own literals: ``Concat_jsonb_jsonbset`` passes
+    ``invert`` as ``INVERT`` and ``Concat_jsonbset_jsonb`` as ``INVERT_NO``. Given
+    ``sql_src`` and ``meos_src``, every wrapper a function's ``@csqlfn`` names is read and
+    each SQL signature is traced to the wrapper whose CREATE FUNCTION states it.
+    ``shape.boundArgs`` holds the literals when every one of those wrappers binds the
+    same ones, as ``sqlReturnType`` holds a return only when every overload agrees;
+    otherwise the function-level map is absent and each signature carries its own
+    wrapper's literals as ``boundArgs``. Without the two sources only ``mdbC`` is read.
 
     Returns ``(idl, count, drift)`` where ``drift`` lists
     ``(function, param, reason)`` call arguments the pass could not classify as a
@@ -239,43 +285,43 @@ def merge_boundargs(idl: dict, mdb_src: str | Path,
     its ``@param``-documented parameter names; a bare identifier bound to one of those is a
     caller-read / derived value and is skipped, so drift is confined to genuinely
     undocumented parameters."""
+    from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs
     documented = documented or {}
     wrappers = extract_wrappers(mdb_src)
     helpers = extract_helpers(mdb_src)
-    n = 0
+    m2d = _meos_to_mdb(meos_src) if meos_src else {}
+    w2sig = _wrapper_sql_sigs(sql_src) if sql_src else {}
     drift: list[tuple[str, str, str]] = []
+    claimed: dict[str, list] = {}
     groups: dict[str, list] = {}
     for func in idl["functions"]:
-        w = func.get("mdbC")
-        if w:
+        primary = func.get("mdbC")
+        if not primary:
+            continue
+        ws = [primary] + [w for w in m2d.get(func["name"]) or () if w != primary]
+        claimed[func["name"]] = ws
+        for w in ws:
             groups.setdefault(w, []).append(func)
-    for wname, group in groups.items():
-        body = wrappers.get(wname)
-        if body is None:
+    wbound = {w: _group_bound(wrappers[w], group, helpers, drift, documented)
+              for w, group in groups.items() if w in wrappers}
+    n = 0
+    for func in idl["functions"]:
+        ws = claimed.get(func["name"])
+        if not ws:
             continue
-        # the wrapper's bound literals, keyed by param name, from whichever group member(s)
-        # the wrapper calls by name (branches — e.g. the RGEO ternary — agree, first wins)
-        wbound: dict[str, str] = {}
-        for func in group:
-            for k, v in _wrapper_bound(body, func, drift, documented).items():
-                wbound.setdefault(k, v)
-        if not wbound:
-            # The wrapper names no MEOS call of its own: it delegates, and the literal it
-            # binds sits at that delegation. `mdbC` names ONE wrapper per catalog entry, so
-            # the sibling that binds the opposite literal is a different entry and the two
-            # never merge.
-            hbody, subst = _delegated(body, helpers)
-            if hbody is None:
-                continue
-            for func in group:
-                for k, v in _wrapper_bound(hbody, func, drift, documented, subst).items():
-                    wbound.setdefault(k, v)
-        if not wbound:
-            continue
-        for func in group:
-            pnames = {p.get("name") for p in func.get("params", [])}
-            bound = {k: v for k, v in wbound.items() if k in pnames}
+        pnames = {p.get("name") for p in func.get("params", [])}
+        own = {w: {k: v for k, v in (wbound.get(w) or {}).items() if k in pnames}
+               for w in ws}
+        sigs = func.get("sqlSignatures") or []
+        sig_ws = [_signature_wrapper(func, s, ws, w2sig) or ws[0] for s in sigs] or ws[:1]
+        if len({tuple(sorted(own[w].items())) for w in sig_ws}) == 1:
+            bound = own[sig_ws[0]]
             if bound:
                 func.setdefault("shape", {})["boundArgs"] = bound
                 n += len(bound)
-    return idl, n, drift
+            continue
+        for s, w in zip(sigs, sig_ws):
+            if own[w]:
+                s["boundArgs"] = own[w]
+                n += len(own[w])
+    return idl, n, list(dict.fromkeys(drift))
