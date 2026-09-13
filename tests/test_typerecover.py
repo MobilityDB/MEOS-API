@@ -168,15 +168,23 @@ class TypeRecoverTests(unittest.TestCase):
 
     def test_cell_id_canonical_normalized_uniform(self):
         # H3Index (libh3's typedef, whose fully-resolved canonical is the platform
-        # "unsigned long") and Quadbin (MobilityDB's typedef, recovered to "uint64_t")
-        # are BOTH uint64 cell ids; as Tcell<T> subtypes they must be spelled identically.
-        # The ``canonical`` field must normalize to "uint64_t" for both, not leave H3Index
-        # at "unsigned long" — a guard on the _CANON_ALIAS canonical-normalization pass.
+        # "unsigned long"), Quadbin and S2CellId (MobilityDB's typedefs, recovered to
+        # "uint64_t") are ALL uint64 cell ids; as Tcell<T> subtypes they must be spelled
+        # identically. The ``canonical`` field must normalize to "uint64_t" for each, not
+        # leave one at "unsigned long" — a guard on the _CANON_ALIAS canonical-normalization
+        # pass.
         for name in ("th3index_start_value", "th3index_end_value",
-                     "tquadbin_start_value", "tquadbin_end_value", "h3index_in"):
+                     "tquadbin_start_value", "tquadbin_end_value", "h3index_in",
+                     "ts2cell_start_value", "ts2cell_end_value", "s2cell_in"):
             rt = self.by_name[name]["returnType"]
             self.assertEqual(rt["c"], "uint64_t", f"{name} c")
             self.assertEqual(rt["canonical"], "uint64_t", f"{name} canonical")
+        # An array of cell ids is an array of by-value uint64_t, whichever cell
+        # typedef the header spells it with.
+        for name in ("th3index_values", "tquadbin_values", "ts2cell_values"):
+            rt = self.by_name[name]["returnType"]
+            self.assertEqual(rt["c"], "uint64_t *", f"{name} c")
+            self.assertEqual(rt["canonical"], "uint64_t *", f"{name} canonical")
 
     def test_typedef_canonical_not_platform_resolved(self):
         # ``canonical`` is the MEOS typedef its ``cType`` names, never libclang's
