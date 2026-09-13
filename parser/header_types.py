@@ -36,10 +36,10 @@ _SCALARS = {
     "uint64", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t",
     "uint16_t", "uint32_t", "uint64_t", "TimestampTz", "TimeADT",
     "DateADT", "Timestamp", "Datum", "meosType", "interpType",
-    # H3Index / Quadbin are uint64 cell ids: typerecover resolves them to
-    # uint64_t, so treat them as scalars here and leave that recovery intact
-    # rather than restoring the opaque spelling from the header source.
-    "H3Index", "Quadbin",
+    # H3Index / Quadbin / S2CellId are uint64 cell ids: typerecover resolves
+    # them to uint64_t, so treat them as scalars here and leave that recovery
+    # intact rather than restoring the opaque spelling from the header source.
+    "H3Index", "Quadbin", "S2CellId",
 }
 
 

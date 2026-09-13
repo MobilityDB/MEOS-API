@@ -44,6 +44,7 @@ _TYPE_MAP = {
     "TimestampTz": "TimestampTz",
     "H3Index": "uint64_t",
     "Quadbin": "uint64_t",
+    "S2CellId": "uint64_t",
     "text": "text",
     "GSERIALIZED": "GSERIALIZED",
     "Interval": "Interval",
