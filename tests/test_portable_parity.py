@@ -47,7 +47,7 @@ class ParityLogicTests(unittest.TestCase):
         self.assertEqual(nad["via"], "explicit")
         self.assertNotIn("nearestApproachDistance", r["unbacked"])
         self.assertEqual(r["byBareName"]["overlaps"]["family"], "topology")
-        self.assertEqual(r["byBareName"]["tEq"]["operator"], "#=")
+        self.assertEqual(r["byBareName"]["tEqual"]["operator"], "#=")
 
     def test_every_bare_name_classified(self):
         r = build_parity(_catalog([]))            # nothing backs anything

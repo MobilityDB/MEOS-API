@@ -98,28 +98,28 @@
       }
     ],
     "temporalComparison": [
-      { "operator": "#=",  "bareName": "tEq" },
-      { "operator": "#<>", "bareName": "tNe" },
-      { "operator": "#<",  "bareName": "tLt" },
-      { "operator": "#<=", "bareName": "tLe" },
-      { "operator": "#>",  "bareName": "tGt" },
-      { "operator": "#>=", "bareName": "tGe" }
+      { "operator": "#=",  "bareName": "tEqual" },
+      { "operator": "#<>", "bareName": "tNotEqual" },
+      { "operator": "#<",  "bareName": "tLessThan" },
+      { "operator": "#<=", "bareName": "tLessEqual" },
+      { "operator": "#>",  "bareName": "tGreaterThan" },
+      { "operator": "#>=", "bareName": "tGreaterEqual" }
     ],
     "everComparison": [
-      { "operator": "?=",  "bareName": "eEq" },
-      { "operator": "?<>", "bareName": "eNe" },
-      { "operator": "?<",  "bareName": "eLt" },
-      { "operator": "?<=", "bareName": "eLe" },
-      { "operator": "?>",  "bareName": "eGt" },
-      { "operator": "?>=", "bareName": "eGe" }
+      { "operator": "?=",  "bareName": "eEqual" },
+      { "operator": "?<>", "bareName": "eNotEqual" },
+      { "operator": "?<",  "bareName": "eLessThan" },
+      { "operator": "?<=", "bareName": "eLessEqual" },
+      { "operator": "?>",  "bareName": "eGreaterThan" },
+      { "operator": "?>=", "bareName": "eGreaterEqual" }
     ],
     "alwaysComparison": [
-      { "operator": "%=",  "bareName": "aEq" },
-      { "operator": "%<>", "bareName": "aNe" },
-      { "operator": "%<",  "bareName": "aLt" },
-      { "operator": "%<=", "bareName": "aLe" },
-      { "operator": "%>",  "bareName": "aGt" },
-      { "operator": "%>=", "bareName": "aGe" }
+      { "operator": "%=",  "bareName": "aEqual" },
+      { "operator": "%<>", "bareName": "aNotEqual" },
+      { "operator": "%<",  "bareName": "aLessThan" },
+      { "operator": "%<=", "bareName": "aLessEqual" },
+      { "operator": "%>",  "bareName": "aGreaterThan" },
+      { "operator": "%>=", "bareName": "aGreaterEqual" }
     ],
     "distance": [
       {
