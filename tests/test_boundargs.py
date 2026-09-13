@@ -376,6 +376,89 @@ class SiblingWrapperTests(unittest.TestCase):
         self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], {"invert": "INVERT"})
 
 
+GENERIC_WRAPPERS = '''
+Datum
+Numset_shift(PG_FUNCTION_ARGS)
+{
+  Set *s = PG_GETARG_SET_P(0);
+  Datum shift = PG_GETARG_DATUM(1);
+  Set *result = numset_shift_scale(s, shift, 0, true, false);
+  PG_FREE_IF_COPY(s, 0);
+  PG_RETURN_SET_P(result);
+}
+
+Datum
+Numset_round(PG_FUNCTION_ARGS)
+{
+  Set *s = PG_GETARG_SET_P(0);
+  Set *result = numset_round_any(s, 3);
+  PG_RETURN_SET_P(result);
+}
+'''
+
+GENERIC_MEOS = '''
+/**
+ * @brief Return a number set shifted and/or scaled
+ */
+Set *
+numset_shift_scale(const Set *s, Datum shift, Datum width, bool hasshift,
+  bool haswidth)
+{
+  return NULL;
+}
+
+/**
+ * @brief Return a number set rounded
+ */
+Set *
+numset_round_any(const Set *s, int ndigits)
+{
+  return NULL;
+}
+'''
+
+
+class GenericTwinTests(unittest.TestCase):
+    """A wrapper calling the internal generic its tagged typed functions wrap."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        for sub, name, text in (("src", "set.c", GENERIC_WRAPPERS),
+                                ("meos", "set.c", GENERIC_MEOS)):
+            (root / sub).mkdir()
+            (root / sub / name).write_text(text)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _idl(self):
+        shift = [{"name": "s"}, {"name": "shift"}, {"name": "width"},
+                 {"name": "hasshift"}, {"name": "haswidth"}]
+        return {"functions": [
+            {"name": "intset_shift_scale", "mdbC": "Numset_shift", "params": shift},
+            {"name": "floatset_shift_scale", "mdbC": "Numset_shift", "params": shift},
+            # the callee's parameters are not this member's, so it is not its generic
+            {"name": "floatset_round", "mdbC": "Numset_round",
+             "params": [{"name": "s"}, {"name": "maxdd"}]}]}
+
+    def test_the_generics_literals_bind_every_member_by_name(self):
+        root = Path(self.tmp.name)
+        idl, n, drift = merge_boundargs(self._idl(), root / "src", meos_src=root / "meos")
+        want = {"width": "0", "hasshift": "true", "haswidth": "false"}
+        self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], want)
+        self.assertEqual(idl["functions"][1]["shape"]["boundArgs"], want)
+
+    def test_a_callee_whose_parameters_differ_binds_nothing(self):
+        root = Path(self.tmp.name)
+        idl, n, drift = merge_boundargs(self._idl(), root / "src", meos_src=root / "meos")
+        self.assertNotIn("boundArgs", idl["functions"][2].get("shape", {}))
+
+    def test_without_the_meos_sources_the_generic_is_not_read(self):
+        idl, n, drift = merge_boundargs(self._idl(), Path(self.tmp.name) / "src")
+        self.assertNotIn("boundArgs", idl["functions"][0].get("shape", {}))
+
+
 GUARDED_WRAPPERS = '''
 Datum
 Tspatial_as_text_common(FunctionCallInfo fcinfo, bool extended)

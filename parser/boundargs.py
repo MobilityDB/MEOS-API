@@ -40,6 +40,15 @@ A wrapper can also supply the value of an argument the SQL signature omits:
 ``tspatial_as_ewkt(temp, OUT_DEFAULT_DECIMAL_DIGITS)``.  Such a local is recorded on
 each SQL signature stating at most ``k`` arguments, where it is the literal the MEOS
 call reads; a signature stating argument ``k`` passes the caller's value.
+
+A wrapper can reach the functions its ``@csqlfn`` tags name through an internal generic
+that none of them is: ``Numset_shift`` calls ``numset_shift_scale(s, shift, 0, true,
+false)``, while the tag names ``intset_shift_scale``, ``floatset_shift_scale`` and their
+siblings, each taking the generic's parameters under the same names in the same order.
+When a wrapper calls no member of its group and delegates to no helper, the MEOS
+definition of each function it calls is read, and a function whose parameter names equal
+a member's is the generic that member wraps: its literals bind to the member by parameter
+name.
 """
 from __future__ import annotations
 
@@ -173,6 +182,36 @@ def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
     return None, {}
 
 
+# A call to a lowercase C function, the form every MEOS function takes.
+_CALLEE = re.compile(r"\b(?P<name>[a-z][a-z0-9_]*)\s*\(")
+
+
+def _param_name(decl: str) -> str | None:
+    """The name a C parameter declaration introduces: ``const Set *s`` gives ``s``,
+    ``void (*fn)(void *)`` gives ``fn``; ``void`` and ``...`` introduce none."""
+    decl = decl.strip()
+    if not decl or decl in ("void", "..."):
+        return None
+    fp = re.search(r"\(\s*\*\s*(\w+)\s*\)", decl)
+    if fp:
+        return fp.group(1)
+    ids = re.findall(r"[A-Za-z_]\w*", decl.split("[")[0])
+    return ids[-1] if ids else None
+
+
+def extract_param_lists(meos_src: str | Path) -> dict[str, list[str]]:
+    """``{function: [parameter names, in order]}`` for every documented MEOS definition
+    under ``meos_src``, read with the definition pattern ``parser.outparam`` scans."""
+    from parser.outparam import _FUNC
+    out: dict[str, list[str]] = {}
+    for f in sorted(Path(meos_src).rglob("*.c")):
+        for m in _FUNC.finditer(f.read_text(errors="ignore")):
+            names = [_param_name(p) for p in _split_args(m.group("params"))]
+            if all(names):
+                out.setdefault(m.group("name"), names)
+    return out
+
+
 def _literal(arg: str) -> str | None:
     """Normalise a call argument to the literal to record, or None if not a literal."""
     if _TRUE.match(arg):
@@ -294,12 +333,13 @@ def _wrapper_bound(body: str, func: dict, drift: list,
 
 
 def _group_bound(body: str, group: list, helpers: dict, drift: list,
-                 documented: dict[str, set]):
+                 documented: dict[str, set], generics: dict | None = None):
     """``(bound, guarded)``: the literals wrapper ``body`` binds, keyed by parameter name,
     and the ``{param: (k, literal)}`` it supplies when the call omits argument ``k``, read
     from its call to whichever member of ``group`` it names (branches such as the RGEO
     ternary agree, and the first wins), or from its delegation to a shared helper when it
-    names none."""
+    names none, or from its call to the generic the members wrap when it does neither --
+    a function none of them is whose parameter names, in ``generics``, equal a member's."""
     bound: dict[str, str] = {}
     guarded: dict[str, tuple[int, str]] = {}
     for func in group:
@@ -316,6 +356,23 @@ def _group_bound(body: str, group: list, helpers: dict, drift: list,
             for k, v in _wrapper_bound(hbody, func, drift, documented, subst,
                                        guarded).items():
                 bound.setdefault(k, v)
+    if bound or guarded or not generics:
+        return bound, guarded
+    # The wrapper calls a generic its typed members wrap: a function none of them is,
+    # taking a member's parameters under the same names in the same order.
+    members = {tuple(p.get("name") for p in f.get("params", [])) for f in group}
+    names = {f["name"] for f in group}
+    for m in _CALLEE.finditer(body):
+        callee = m.group("name")
+        plist = generics.get(callee)
+        if callee in names or not plist or tuple(plist) not in members:
+            continue
+        twin = {"name": callee, "params": [{"name": n} for n in plist]}
+        for k, v in _wrapper_bound(body, twin, drift, documented,
+                                   guarded=guarded).items():
+            bound.setdefault(k, v)
+        if bound or guarded:
+            break
     return bound, guarded
 
 
@@ -382,7 +439,8 @@ def merge_boundargs(idl: dict, mdb_src: str | Path,
         claimed[func["name"]] = ws
         for w in ws:
             groups.setdefault(w, []).append(func)
-    wbound = {w: _group_bound(wrappers[w], group, helpers, drift, documented)
+    generics = extract_param_lists(meos_src) if meos_src else {}
+    wbound = {w: _group_bound(wrappers[w], group, helpers, drift, documented, generics)
               for w, group in groups.items() if w in wrappers}
     n = 0
     for func in idl["functions"]:
