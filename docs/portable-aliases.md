@@ -36,10 +36,10 @@ lookups for codegen:
 
 ```json
 "portableAliases": {
-  "byOperator": { "&&": "overlaps", "#=": "teq", "~=": "same", ... },
-  "byBareName": { "overlaps": "&&", "teq": "#=", "same": "~=", ... },
-  "bareNames":  ["above", "adjacent", ..., "tdistance", "tge", "tne"],
-  "count": 29, "provenance": {...}, "scope": {...}, "notes": [...]
+  "byOperator": { "&&": "overlaps", "#=": "tEqual", "~=": "same", ... },
+  "byBareName": { "overlaps": "&&", "tEqual": "#=", "same": "~=", ... },
+  "bareNames":  ["aEqual", "aGreaterEqual", ..., "tLessEqual", "tLessThan", "tNotEqual"],
+  "count": 41, "provenance": {...}, "scope": {...}, "notes": [...]
 }
 ```
 

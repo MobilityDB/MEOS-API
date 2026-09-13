@@ -40,8 +40,8 @@ class MappingFileTests(unittest.TestCase):
         for op, bn in [("&&", "overlaps"), ("@>", "contains"),
                        ("-|-", "adjacent"), ("<<#", "before"),
                        ("#&>", "overafter"), ("|&>", "overabove"),
-                       ("/&>", "overback"), ("#=", "tEq"), ("#<>", "tNe"),
-                       ("?=", "eEq"), ("%=", "aEq"),
+                       ("/&>", "overback"), ("#=", "tEqual"),
+                       ("#<>", "tNotEqual"), ("?=", "eEqual"), ("%=", "aEqual"),
                        ("|=|", "nearestApproachDistance"), ("~=", "same")]:
             self.assertEqual(flat[op], bn)
         self.assertEqual(sum(_EXPECTED_FAMILY_SIZES.values()), 41)
