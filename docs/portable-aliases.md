@@ -97,11 +97,13 @@ bare name against the catalog's function families (by the MEOS bare-name
 prefix convention), and every position operator against the family its
 position prefixes (`left_*`, `before_*`) with its SQL names by class, and
 writes `output/meos-portable-parity.json`. A bare name whose C family
-prefix differs is resolved through `explicitBacking` (`nearestApproachDistance`
-through `nad`, the `nad_*` family), and one that no entry resolves is
-flagged `needs-explicit-backing` — never silently dropped;
-`tests/test_portable_parity.py` gates this (no operator may be
-unclassified).
+prefix differs is backed by the functions whose `@sqlfn` is the bare name
+(`tEqual` by the `teq_*` family, `eEqual` by `ever_eq_*`, `tDistance` by
+`tdistance_*`), else through `explicitBacking` (`nearestApproachDistance`
+through `nad`, the `nad_*` family), and one that none of them resolves is
+flagged `needs-explicit-backing` — never silently dropped.
+`tests/test_portable_parity.py` gates this: no operator may be
+unclassified, and over a derived catalog every operator is backed.
 
 ## Provenance
 
