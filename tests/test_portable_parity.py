@@ -20,9 +20,11 @@ MAP = ROOT / "meta" / "portable-aliases.json"
 _CATALOG = ROOT / "output" / "meos-idl.json"
 
 
-def _catalog(fn_names):
+def _catalog(fns):
+    """A catalog of the given functions: a name, or a function record."""
     idl = attach_portable_aliases(
-        {"functions": [{"name": n} for n in fn_names]}, MAP)
+        {"functions": [f if isinstance(f, dict) else {"name": f}
+                       for f in fns]}, MAP)
     return idl
 
 
@@ -30,7 +32,10 @@ class ParityLogicTests(unittest.TestCase):
     def test_backed_vs_needs_explicit(self):
         cat = _catalog([
             "overlaps_span_span", "overlaps_tbox_tbox",   # backs `overlaps`
-            "teq_temporal_temporal",                       # backs `teq`
+            {"name": "teq_temporal_temporal",              # backs `tEqual`
+             "sqlfn": "tEqual"},                           # by its SQL name
+            {"name": "ever_eq_temporal_temporal"},         # no SQL name: backs
+                                                           # nothing
             "same",                                        # exact-name back
             "nad_tfloat_tfloat",                           # explicit backing
                                                            # of nearestApproach…
@@ -51,6 +56,13 @@ class ParityLogicTests(unittest.TestCase):
         self.assertNotIn("nearestApproachDistance", r["unbacked"])
         self.assertEqual(r["byBareName"]["overlaps"]["family"], "topology")
         self.assertEqual(r["byBareName"]["tEqual"]["operator"], "#=")
+        # a C family whose prefix differs is backed by the functions carrying
+        # the bare name as their @sqlfn, and only by those
+        teq = r["byBareName"]["tEqual"]
+        self.assertEqual(teq["status"], "backed")
+        self.assertEqual(teq["via"], "sqlfn")
+        self.assertEqual(teq["sample"], ["teq_temporal_temporal"])
+        self.assertIn("eEqual", r["unbacked"])
         # a position operator is backed by the MEOS family its position prefixes
         left = r["byPosition"]["<<"]
         self.assertEqual(left["status"], "backed")
@@ -100,6 +112,8 @@ class LiveParityGate(unittest.TestCase):
         self.assertEqual(
             r["backed"] + r["needsExplicitBacking"], r["total"])
         self.assertEqual(r["total"], 41)
+        # every operator of the contract is backed in the catalog
+        self.assertEqual(r["unbacked"] + r["unbackedPositions"], [])
 
 
 if __name__ == "__main__":

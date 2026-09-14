@@ -4,13 +4,14 @@
 #     python run.py                 # catalog with `portableAliases` + functions
 #     python tools/portable_parity.py     # -> output/meos-portable-parity.json
 #
-# For every canonical bare name (PR #8 / RFC #920) it reports the catalog
-# function family that backs it, by the MEOS bare-name prefix convention
-# (`overlaps_*`, `teq_*`, `same_*`, …). A bare name with no prefix match is
-# **not** asserted to be an API gap (some map through a different C prefix,
-# e.g. `nearestApproachDistance` ↔ `nad_*`): it is flagged
-# `needs-explicit-backing` so the cross-repo work can add an explicit
-# operator→C-family entry — an honest signal, never a fabricated verdict.
+# For every canonical bare name it reports the catalog functions that back it: by the MEOS bare-name prefix convention
+# (`overlaps_*`, `same_*`, …), else by the functions whose @sqlfn IS the bare
+# name (`tEqual` on the `teq_*` family, `eEqual` on `ever_eq_*`: the SQL name
+# MobilityDB declares for them), else by a verified `explicitBacking` prefix.
+# A bare name none of them resolves is **not** asserted to be an API gap: it
+# is flagged `needs-explicit-backing` so the cross-repo work can add an
+# explicit operator→C-family entry — an honest signal, never a fabricated
+# verdict.
 #
 # A position operator has no bare name: its SQL names are one per class
 # (`setLeft` … `stboxLeft`, the catalog's `positionNames`), and its MEOS C
@@ -34,6 +35,10 @@ def build_parity(catalog: dict) -> dict:
               for fam, lst in pa["families"].items() for p in lst}
     explicit = pa.get("explicitBacking", {})
     names = [f["name"] for f in catalog.get("functions", [])]
+    by_sqlfn = {}
+    for f in catalog.get("functions", []):
+        if f.get("sqlfn"):
+            by_sqlfn.setdefault(f["sqlfn"], []).append(f["name"])
 
     def _matches(prefix):
         return [n for n in names
@@ -42,6 +47,8 @@ def build_parity(catalog: dict) -> dict:
     by_bare = {}
     for bare, (fam, op) in sorted(fam_of.items()):
         hits, via = _matches(bare), "prefix"
+        if not hits:                          # the functions named by it in SQL
+            hits, via = list(by_sqlfn.get(bare, [])), "sqlfn"
         if not hits:                          # try the verified explicit map
             for pref in explicit.get(bare, []):
                 hits += _matches(pref)
