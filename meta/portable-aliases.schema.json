@@ -5,9 +5,10 @@
   "description": "Schema for `meta/portable-aliases.json` (RFC #920). Catches shape regressions earlier than the unit tests; validated as a test step in `tests/test_portable.py`.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["provenance", "families", "alreadyCanonical", "explicitBacking", "scope", "notes"],
+  "required": ["provenance", "families", "positionFamilies", "alreadyCanonical", "explicitBacking", "scope", "notes"],
   "properties": {
     "_comment": {"type": "string"},
+    "_positionFamiliesComment": {"type": "string"},
     "_explicitBackingComment": {"type": "string"},
 
     "provenance": {
@@ -35,6 +36,25 @@
           "properties": {
             "operator": {"type": "string", "minLength": 1, "maxLength": 8},
             "bareName": {"type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9]*$"}
+          }
+        }
+      }
+    },
+
+    "positionFamilies": {
+      "type": "object",
+      "description": "Position operators, whose SQL names are the class of their operands followed by the position (setLeft … stboxLeft). `position` is the stem the names and the MEOS C functions share; the catalog derives the names by class.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operator", "position"],
+          "properties": {
+            "operator": {"type": "string", "minLength": 1, "maxLength": 8},
+            "position": {"type": "string", "pattern": "^[a-z]+$"}
           }
         }
       }

@@ -17,7 +17,7 @@ python tools/portable_parity.py  # -> output/meos-portable-parity.json (bare-nam
 
 | Artifact | Contents |
 |---|---|
-| `meos-idl.json#/portableAliases` | canonical operator→bare-name dialect: `byOperator`, `byBareName`, `families`, `explicitBacking`, `scope` |
+| `meos-idl.json#/portableAliases` | canonical operator→bare-name dialect: `byOperator`, `byBareName`, `families`, `explicitBacking`, `scope`; the position operators' names by class: `positionFamilies`, `byPositionOperator`, `positionNames` (operator → class → SQL name) |
 | `meos-idl.json#/functions[].{network,wire,api}` | per-function projectability + decode/encode/array/out-param wire model |
 | `meos-idl.json#/temporalTypes` | per `Temporal<T>`: its `base`, its `bbox`, the `mfjson` type token `asMFJSON` writes, and the `number` / `spatial` / `linear` classes |
 | `meos-idl.json#/typeRelations/byBase` | each base type's `set`, `span`, `spanset` and its `temporal` types, the last a list since a base carries several |
@@ -31,7 +31,9 @@ python tools/portable_parity.py  # -> output/meos-portable-parity.json (bare-nam
 `portableAliases.byOperator` (drop type-qualified forms like
 `spanOverlaps`). Done = every operator in `byOperator` is callable by its
 bare name, parity-checked with the same prefix logic as
-`portable_parity.py`, **0 unbacked**.
+`portable_parity.py`, **0 unbacked**. A position operator registers its
+names by class from `portableAliases.positionNames` (`stboxLeft`,
+`tboxBefore`), which are the `sqlfn` of its functions.
 
 **PyMEOS, JMEOS, MEOS.NET** — code-generate from `meos-idl.json`
 (`functions` + `portableAliases`) so every binding emits **identical** bare

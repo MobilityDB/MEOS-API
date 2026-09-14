@@ -5,7 +5,8 @@ import subprocess
 from pathlib import Path
 
 from parser.parser import parse_all_headers, merge_meta
-from parser.portable import attach_portable_aliases, classify_backing_sqlfn
+from parser.portable import (attach_portable_aliases, attach_position_names,
+                             classify_backing_sqlfn)
 from parser.covering import attach_temporal_covering
 from parser.typerecover import recover_collapsed_types, normalize_canonical
 from parser.header_types import reconcile
@@ -265,6 +266,13 @@ def main():
         nbo = sum(1 for f in idl.get("functions", []) if f.get("sqlfnBackingOnly"))
         print(f"      Flagged {nbo} bbox-topological backing @sqlfn tag(s) "
               f"(sqlfnBackingOnly)", file=sys.stderr)
+        # The same map names each position operator once per class (setLeft …
+        # stboxLeft): derive those names from its @sqlfn/@sqlop tags.
+        idl = attach_position_names(idl)
+        pn = idl.get("portableAliases", {}).get("positionNames", {})
+        print(f"      Derived {sum(len(c) for c in pn.values())} position SQL "
+              f"name(s) by class for {len(pn)} position operator(s) "
+              f"(positionNames)", file=sys.stderr)
 
         # A PG wrapper can BIND a MEOS input to a fixed literal instead of exposing
         # it as a SQL argument (valueAtTimestamp hides `strict=true`). Capture those
@@ -347,6 +355,7 @@ def main():
     print(f"      → {idl_path} written", file=sys.stderr)
 
     pa = idl.get("portableAliases", {}).get("count", 0)
+    npos = len(idl.get("portableAliases", {}).get("byPositionOperator", {}))
     cov = idl.get("temporalCovering", {}).get("count", 0)
     exposable = idl.get("enrichment", {}).get("exposableFunctions", 0)
     om = idl.get("objectModel", {}).get("summary", {})
@@ -356,6 +365,7 @@ def main():
           f"{len(idl['enums'])} enums, "
           f"{len(idl.get('macros', []))} macros, "
           f"{pa} portable bare-name aliases, "
+          f"{npos} position operators, "
           f"{cov} temporal covering types", file=sys.stderr)
     if om:
         print(f"      object model: {om['classesWithMethods']} classes, "

@@ -33,7 +33,10 @@ class ParityLogicTests(unittest.TestCase):
             "teq_temporal_temporal",                       # backs `teq`
             "same",                                        # exact-name back
             "nad_tfloat_tfloat",                           # explicit backing
-        ])                                                 # of nearestApproach…
+                                                           # of nearestApproach…
+            "left_set_set", "left_tspatial_tspatial",      # back `<<`
+            "overleft_stbox_stbox",                        # backs `&<`, not `<<`
+        ])
         r = build_parity(cat)
         self.assertEqual(r["total"], 41)
         self.assertEqual(r["byBareName"]["overlaps"]["status"], "backed")
@@ -48,15 +51,39 @@ class ParityLogicTests(unittest.TestCase):
         self.assertNotIn("nearestApproachDistance", r["unbacked"])
         self.assertEqual(r["byBareName"]["overlaps"]["family"], "topology")
         self.assertEqual(r["byBareName"]["tEqual"]["operator"], "#=")
+        # a position operator is backed by the MEOS family its position prefixes
+        left = r["byPosition"]["<<"]
+        self.assertEqual(left["status"], "backed")
+        self.assertEqual(left["position"], "left")
+        self.assertEqual(left["family"], "spaceX")
+        self.assertEqual(left["backedBy"], 2)
+        self.assertEqual(r["byPosition"]["&<"]["backedBy"], 1)
+        self.assertIn("<<#", r["unbackedPositions"])
+        self.assertNotIn("<<", r["unbackedPositions"])
+        self.assertNotIn("left", r["byBareName"])
+
+    def test_position_sql_names_reported(self):
+        # With the catalog's positionNames derived, each position operator
+        # reports its SQL names by class next to its backing.
+        cat = _catalog(["left_stbox_stbox"])
+        cat["portableAliases"]["positionNames"] = {
+            "<<": {"set": "setLeft", "stbox": "stboxLeft"}}
+        r = build_parity(cat)
+        self.assertEqual(r["byPosition"]["<<"]["sqlNames"],
+                         {"set": "setLeft", "stbox": "stboxLeft"})
+        self.assertEqual(r["byPosition"][">>"]["sqlNames"], {})
 
     def test_every_bare_name_classified(self):
         r = build_parity(_catalog([]))            # nothing backs anything
         self.assertEqual(r["total"], 41)
         self.assertEqual(r["backed"], 0)
-        self.assertEqual(len(r["unbacked"]), 41)  # all flagged, 0 dropped
+        self.assertEqual(r["needsExplicitBacking"], 41)
+        self.assertEqual(len(r["unbacked"]), 25)  # all flagged, 0 dropped
+        self.assertEqual(len(r["unbackedPositions"]), 16)
         self.assertTrue(all(v["status"] in ("backed",
                                             "needs-explicit-backing")
-                            for v in r["byBareName"].values()))
+                            for v in list(r["byBareName"].values())
+                            + list(r["byPosition"].values())))
 
     def test_requires_portable_aliases(self):
         with self.assertRaises(ValueError):
