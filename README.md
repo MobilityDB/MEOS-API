@@ -228,7 +228,9 @@ Manual annotations (ownership rules, additional documentation, deprecation flags
 bare-name mapping that MobilityDB now registers natively (PR #1075). The
 pipeline folds it into the catalog as `portableAliases` (with `byOperator`
 / `byBareName` lookups), so **every binding/engine generates the identical
-bare names** and a user learns one reference and assumes the rest.
+bare names** and a user learns one reference and assumes the rest. A
+position operator has one name per class instead (`setLeft` … `stboxLeft`),
+which the catalog derives from the `@sqlfn` tags as `positionNames`.
 
 It is curated canonical data, kept verbatim (only bijective lookups are
 derived — no C-symbol guessing; upstream aliases reuse each operator's own
@@ -236,8 +238,8 @@ backing function, equivalence by construction). The mapping is
 type-agnostic and applies to **every** temporal type family —
 `temporal`, `geo`, `cbuffer`, `npoint`, `pose`, `rgeo` are all in scope and
 must not be excluded from any parity headline. `python tools/portable_parity.py`
-audits it against the catalog — currently **29/29 = 100%** backed (verified,
-no guessing). See [`docs/portable-aliases.md`](docs/portable-aliases.md).
+audits it against the catalog, flagging every operator no catalog family backs
+(no guessing). See [`docs/portable-aliases.md`](docs/portable-aliases.md).
 
 ## OpenAPI generation
 

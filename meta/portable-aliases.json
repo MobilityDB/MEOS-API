@@ -1,5 +1,5 @@
 {
-  "_comment": "Canonical portable bare-name dialect \u2014 the single codegen source of truth (RFC #920). Every binding/engine generates the SAME bare names from this mapping so users learn one reference and assume the rest. Operators are SQL operator symbols; bareName is the portable function name. The mapping is type-agnostic: it applies to EVERY temporal type family.",
+  "_comment": "Canonical portable bare-name dialect \u2014 the single codegen source of truth (RFC #920). Every binding/engine generates the SAME bare names from this mapping so users learn one reference and assume the rest. Operators are SQL operator symbols; bareName is the portable function name. The mapping is type-agnostic: it applies to EVERY temporal type family. A position operator (`positionFamilies`) has instead one name per class of its operands.",
   "provenance": {
     "discussion": "MobilityDB#861",
     "rfc": "MobilityDB RFC #920 (doc/rfc/sql-portability/README.md, branch rfc/sql-portability)",
@@ -23,78 +23,6 @@
       {
         "operator": "-|-",
         "bareName": "adjacent"
-      }
-    ],
-    "timePosition": [
-      {
-        "operator": "<<#",
-        "bareName": "before"
-      },
-      {
-        "operator": "#>>",
-        "bareName": "after"
-      },
-      {
-        "operator": "&<#",
-        "bareName": "overbefore"
-      },
-      {
-        "operator": "#&>",
-        "bareName": "overafter"
-      }
-    ],
-    "spaceX": [
-      {
-        "operator": "<<",
-        "bareName": "left"
-      },
-      {
-        "operator": ">>",
-        "bareName": "right"
-      },
-      {
-        "operator": "&<",
-        "bareName": "overleft"
-      },
-      {
-        "operator": "&>",
-        "bareName": "overright"
-      }
-    ],
-    "spaceY": [
-      {
-        "operator": "<<|",
-        "bareName": "below"
-      },
-      {
-        "operator": "|>>",
-        "bareName": "above"
-      },
-      {
-        "operator": "&<|",
-        "bareName": "overbelow"
-      },
-      {
-        "operator": "|&>",
-        "bareName": "overabove"
-      }
-    ],
-    "spaceZ": [
-      {
-        "operator": "<</",
-        "bareName": "front"
-      },
-      {
-        "operator": "/>>",
-        "bareName": "back"
-      },
-      {
-        "operator": "&</",
-        "bareName": "overfront"
-      },
-      {
-        "operator": "/&>",
-        "bareName": "overback"
       }
     ],
     "temporalComparison": [
@@ -138,6 +66,33 @@
       }
     ]
   },
+  "_positionFamiliesComment": "A position operator has one SQL name per class of its operands, the class followed by the position: `<<` is setLeft, spanLeft, spansetLeft, tboxLeft, stboxLeft and tpcboxLeft (MobilityDB#2717). A temporal operand takes the class of its bounding box. `position` is the stem those names and the MEOS C functions share (left_set_set, left_tspatial_tspatial). The catalog derives the names by class from the @sqlfn tags of the functions whose @sqlop is the operator (`portableAliases.positionNames`).",
+  "positionFamilies": {
+    "timePosition": [
+      { "operator": "<<#", "position": "before" },
+      { "operator": "#>>", "position": "after" },
+      { "operator": "&<#", "position": "overbefore" },
+      { "operator": "#&>", "position": "overafter" }
+    ],
+    "spaceX": [
+      { "operator": "<<", "position": "left" },
+      { "operator": ">>", "position": "right" },
+      { "operator": "&<", "position": "overleft" },
+      { "operator": "&>", "position": "overright" }
+    ],
+    "spaceY": [
+      { "operator": "<<|", "position": "below" },
+      { "operator": "|>>", "position": "above" },
+      { "operator": "&<|", "position": "overbelow" },
+      { "operator": "|&>", "position": "overabove" }
+    ],
+    "spaceZ": [
+      { "operator": "<</", "position": "front" },
+      { "operator": "/>>", "position": "back" },
+      { "operator": "&</", "position": "overfront" },
+      { "operator": "/&>", "position": "overback" }
+    ]
+  },
   "alreadyCanonical": [
     {
       "kind": "functions",
@@ -170,6 +125,6 @@
   "notes": [
     "Generate aliases by reusing each operator's own backing C function (equivalence by construction), never by reimplementing; mirror MobilityDB tools/portable_aliases/generate.py + its 100%-coverage audit.",
     "User-facing API uses the full name `trgeometry`; internal functions keep the `trgeo_` prefix \u2014 do NOT normalize the internal prefix.",
-    "Goal: 100% parity ecosystem-wide \u2014 every operator has its bare name on every engine, no gaps, no headline exclusions."
+    "Goal: 100% parity ecosystem-wide \u2014 every operator has its portable name (its bare name, or its name by class for a position operator) on every engine, no gaps, no headline exclusions."
   ]
 }

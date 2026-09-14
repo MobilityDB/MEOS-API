@@ -17,29 +17,56 @@ family, and is **type-agnostic** (it applies to every temporal type):
 | Family | Operator → bare name |
 |---|---|
 | Topology | `&&`→`overlaps` `@>`→`contains` `<@`→`contained` `-\|-`→`adjacent` |
+| Temporal comparison | `#=`→`tEqual` `#<>`→`tNotEqual` `#<`→`tLessThan` `#<=`→`tLessEqual` `#>`→`tGreaterThan` `#>=`→`tGreaterEqual` |
+| Ever comparison | `?=`→`eEqual` `?<>`→`eNotEqual` `?<`→`eLessThan` `?<=`→`eLessEqual` `?>`→`eGreaterThan` `?>=`→`eGreaterEqual` |
+| Always comparison | `%=`→`aEqual` `%<>`→`aNotEqual` `%<`→`aLessThan` `%<=`→`aLessEqual` `%>`→`aGreaterThan` `%>=`→`aGreaterEqual` |
+| Distance | `<->`→`tDistance` `\|=\|`→`nearestApproachDistance` |
+| Same | `~=`→`same` |
+
+25 operator→bare-name pairs. Already-canonical (no aliasing needed):
+`eIntersects`, `atTime`, restriction and spatial-relationship functions.
+
+## Position operators
+
+A position operator has one name per class of its operands instead: the
+class followed by the position, a temporal operand taking the class of its
+bounding box (MobilityDB#2717). `<<` is `setLeft`, `spanLeft`,
+`spansetLeft`, `tboxLeft`, `stboxLeft` and `tpcboxLeft`; the Y and Z
+positions exist for `stbox` and `tpcbox`. The mapping holds each operator
+with its position, the stem those names and the MEOS C functions share
+(`left_set_set`, `left_tspatial_tspatial`), under `positionFamilies`:
+
+| Family | Operator → position |
+|---|---|
 | Time position | `<<#`→`before` `#>>`→`after` `&<#`→`overbefore` `#&>`→`overafter` |
 | Space X | `<<`→`left` `>>`→`right` `&<`→`overleft` `&>`→`overright` |
 | Space Y | `<<\|`→`below` `\|>>`→`above` `&<\|`→`overbelow` `\|&>`→`overabove` |
 | Space Z | `<</`→`front` `/>>`→`back` `&</`→`overfront` `/&>`→`overback` |
-| Temporal comparison | `#=`→`teq` `#<>`→`tne` `#<`→`tlt` `#<=`→`tle` `#>`→`tgt` `#>=`→`tge` |
-| Distance | `<->`→`tdistance` `\|=\|`→`nearestApproachDistance` |
-| Same | `~=`→`same` |
 
-29 operator→bare-name pairs. Already-canonical (no aliasing needed):
-`ever_*`/`always_*` (`?=`/`%=`), `eIntersects`, `atTime`, restriction and
-spatial-relationship functions.
+The catalog derives the names by class from the `@sqlfn` tags of the
+functions whose `@sqlop` is the operator (`positionNames`, 64 names for the
+16 operators). A name that is not the class followed by the position, or an
+operator that no function carries, stops the pipeline: either means the
+tags and the mapping disagree.
 
 ## In the catalog
 
-`portableAliases` carries the verbatim `families`, plus derived bijective
-lookups for codegen:
+`portableAliases` carries the verbatim `families` and `positionFamilies`,
+plus derived lookups for codegen:
 
 ```json
 "portableAliases": {
   "byOperator": { "&&": "overlaps", "#=": "tEqual", "~=": "same", ... },
   "byBareName": { "overlaps": "&&", "tEqual": "#=", "same": "~=", ... },
   "bareNames":  ["aEqual", "aGreaterEqual", ..., "tLessEqual", "tLessThan", "tNotEqual"],
-  "count": 41, "provenance": {...}, "scope": {...}, "notes": [...]
+  "count": 25,
+  "byPositionOperator": { "<<": "left", "<<#": "before", ... },
+  "positionNames": {
+    "<<": { "set": "setLeft", "span": "spanLeft", "spanset": "spansetLeft",
+            "stbox": "stboxLeft", "tbox": "tboxLeft", "tpcbox": "tpcboxLeft" },
+    "<<|": { "stbox": "stboxBelow", "tpcbox": "tpcboxBelow" }, ...
+  },
+  "provenance": {...}, "scope": {...}, "notes": [...]
 }
 ```
 
@@ -67,15 +94,14 @@ end state.
 `portable_parity.py` is the meos-api.json analogue of MobilityDB's
 `tools/portable_aliases/generate.py --check`: it cross-references every
 bare name against the catalog's function families (by the MEOS bare-name
-prefix convention) and writes `output/meos-portable-parity.json`.
-
-Live result: **29 / 29 = 100%** — every operator's bare name is backed in
-the catalog (28 directly by prefix; `nearestApproachDistance` via the
-*verified* `explicitBacking` entry `nad` — the `nad_*` family, 35
-functions, confirmed present, not guessed). A bare name whose C family
-prefix differs is resolved through `explicitBacking`, never false-flagged
-as a gap and never silently dropped; `tests/test_portable_parity.py`
-gates this (no bare name may be unclassified or regressed).
+prefix convention), and every position operator against the family its
+position prefixes (`left_*`, `before_*`) with its SQL names by class, and
+writes `output/meos-portable-parity.json`. A bare name whose C family
+prefix differs is resolved through `explicitBacking` (`nearestApproachDistance`
+through `nad`, the `nad_*` family), and one that no entry resolves is
+flagged `needs-explicit-backing` — never silently dropped;
+`tests/test_portable_parity.py` gates this (no operator may be
+unclassified).
 
 ## Provenance
 

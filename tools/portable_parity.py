@@ -11,6 +11,11 @@
 # e.g. `nearestApproachDistance` ↔ `nad_*`): it is flagged
 # `needs-explicit-backing` so the cross-repo work can add an explicit
 # operator→C-family entry — an honest signal, never a fabricated verdict.
+#
+# A position operator has no bare name: its SQL names are one per class
+# (`setLeft` … `stboxLeft`, the catalog's `positionNames`), and its MEOS C
+# functions share its position as their prefix (`left_*`, `before_*`), which is
+# what backs it. The report lists it under `byPosition`, keyed by operator.
 
 import json
 import sys
@@ -47,10 +52,26 @@ def build_parity(catalog: dict) -> dict:
             "sample": sorted(hits)[:3],
             "status": "backed" if hits else "needs-explicit-backing",
         }
-    backed = [b for b, v in by_bare.items() if v["status"] == "backed"]
+    position_names = pa.get("positionNames", {})
+    by_position = {}
+    for fam, lst in sorted(pa.get("positionFamilies", {}).items()):
+        for p in lst:
+            hits = _matches(p["position"])
+            by_position[p["operator"]] = {
+                "position": p["position"], "family": fam,
+                "via": "prefix" if hits else None,
+                "backedBy": len(hits),
+                "sample": sorted(hits)[:3],
+                "sqlNames": position_names.get(p["operator"], {}),
+                "status": "backed" if hits else "needs-explicit-backing",
+            }
+    backed = ([b for b, v in by_bare.items() if v["status"] == "backed"]
+              + [o for o, v in by_position.items() if v["status"] == "backed"])
     unbacked = sorted(b for b, v in by_bare.items()
                       if v["status"] == "needs-explicit-backing")
-    total = len(by_bare)
+    unbacked_positions = sorted(o for o, v in by_position.items()
+                                if v["status"] == "needs-explicit-backing")
+    total = len(by_bare) + len(by_position)
 
     # Defensive cross-reference: every `alreadyCanonical` family entry has a
     # `pattern` like `"ever_*"` that must match at least one catalog function.
@@ -78,11 +99,13 @@ def build_parity(catalog: dict) -> dict:
     return {
         "total": total,
         "backed": len(backed),
-        "needsExplicitBacking": len(unbacked),
+        "needsExplicitBacking": len(unbacked) + len(unbacked_positions),
         "parityPct": round(len(backed) * 100 / total, 1) if total else 0,
         "canonicalDrift": canonical_drift,  # empty list = no drift detected
         "unbacked": unbacked,           # the precise cross-repo worklist
+        "unbackedPositions": unbacked_positions,
         "byBareName": by_bare,
+        "byPosition": by_position,
     }
 
 
@@ -92,13 +115,17 @@ def main() -> None:
     rep = build_parity(json.loads(IN_PATH.read_text()))
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(rep, indent=2))
-    print(f"[portable-parity] {rep['backed']}/{rep['total']} bare names "
+    print(f"[portable-parity] {rep['backed']}/{rep['total']} operators "
           f"backed in the catalog ({rep['parityPct']}%); "
           f"{rep['needsExplicitBacking']} need an explicit backing entry "
           f"→ {OUT_PATH}", file=sys.stderr)
     for b in rep["unbacked"]:
         v = rep["byBareName"][b]
         print(f"  needs-explicit-backing: {b!r}  ({v['operator']}, "
+              f"{v['family']})", file=sys.stderr)
+    for o in rep["unbackedPositions"]:
+        v = rep["byPosition"][o]
+        print(f"  needs-explicit-backing: {o!r}  ({v['position']}, "
               f"{v['family']})", file=sys.stderr)
     for drift in rep["canonicalDrift"]:
         print(f"  canonical-drift: family={drift['family']!r} pattern={drift['pattern']!r} — "
