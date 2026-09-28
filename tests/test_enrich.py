@@ -62,6 +62,15 @@ FUNCTIONS = [
        ("const struct Box *", "box"), ("int", "maxdd")),
     fn("weird_in", "struct Weird *",
        ("const char *", "str"), ("int", "basetype")),
+    # The byte codec: a reader of (bytes, length) and a writer of (value,
+    # variant, *size_out). Box has a writer and no reader, so no byte codec.
+    fn("temporal_from_wkb", "struct Temporal *",
+       ("const uint8_t *", "wkb"), ("size_t", "size")),
+    fn("temporal_as_wkb", "uint8_t *",
+       (T, "temp"), ("uint8_t", "variant"), ("size_t *", "size_out")),
+    fn("box_as_wkb", "uint8_t *",
+       ("const struct Box *", "box"), ("uint8_t", "variant"),
+       ("size_t *", "size_out")),
     # An otherwise-exposable function carrying an internal doxygen group: it
     # must be policy-excluded (api=internal), like the programmer Datum API.
     dict(fn("internal_op", "struct Temporal *", (T, "temp")),
@@ -148,6 +157,17 @@ class TypeEncodingTests(unittest.TestCase):
         # weird_in(str, int basetype): the *type tag disqualifies it, so
         # Weird gets no decoder at all.
         self.assertNotIn("Weird", self.te)
+
+    def test_byte_codec_beside_the_wire_encodings(self):
+        # the byte-codec twin of #test_struct_prefix_stripped_and_round_trip
+        self.assertEqual(self.te["Temporal"]["bytes"],
+                         {"decoder": "temporal_from_wkb",
+                          "encoder": "temporal_as_wkb"})
+        # the bytes are no wire string: the encodings stay the string forms
+        self.assertEqual(self.te["Temporal"]["encodings"], ["mfjson", "text"])
+        # a writer without a reader states no codec
+        self.assertNotIn("bytes", self.te["Box"])
+        self.assertNotIn("bytes", self.te["Set"])
 
     def test_no_primitive_or_intermediate_false_positives(self):
         self.assertNotIn("int", self.te)        # was a real false positive

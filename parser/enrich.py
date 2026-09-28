@@ -6,7 +6,8 @@ from C headers:
 
 - ``category``     — a coarse semantic class (constructor, predicate, io, ...).
 - ``typeEncodings``— for each opaque C type, how it round-trips to the wire
-                      (text / MF-JSON / WKB) and the function names that do it.
+                      (text / MF-JSON / WKB) and the function names that do it,
+                      and under ``bytes`` the reader and writer of its WKB bytes.
 - ``network``      — whether the function can be projected onto a *stateless*
                       endpoint, and if not, why.
 - ``wire``         — per-parameter and return value, the concrete request /
@@ -238,6 +239,28 @@ def build_type_encodings(functions: list, structs: set) -> dict:
         generic = base.lower() + suffix
         return generic if generic in cands else sorted(cands)[0]
 
+    # The byte codec of a type, beside its wire encodings: a reader
+    # ``T *f(const uint8_t *wkb, size_t size)`` and a writer
+    # ``uint8_t *f(const T *, uint8_t variant, size_t *size_out)``, recognised by
+    # shape. The bytes are no wire string, so they add no ``encodings`` entry; an
+    # in-process binding carries a value as them (the JVM engines).
+    bread: dict[str, list] = {}
+    bwrite: dict[str, list] = {}
+    for fn in functions:
+        params = fn.get("params", [])
+        ret = fn["returnType"]["canonical"]
+        cs = [p["canonical"] for p in params]
+        if (len(cs) == 2 and _base(cs[0]) == "uint8_t" and _ptr_depth(cs[0]) == 1
+                and _base(cs[1]) == "size_t" and _ptr_depth(cs[1]) == 0
+                and _ptr_depth(ret) == 1 and _base(ret) in structs):
+            bread.setdefault(_base(ret), []).append(fn["name"])
+        if (len(cs) == 3 and _base(ret) == "uint8_t" and _ptr_depth(ret) == 1
+                and _ptr_depth(cs[0]) == 1 and _base(cs[0]) in structs
+                and _base(cs[1]) in ("uint8_t", "unsigned char")
+                and _ptr_depth(cs[1]) == 0
+                and _base(cs[2]) == "size_t" and _ptr_depth(cs[2]) == 1):
+            bwrite.setdefault(_base(cs[0]), []).append(fn["name"])
+
     out: dict[str, dict] = {}
     for base, s in enc.items():
         dec = {e: choose(c, base, dec_suffix[e])
@@ -255,6 +278,11 @@ def build_type_encodings(functions: list, structs: set) -> dict:
             "in_aux": s["decoders"][in_e][dec[in_e]] if in_e else [],
             "out_aux": s["encoders"][out_e][encd[out_e]] if out_e else [],
         }
+        if base in bread and base in bwrite:
+            out[base]["bytes"] = {
+                "decoder": choose(dict.fromkeys(bread[base]), base, "_from_wkb"),
+                "encoder": choose(dict.fromkeys(bwrite[base]), base, "_as_wkb"),
+            }
     return out
 
 
