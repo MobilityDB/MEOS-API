@@ -125,6 +125,51 @@ def _arg_type(decl, vocab):
     return toks[-1] if toks else a
 
 
+def _strip_sql_comments(text):
+    """`text` with its SQL comments blanked and every newline kept.
+
+    The SQL counterpart of #strip_comments of parser/temporaltypes.py: a
+    `-- comment` runs to the end of its line and a `/* comment */` to its close,
+    PostgreSQL nesting one block comment inside another. A string literal is
+    stepped over, its quote doubled inside it (`'it''s'`), so a comment opener
+    in a literal stays part of the literal. A statement commented out is no
+    declaration, and a commented line inside one is no part of it."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text.startswith("--", i):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            out.append(" " * (end - i))
+            i = end
+        elif text.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif text.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            out.append(re.sub(r"[^\n]", " ", text[i:j]))
+            i = j
+        elif text[i] == "'":
+            j = i + 1
+            while j < n:
+                if text[j] == "'":
+                    if text.startswith("''", j):
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(text[i:j])
+            i = j
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
 def _create_fn_stmts(text):
     """Yield (sqlName, [raw arg decls], returnType|None, wrapper|None, retSet) for every
     CREATE FUNCTION in `text`, each parsed STATEMENT-BOUNDED (to its terminating `;`).
@@ -175,7 +220,7 @@ def _wrapper_sql_sigs(sql_src):
         return out
     stmts, vocab = [], set()
     for sf in sorted(sql_src.rglob("*.sql")):
-        text = sf.read_text(errors="ignore")
+        text = _strip_sql_comments(sf.read_text(errors="ignore"))
         for sqlname, argdecls, ret, wrapper, retset in _create_fn_stmts(text):
             stmts.append((sqlname, argdecls, ret, wrapper, retset))
             if ret:
