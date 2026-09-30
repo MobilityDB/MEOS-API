@@ -68,6 +68,9 @@ _DATUM = re.compile(r"Datum\s+(\w+)\s*\(\s*PG_FUNCTION_ARGS")
 # binds is in the trailing `AS 'MODULE_PATHNAME', '<Wrapper>'`.
 _CREATE_FN = re.compile(r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(\w+)\s*\(", re.I)
 _AS_WRAPPER = re.compile(r"AS\s+'[^']*'\s*,\s*'(\w+)'", re.I)
+# The body of a function with no C symbol: `AS 'SELECT ...'` (quotes doubled inside)
+# or `AS $$ SELECT ... $$`.
+_AS_BODY = re.compile(r"\bAS\s+(?:'((?:[^']|'')*)'|\$\$(.*?)\$\$)", re.I | re.S)
 # A CREATE FUNCTION attribute that may follow RETURNS <type> before the body.
 _RET_ATTR = re.compile(
     r"\b(?:SUPPORT|LANGUAGE|WINDOW|IMMUTABLE|STABLE|VOLATILE|LEAKPROOF|CALLED|RETURNS\s+NULL|"
@@ -202,7 +205,7 @@ def _strip_sql_comments(text):
     return "".join(out)
 
 
-def _create_fn_stmts(text):
+def _create_fn_stmts(text, bodies=False):
     """Yield (sqlName, [raw arg decls], returnType|None, wrapper|None, retSet) for every
     CREATE FUNCTION in `text`, each parsed STATEMENT-BOUNDED (to its terminating `;`).
     returnType is the type of one returned row; retSet is True for `RETURNS SETOF`,
@@ -210,7 +213,10 @@ def _create_fn_stmts(text):
     Bounding to the `;` is what stops a `LANGUAGE SQL` default-arg overload (whose own
     `AS 'SELECT ...'` has no C symbol) from bleeding its RETURNS/AS across the boundary
     into the next C-backed statement — the cross-statement mis-attribution that produced
-    garbage return types. wrapper is None for a LANGUAGE SQL / $$ body (no C symbol)."""
+    garbage return types. wrapper is None for a LANGUAGE SQL / $$ body (no C symbol).
+    With `bodies`, each tuple ends with that body, read from the same `AS` clause
+    #_AS_WRAPPER reads a C symbol from, its quotes undoubled; None for a function
+    with a C symbol."""
     for m in _CREATE_FN.finditer(text):
         sqlname = m.group(1)
         i, depth, start = m.end(), 1, m.end()
@@ -233,7 +239,14 @@ def _create_fn_stmts(text):
             # return type `boolean SUPPORT tspatial_supportfn`. Keep only the type.
             ret = _RET_ATTR.split(ret, maxsplit=1)[0].strip() or ret
         argdecls = [a for a in _split_top_commas(text[start:arg_close]) if a.strip()]
-        yield sqlname, argdecls, ret, wrapper, retset
+        if not bodies:
+            yield sqlname, argdecls, ret, wrapper, retset
+            continue
+        bm = None if wrapper else _AS_BODY.search(tail)
+        body = None
+        if bm:
+            body = bm.group(1).replace("''", "'") if bm.group(1) is not None else bm.group(2)
+        yield sqlname, argdecls, ret, wrapper, retset, body
 
 
 def _wrapper_sql_sigs(sql_src):
@@ -251,36 +264,51 @@ def _wrapper_sql_sigs(sql_src):
     the type vocabulary and the composite types, then resolve every arg's type
     against the vocabulary."""
     out = {}
+    stmts, vocab, composites = sql_statements(sql_src)
+    for sqlname, argdecls, ret, wrapper, retset, _ in stmts:
+        if wrapper is None:
+            continue                                            # LANGUAGE SQL / $$ body — no C symbol
+        out.setdefault(wrapper, []).append(
+            sql_signature(sqlname, argdecls, ret, retset, vocab, composites))
+    return out
+
+
+def sql_statements(sql_src):
+    """(statements, type vocabulary, composite types) of the CREATE FUNCTION statements
+    under `sql_src`, each statement as #_create_fn_stmts yields it with its body. The
+    vocabulary holds every RETURNS type and every single-token argument type, so an
+    argument's type is read against it (#_arg_type)."""
+    stmts, vocab, composites = [], set(), {}
     sql_src = Path(sql_src)
     if not sql_src.exists():
-        return out
-    stmts, vocab, composites = [], set(), {}
+        return stmts, vocab, composites
     for sf in sorted(sql_src.rglob("*.sql")):
         text = _strip_sql_comments(sf.read_text(errors="ignore"))
         composites.update(_composite_types(text))
-        for sqlname, argdecls, ret, wrapper, retset in _create_fn_stmts(text):
-            stmts.append((sqlname, argdecls, ret, wrapper, retset))
+        for stmt in _create_fn_stmts(text, bodies=True):
+            stmts.append(stmt)
+            argdecls, ret = stmt[1], stmt[2]
             if ret:
                 vocab.add(ret)                                  # a RETURNS clause is always a type
             for a in argdecls:
                 bt = _bare_type(a)
                 if bt and " " not in bt:
                     vocab.add(bt)                               # a single-token arg is always a type
-    for sqlname, argdecls, ret, wrapper, retset in stmts:
-        if wrapper is None:
-            continue                                            # LANGUAGE SQL / $$ body — no C symbol
-        indecls = [a for a in argdecls if _is_in_arg(a)]
-        args = [_arg_type(a, vocab) for a in indecls]
-        arg_defaults = [_arg_default(a) for a in indecls]
-        required = sum(1 for a in indecls if not re.search(r"\bDEFAULT\b", a, re.I))
-        outcols = [_column(_OUTMODE.sub("", a.strip())) for a in argdecls
-                   if _OUTMODE.match(a.strip())]
-        columns = outcols or composites.get(ret)
-        out.setdefault(wrapper, []).append(
-            {"sqlName": sqlname, "args": args, "required": required,
-             "argDefaults": arg_defaults, "ret": ret, "retSet": retset,
-             "columns": columns if columns and len(columns) > 1 else None})
-    return out
+    return stmts, vocab, composites
+
+
+def sql_signature(sqlname, argdecls, ret, retset, vocab, composites):
+    """The SQL signature {sqlName, args, required, argDefaults, ret, retSet, columns} a
+    CREATE FUNCTION states, as #_wrapper_sql_sigs lists it."""
+    indecls = [a for a in argdecls if _is_in_arg(a)]
+    outcols = [_column(_OUTMODE.sub("", a.strip())) for a in argdecls
+               if _OUTMODE.match(a.strip())]
+    columns = outcols or composites.get(ret)
+    return {"sqlName": sqlname, "args": [_arg_type(a, vocab) for a in indecls],
+            "required": sum(1 for a in indecls if not re.search(r"\bDEFAULT\b", a, re.I)),
+            "argDefaults": [_arg_default(a) for a in indecls],
+            "ret": ret, "retSet": retset,
+            "columns": columns if columns and len(columns) > 1 else None}
 
 
 def _meos_to_mdb(meos_src):
@@ -447,8 +475,10 @@ def _sql_ctypes(idl):
     catalog: a class is its `cType` (the object model names `TInt`, `TsTzSpanSet`,
     `Geometry` after the SQL types, lower-cased), every temporal type a `Temporal`,
     a base type its C spelling (#C_BASE_TYPES of parser/typescope.py, in
-    PostgreSQL's spelling through #sql_spellings), a cell id `uint64`, and every
-    base type of the type relations also a `Datum`."""
+    PostgreSQL's spelling through #sql_spellings), a cell id `uint64`, every
+    base type of the type relations also a `Datum`, and every set, span and span set
+    the type relations build over a base type the `cType` of the class `Set`, `Span`
+    or `SpanSet` (`h3indexset` is a `Set`)."""
     out = {}
     for cls, rec in ((idl.get("objectModel") or {}).get("classes") or {}).items():
         if rec.get("cType"):
@@ -461,9 +491,15 @@ def _sql_ctypes(idl):
         for m in (meos if isinstance(meos, tuple) else (meos,)):
             for name in sql_spellings({m}):
                 out.setdefault(name, set()).add(c)
-    for base in ((idl.get("typeRelations") or {}).get("byBase") or {}):
+    classes = (idl.get("objectModel") or {}).get("classes") or {}
+    containers = {"set": "Set", "span": "Span", "spanset": "SpanSet"}
+    for base, rel in ((idl.get("typeRelations") or {}).get("byBase") or {}).items():
         for name in sql_spellings({base}):
             out.setdefault(name, set()).add("Datum")
+        for kind, cls in containers.items():
+            ctype = (classes.get(cls) or {}).get("cType")
+            if rel.get(kind) and ctype:
+                out.setdefault(rel[kind], set()).add(_c_base(ctype)[0])
     return out
 
 
