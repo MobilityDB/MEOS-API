@@ -14,10 +14,13 @@ Wrapper); in mobilitydb/src `@sqlfn name()` + `@sqlop @p <op>` sit above
 
 Adds per function (when the chain resolves): `sqlfn`, `sqlop`, `mdbC`.
 """
+import json
 import re
 from pathlib import Path
 
-from parser.typescope import (TypeFacts, declared_scopes, read_bodies,
+from parser.shapeinfer import _out_count_param
+from parser.typescope import (C_BASE_TYPES, TypeFacts, declared_scopes, read_bodies,
+                              sql_spellings,
                               require_scopes, resolve_scope, signatures_for)
 
 # A @csqlfn tag carries one OR MORE #Wrapper() references — comma- or
@@ -89,6 +92,12 @@ def _split_top_commas(s):
 
 
 _ARGMODE = re.compile(r"^(?:IN|OUT|INOUT|VARIADIC)\s+", re.I)
+# The argument modes naming a column of the row a function returns: PostgreSQL
+# declares a record-returning function's columns as OUT (or INOUT) arguments.
+_OUTMODE = re.compile(r"^(?:OUT|INOUT)\s+", re.I)
+# `CREATE TYPE name AS (` — a composite type, whose members are the columns of the
+# row a function returning it gives.
+_CREATE_COMPOSITE = re.compile(r"CREATE\s+TYPE\s+(\w+)\s+AS\s*\(", re.I)
 
 
 def _arg_default(decl):
@@ -106,6 +115,29 @@ def _bare_type(decl):
     stripped — leaving `[argname] argtype`, argtype possibly multi-word (double precision)."""
     a = _ARGMODE.sub("", decl.strip())
     return re.split(r"\bDEFAULT\b|=", a, maxsplit=1, flags=re.I)[0].strip()
+
+
+def _is_in_arg(decl):
+    """Whether a CREATE FUNCTION argument is passed by the caller: every mode but OUT."""
+    return not re.match(r"^OUT\s+", decl.strip(), re.I)
+
+
+def _column(decl):
+    """`(name, type)` of a column declaration: an OUT argument (`OUT i integer`) or a
+    composite member (`value integer`, `times bigint[]`)."""
+    name, _, typ = _bare_type(decl).partition(" ")
+    return name, " ".join(typ.split())
+
+
+def _composite_types(text):
+    """Yield (typeName, [(column, type), ...]) for every composite type in `text`."""
+    for m in _CREATE_COMPOSITE.finditer(text):
+        i, depth = m.end(), 1
+        while i < len(text) and depth:
+            depth += (text[i] == "(") - (text[i] == ")")
+            i += 1
+        yield m.group(1), [_column(c) for c in _split_top_commas(text[m.end():i - 1])
+                           if c.strip()]
 
 
 def _arg_type(decl, vocab):
@@ -206,21 +238,26 @@ def _create_fn_stmts(text):
 
 def _wrapper_sql_sigs(sql_src):
     """MobilityDB-C wrapper name -> list of per-overload SQL signatures
-    {sqlName, args:[type,...], required, ret, retSet}, straight from the CREATE FUNCTION
+    {sqlName, args:[type,...], required, ret, retSet, columns}, straight from the CREATE FUNCTION
     statements. The .in.sql CREATE FUNCTION set IS the exact SQL registration surface,
     so a binding emits ONE registration per signature over the concrete arg types with
     NO type-scope heuristic — e.g. `minInstant` lands on exactly its four overloads
     {tint,tbigint,tfloat,ttext}, never over tbool or the geo types. `required` counts the
     non-DEFAULT args (args beyond it are SQL-optional); `ret` is the concrete SQL subtype
-    the polymorphic `Temporal *` C return loses. Two passes: gather the type vocabulary
-    from the unambiguous positions, then resolve every arg's type against it."""
+    the polymorphic `Temporal *` C return loses. `args` are the arguments a caller
+    passes; the OUT arguments are no input but the columns of the row returned, and
+    `columns` lists them, or the members of the composite type returned, as
+    (name, type) pairs, None for a function returning one value. Two passes: gather
+    the type vocabulary and the composite types, then resolve every arg's type
+    against the vocabulary."""
     out = {}
     sql_src = Path(sql_src)
     if not sql_src.exists():
         return out
-    stmts, vocab = [], set()
+    stmts, vocab, composites = [], set(), {}
     for sf in sorted(sql_src.rglob("*.sql")):
         text = _strip_sql_comments(sf.read_text(errors="ignore"))
+        composites.update(_composite_types(text))
         for sqlname, argdecls, ret, wrapper, retset in _create_fn_stmts(text):
             stmts.append((sqlname, argdecls, ret, wrapper, retset))
             if ret:
@@ -232,12 +269,17 @@ def _wrapper_sql_sigs(sql_src):
     for sqlname, argdecls, ret, wrapper, retset in stmts:
         if wrapper is None:
             continue                                            # LANGUAGE SQL / $$ body — no C symbol
-        args = [_arg_type(a, vocab) for a in argdecls]
-        arg_defaults = [_arg_default(a) for a in argdecls]
-        required = sum(1 for a in argdecls if not re.search(r"\bDEFAULT\b", a, re.I))
+        indecls = [a for a in argdecls if _is_in_arg(a)]
+        args = [_arg_type(a, vocab) for a in indecls]
+        arg_defaults = [_arg_default(a) for a in indecls]
+        required = sum(1 for a in indecls if not re.search(r"\bDEFAULT\b", a, re.I))
+        outcols = [_column(_OUTMODE.sub("", a.strip())) for a in argdecls
+                   if _OUTMODE.match(a.strip())]
+        columns = outcols or composites.get(ret)
         out.setdefault(wrapper, []).append(
             {"sqlName": sqlname, "args": args, "required": required,
-             "argDefaults": arg_defaults, "ret": ret, "retSet": retset})
+             "argDefaults": arg_defaults, "ret": ret, "retSet": retset,
+             "columns": columns if columns and len(columns) > 1 else None})
     return out
 
 
@@ -372,6 +414,186 @@ def _meos_direct_sql(meos_src):
             out.setdefault(fm.group(1),
                            (sm.group(1), om.group(1) if om else None))
     return out
+
+
+_COLUMNS_META = Path(__file__).resolve().parent.parent / "meta" / "sql-columns.json"
+
+
+def declared_columns(path=_COLUMNS_META):
+    """The column facts stated in `meta/sql-columns.json`, keyed by the composite
+    type a function returns, or by its SQL name when it returns `record`."""
+    doc = json.loads(Path(path).read_text())
+    return {key: entry["columns"] for key, entry in doc["rows"].items()}
+
+
+def _c_base(ctype):
+    """A C type without `const`, `struct` and its pointer levels, with the
+    `<stdint.h>` spellings read as MEOS's own (`int64_t` is `int64`), and the number of
+    pointer levels: `const Temporal **` is (`Temporal`, 2)."""
+    t = re.sub(r"\b(?:const|struct)\b", "", ctype or "")
+    stars = t.count("*")
+    t = " ".join(t.replace("*", " ").split())
+    return re.sub(r"^(u?int(?:8|16|32|64))_t$", r"\1", t), stars
+
+
+# The cell ids MEOS declares by their own name, `typedef uint64 H3Index` and alike,
+# which #_TYPE_MAP of parser/typerecover.py spells `uint64_t` catalog-wide, beside the
+# SQL type each one is.
+_CELL_IDS = {"H3Index": "h3index", "Quadbin": "quadbin", "S2CellId": "s2cell"}
+
+
+def _sql_ctypes(idl):
+    """SQL type name -> the C types a value of it can arrive as, read from the
+    catalog: a class is its `cType` (the object model names `TInt`, `TsTzSpanSet`,
+    `Geometry` after the SQL types, lower-cased), every temporal type a `Temporal`,
+    a base type its C spelling (#C_BASE_TYPES of parser/typescope.py, in
+    PostgreSQL's spelling through #sql_spellings), a cell id `uint64`, and every
+    base type of the type relations also a `Datum`."""
+    out = {}
+    for cls, rec in ((idl.get("objectModel") or {}).get("classes") or {}).items():
+        if rec.get("cType"):
+            out.setdefault(cls.lower(), set()).add(_c_base(rec["cType"])[0])
+    for temptype in idl.get("temporalTypes") or {}:
+        out.setdefault(temptype, set()).add("Temporal")
+    for sqltype in _CELL_IDS.values():
+        out.setdefault(sqltype, set()).add("uint64")
+    for c, meos in C_BASE_TYPES.items():
+        for m in (meos if isinstance(meos, tuple) else (meos,)):
+            for name in sql_spellings({m}):
+                out.setdefault(name, set()).add(c)
+    for base in ((idl.get("typeRelations") or {}).get("byBase") or {}):
+        for name in sql_spellings({base}):
+            out.setdefault(name, set()).add("Datum")
+    return out
+
+
+def _row_slots(func, retset, width, struct, classes):
+    """The C values that can feed the columns of one row of `func`, in the order a
+    row lists them: each is (source, C type, pointer levels) where `source` is the
+    column's `from` and, inside one C value, its `element` or `field`.
+
+    A set of rows reads one element of each array per row: the returned array
+    (split into `groupSize` elements per row when it is flattened, into the fields
+    of its struct when it is an array of structs) and each out-parameter array.
+    One row reads the returned value, each element of a returned fixed array (a
+    quaternion), and each out-parameter, an array out-parameter whole; a `bool`
+    returned beside out-parameters says whether there is a row, and feeds none.
+    The count of an array feeds no column, and a struct a class stands for (a
+    `TBox` tile) is one value, not its fields."""
+    shape = func.get("shape") or {}
+    ar = shape.get("arrayReturn")
+    params = [(p["name"], p.get("cType")) for p in func.get("params") or ()]
+    length = _out_count_param(func)
+    outs = set(shape.get("outParams") or ())
+    outarrays = {a["param"] for a in shape.get("outputArrays") or ()}
+    slots = []
+    if ar:
+        elem, stars = _c_base(ar["element"]["c"])
+        if ar.get("groupSize"):
+            slots += [({"from": "return", "element": k}, elem, stars)
+                      for k in range(ar["groupSize"])]
+        elif struct and not stars and elem not in classes:
+            slots += [({"from": "return", "field": f["name"]}, *_c_base(f["cType"]))
+                      for f in struct["fields"]]
+        elif not retset and not outarrays:
+            slots += [({"from": "return", "element": k}, elem, stars)
+                      for k in range(width)]
+        else:
+            slots.append(({"from": "return"}, elem, stars))
+    else:
+        ret, stars = _c_base((func.get("returnType") or {}).get("c"))
+        if ret not in ("void", "bool") or not outs:
+            slots.append(({"from": "return"}, ret, stars))
+    for name, ctype in params:
+        if name in outs and name != length:
+            base, stars = _c_base(ctype)
+            # An out-parameter points at what it returns: one pointer level less. A
+            # set of rows reads one element of an array out-parameter per row.
+            stars -= 1 + (retset and name in outarrays)
+            slots.append(({"from": name}, base, stars))
+    return slots
+
+
+def _fits(sqltype, cbase, stars, sqlc):
+    """Whether a C value of base type `cbase` behind `stars` pointer levels can be a
+    value of SQL type `sqltype`: a `Datum` or a by-value base type bare (`int`,
+    `TimestampTz`), a struct bare (a `TBox` array element) or behind one pointer
+    (`Temporal *`, `SpanSet *`), an SQL array a C array of its elements."""
+    if sqltype.endswith("[]"):
+        return stars >= 1 and _fits(sqltype[:-2], cbase, stars - 1, sqlc)
+    if cbase not in sqlc.get(sqltype, ()):
+        return False
+    return stars == 0 if cbase == "Datum" else stars <= 1
+
+
+def _column_sources(func, sig, sqlc, declared, struct):
+    """The columns of the row `sig` returns, each naming the C value feeding it by
+    `from`: `return`, the value or array the function returns, or an out-parameter,
+    and `element` or `field` inside it. Each column is fed by the first C value of
+    its type not already feeding one, so the SQL column order and the C parameter
+    order need not agree: `valueTimeSplit` rows `(number, time, tnumber)` read the
+    out-parameters `value_bins`, `time_bins` and the returned fragments,
+    `tDisjointPairs` rows `(i, j, periods)` the two elements of the returned index
+    pair and the out-parameter `periods`. None when a column fits no C value, when
+    it fits values of two C sources, or when a C value feeds no column.
+
+    `meta/sql-columns.json` states what only the wrapper does: a column numbering
+    the rows from 1, as PostgreSQL's WITH ORDINALITY (`"from": "ordinal"`, the index
+    of a tile), and a constant the wrapper adds (`"offset": 1`, turning a C array
+    index into a SQL array position)."""
+    stated = declared.get(sig["ret"]) or declared.get(sig.get("sqlName") or func.get("sqlfn")) or {}
+    cols = sig["columns"]
+    fed = [c for c in cols if "from" not in stated.get(c["name"], {})]
+    classes = {c for cs in sqlc.values() for c in cs}
+    slots = _row_slots(func, sig.get("retSet", False), len(fed), struct, classes)
+    used, out = set(), {}
+    for c in fed:
+        fits = [k for k, (_, base, stars) in enumerate(slots)
+                if k not in used and _fits(c["type"], base, stars, sqlc)]
+        if not fits or len({slots[k][0]["from"] for k in fits}) > 1:
+            return None
+        used.add(fits[0])
+        out[c["name"]] = dict(slots[fits[0]][0])
+    if len(used) != len(slots):
+        return None
+    result = []
+    for c in cols:
+        entry = {"name": c["name"], "type": c["type"]}
+        entry.update(out.get(c["name"], {}))
+        entry.update(stated.get(c["name"], {}))
+        result.append(entry)
+    return result
+
+
+def attach_row_sources(idl, declared=None):
+    """Name the C value feeding each column of every row a SQL signature returns.
+
+    Runs once the object model and the type relations are attached, since a column
+    is matched to a C value by type. A row whose columns no C value and no
+    declaration feeds stops the catalog: guessing a column's source would hand a
+    binding a row PostgreSQL does not return."""
+    declared = declared_columns() if declared is None else declared
+    sqlc = _sql_ctypes(idl)
+    structs = {s["name"]: s for s in idl.get("structs") or ()}
+    unfed, n = [], 0
+    for f in idl["functions"]:
+        ar = (f.get("shape") or {}).get("arrayReturn")
+        struct = structs.get(_c_base(ar["element"]["c"])[0]) if ar else None
+        for s in f.get("sqlSignatures") or ():
+            if not s.get("columns"):
+                continue
+            columns = _column_sources(f, s, sqlc, declared, struct)
+            if columns is None:
+                unfed.append(f"{f['name']}: {s.get('sqlName', f.get('sqlfn'))}"
+                             f"({', '.join(s['args'])}) RETURNS {s['ret']}")
+            else:
+                s["columns"] = columns
+                n += 1
+    if unfed:
+        raise ValueError(
+            "SQL rows with a column MEOS states no source for; state it in "
+            "meta/sql-columns.json:\n  " + "\n  ".join(sorted(set(unfed))))
+    return idl, n
 
 
 def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
@@ -536,6 +758,8 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
                 entry = {"args": s["args"], "ret": s["ret"]}
                 if s["retSet"]:
                     entry["retSet"] = True
+                if s["columns"]:
+                    entry["columns"] = [{"name": c, "type": t} for c, t in s["columns"]]
                 if any(d is not None for d in s["argDefaults"]):
                     entry["argDefaults"] = s["argDefaults"]
                 if multiname or s["sqlName"] != f["sqlfn"]:

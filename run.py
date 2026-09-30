@@ -16,7 +16,7 @@ from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import merge_boundargs, resolve_bound_names
 from parser.enrich import enrich_idl
-from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map,
+from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
                           lint_ea_sqlfn, lint_positional_sqlfn,
                           lint_sqlfn_case_collisions)
@@ -333,6 +333,12 @@ def main():
     # token from here; carrying a per-type table of its own is a copy that goes stale the
     # moment a family is added.
     idl = attach_temporal_types(idl, MOBILITYDB_SRC)
+
+    # Name the C value feeding each column of every row a SQL signature returns, matched
+    # by type once the object model and the type relations state the C type of each SQL
+    # type; a row with a column nothing feeds stops the catalog.
+    idl, nrows = attach_row_sources(idl)
+    print(f"      SQL rows with every column's C source: {nrows}", file=sys.stderr)
 
     # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
     # a consumer proves it is current by comparing sourceCommit to live upstream master, never by
