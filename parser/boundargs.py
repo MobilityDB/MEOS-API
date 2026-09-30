@@ -381,10 +381,10 @@ def _signature_wrapper(func: dict, sig: dict, claimed: list, w2sig: dict) -> str
     registers it, as ``attach_sqlfn_map`` keeps the first of two wrappers registering
     the same overload. None when no claimed wrapper states it."""
     key = (sig.get("sqlName") or func.get("sqlfn"), tuple(sig.get("args") or ()),
-           sig.get("ret"))
+           sig.get("ret"), bool(sig.get("retSet")))
     for w in claimed:
         for s in w2sig.get(w) or ():
-            if (s["sqlName"], tuple(s["args"]), s["ret"]) == key:
+            if (s["sqlName"], tuple(s["args"]), s["ret"], s["retSet"]) == key:
                 return w
     return None
 

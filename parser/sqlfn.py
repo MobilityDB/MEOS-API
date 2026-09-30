@@ -126,8 +126,10 @@ def _arg_type(decl, vocab):
 
 
 def _create_fn_stmts(text):
-    """Yield (sqlName, [raw arg decls], returnType|None, wrapper|None) for every
+    """Yield (sqlName, [raw arg decls], returnType|None, wrapper|None, retSet) for every
     CREATE FUNCTION in `text`, each parsed STATEMENT-BOUNDED (to its terminating `;`).
+    returnType is the type of one returned row; retSet is True for `RETURNS SETOF`,
+    PostgreSQL's `proretset`, a function returning any number of such rows.
     Bounding to the `;` is what stops a `LANGUAGE SQL` default-arg overload (whose own
     `AS 'SELECT ...'` has no C symbol) from bleeding its RETURNS/AS across the boundary
     into the next C-backed statement — the cross-statement mis-attribution that produced
@@ -143,8 +145,9 @@ def _create_fn_stmts(text):
         tail = text[i:semi if semi != -1 else len(text)]        # ') RETURNS <t> AS ...'
         wm = _AS_WRAPPER.search(tail)
         wrapper = wm.group(1) if wm else None
-        rm = re.match(r"\s*RETURNS\s+(?:SETOF\s+)?(.+?)\s+AS\b", tail, re.I | re.S)
-        ret = " ".join(rm.group(1).split()) if rm else None
+        rm = re.match(r"\s*RETURNS\s+(SETOF\s+)?(.+?)\s+AS\b", tail, re.I | re.S)
+        ret = " ".join(rm.group(2).split()) if rm else None
+        retset = bool(rm and rm.group(1))
         if ret:
             # PostgreSQL lets the function attributes come in any order, so an
             # attribute may sit between RETURNS and AS rather than after the body.
@@ -153,12 +156,12 @@ def _create_fn_stmts(text):
             # return type `boolean SUPPORT tspatial_supportfn`. Keep only the type.
             ret = _RET_ATTR.split(ret, maxsplit=1)[0].strip() or ret
         argdecls = [a for a in _split_top_commas(text[start:arg_close]) if a.strip()]
-        yield sqlname, argdecls, ret, wrapper
+        yield sqlname, argdecls, ret, wrapper, retset
 
 
 def _wrapper_sql_sigs(sql_src):
     """MobilityDB-C wrapper name -> list of per-overload SQL signatures
-    {sqlName, args:[type,...], required, ret}, straight from the CREATE FUNCTION
+    {sqlName, args:[type,...], required, ret, retSet}, straight from the CREATE FUNCTION
     statements. The .in.sql CREATE FUNCTION set IS the exact SQL registration surface,
     so a binding emits ONE registration per signature over the concrete arg types with
     NO type-scope heuristic — e.g. `minInstant` lands on exactly its four overloads
@@ -173,15 +176,15 @@ def _wrapper_sql_sigs(sql_src):
     stmts, vocab = [], set()
     for sf in sorted(sql_src.rglob("*.sql")):
         text = sf.read_text(errors="ignore")
-        for sqlname, argdecls, ret, wrapper in _create_fn_stmts(text):
-            stmts.append((sqlname, argdecls, ret, wrapper))
+        for sqlname, argdecls, ret, wrapper, retset in _create_fn_stmts(text):
+            stmts.append((sqlname, argdecls, ret, wrapper, retset))
             if ret:
                 vocab.add(ret)                                  # a RETURNS clause is always a type
             for a in argdecls:
                 bt = _bare_type(a)
                 if bt and " " not in bt:
                     vocab.add(bt)                               # a single-token arg is always a type
-    for sqlname, argdecls, ret, wrapper in stmts:
+    for sqlname, argdecls, ret, wrapper, retset in stmts:
         if wrapper is None:
             continue                                            # LANGUAGE SQL / $$ body — no C symbol
         args = [_arg_type(a, vocab) for a in argdecls]
@@ -189,7 +192,7 @@ def _wrapper_sql_sigs(sql_src):
         required = sum(1 for a in argdecls if not re.search(r"\bDEFAULT\b", a, re.I))
         out.setdefault(wrapper, []).append(
             {"sqlName": sqlname, "args": args, "required": required,
-             "argDefaults": arg_defaults, "ret": ret})
+             "argDefaults": arg_defaults, "ret": ret, "retSet": retset})
     return out
 
 
@@ -428,7 +431,7 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
                     wsigs = signatures_for(f["name"], wsigs, scope)
                     scoped = True
             for s in wsigs:
-                key = (s["sqlName"], tuple(s["args"]), s["ret"])
+                key = (s["sqlName"], tuple(s["args"]), s["ret"], s["retSet"])
                 if key not in seen:
                     seen.add(key)
                     sigs.append(s)
@@ -486,6 +489,8 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
                 if not multiname and s["sqlName"] != surface:
                     continue
                 entry = {"args": s["args"], "ret": s["ret"]}
+                if s["retSet"]:
+                    entry["retSet"] = True
                 if any(d is not None for d in s["argDefaults"]):
                     entry["argDefaults"] = s["argDefaults"]
                 if multiname or s["sqlName"] != f["sqlfn"]:
