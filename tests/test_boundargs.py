@@ -594,6 +594,154 @@ class GuardedDefaultTests(unittest.TestCase):
         self.assertEqual(n, 0)
 
 
+# Tgeo_space_split and Tgeo_split_start as mobilitydb/src/geo/tgeo_tile.c states them
+HELPER_INIT_WRAPPERS = '''
+static void
+Tgeo_split_start(FunctionCallInfo fcinfo, FuncCallContext *funcctx,
+  const Temporal *temp, double xsize, double ysize, double zsize,
+  const Interval *duration, const GSERIALIZED *sorigin, TimestampTz torigin,
+  bool bitmatrix, bool border_inc)
+{
+  int ntiles;
+  funcctx->user_fctx = tgeo_space_time_split_init(temp, xsize, ysize, zsize,
+    duration, sorigin, torigin, bitmatrix, border_inc, &ntiles);
+  get_call_result_type(fcinfo, 0, &funcctx->tuple_desc);
+  BlessTupleDesc(funcctx->tuple_desc);
+  return;
+}
+
+Datum
+Tgeo_space_split(PG_FUNCTION_ARGS)
+{
+  if (SRF_IS_FIRSTCALL())
+  {
+    FuncCallContext *funcctx = SRF_FIRSTCALL_INIT();
+    Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+    double xsize = PG_GETARG_FLOAT8(1);
+    double ysize = 0;
+    double zsize = 0;
+    int i = 2;
+    if (PG_NARGS() > 5)
+      ysize = PG_GETARG_FLOAT8(i++);
+    if (PG_NARGS() > 6)
+      zsize = PG_GETARG_FLOAT8(i++);
+    GSERIALIZED *sorigin = PG_GETARG_GSERIALIZED_P(i++);
+    bool bitmatrix = PG_GETARG_BOOL(i++);
+    bool border_inc = PG_GETARG_BOOL(i++);
+    Tgeo_split_start(fcinfo, funcctx, temp, xsize, ysize, zsize, NULL,
+      sorigin, 0, bitmatrix, border_inc);
+  }
+  return Tgeo_split_next(fcinfo);
+}
+
+static void
+Other_start(FunctionCallInfo fcinfo, const Temporal *temp, double size)
+{
+  other_init(temp, size);
+}
+
+Datum
+Tgeo_other_split(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  double size = 0;
+  if (PG_NARGS() > 1)
+    size = PG_GETARG_FLOAT8(1);
+  Other_start(fcinfo, temp, size);
+  PG_RETURN_VOID();
+}
+'''
+
+HELPER_INIT_MEOS = '''
+/**
+ * @brief Return the state of a split of a temporal value over a grid
+ */
+STboxGridState *
+tgeo_space_time_split_init(const Temporal *temp, double xsize, double ysize,
+  double zsize, const Interval *duration, const GSERIALIZED *sorigin,
+  TimestampTz torigin, bool bitmatrix, bool border_inc, int *ntiles)
+{
+  return NULL;
+}
+
+/**
+ * @brief Return the state of another split
+ */
+void *
+other_init(const Temporal *value, double step)
+{
+  return NULL;
+}
+'''
+
+
+class HelperInitTests(unittest.TestCase):
+    """A wrapper reading its sizes under PG_NARGS guards and handing them to a helper that
+    calls the members' initialiser, bound by parameter name as #GenericTwinTests binds a
+    generic."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        for sub, name, text in (("src", "tile.c", HELPER_INIT_WRAPPERS),
+                                ("meos", "tile.c", HELPER_INIT_MEOS)):
+            (root / sub).mkdir()
+            (root / sub / name).write_text(text)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _split(self):
+        return {"name": "tgeo_space_split", "mdbC": "Tgeo_space_split",
+                "params": [{"name": n} for n in (
+                    "temp", "xsize", "ysize", "zsize", "sorigin", "bitmatrix",
+                    "border_inc", "space_bins", "count")],
+                "sqlSignatures": [
+                    {"args": ["tgeompoint", "float", "float", "float", "geometry",
+                              "boolean", "boolean"], "ret": "point_tpoint"},
+                    {"args": ["tgeompoint", "float", "geometry", "boolean", "boolean"],
+                     "ret": "point_tpoint"},
+                    {"args": ["tgeompoint", "float", "float", "geometry", "boolean",
+                              "boolean"], "ret": "point_tpoint"}]}
+
+    def _merge(self, func, meos=True):
+        root = Path(self.tmp.name)
+        # the @param names run.py reads from the MEOS sources (parser.outparam)
+        documented = {"tgeo_space_time_split_init": {
+            "temp", "xsize", "ysize", "zsize", "duration", "sorigin", "torigin",
+            "bitmatrix", "border_inc", "ntiles"}}
+        return merge_boundargs({"functions": [func]}, root / "src", documented,
+                               meos_src=root / "meos" if meos else None)
+
+    def test_each_short_form_binds_the_sizes_it_omits(self):
+        idl, n, drift = self._merge(self._split())
+        f = idl["functions"][0]
+        self.assertEqual([s.get("boundArgs") for s in f["sqlSignatures"]],
+                         [None, {"ysize": "0", "zsize": "0"}, {"zsize": "0"}])
+        self.assertNotIn("boundArgs", f.get("shape", {}))
+        self.assertEqual((n, drift), (3, []))
+
+    def test_a_literal_for_a_parameter_the_member_lacks_binds_nothing(self):
+        # duration NULL and torigin 0 reach the initialiser, which tgeo_space_split lacks
+        idl, _, _ = self._merge(self._split())
+        for s in idl["functions"][0]["sqlSignatures"]:
+            self.assertFalse({"duration", "torigin"} & set(s.get("boundArgs") or {}))
+
+    def test_an_initialiser_sharing_no_parameter_name_binds_nothing(self):
+        idl, n, _ = self._merge(
+            {"name": "tgeo_other_split", "mdbC": "Tgeo_other_split",
+             "params": [{"name": "temp"}, {"name": "width"}],
+             "sqlSignatures": [{"args": ["tgeompoint"], "ret": "tgeompoint"}]})
+        f = idl["functions"][0]
+        self.assertFalse([s for s in f["sqlSignatures"] if "boundArgs" in s])
+        self.assertNotIn("boundArgs", f.get("shape", {}))
+
+    def test_without_the_meos_sources_the_initialiser_is_not_read(self):
+        idl, _, _ = self._merge(self._split(), meos=False)
+        f = idl["functions"][0]
+        self.assertFalse([s for s in f["sqlSignatures"] if "boundArgs" in s])
+
+
 class BoundNameValueTests(unittest.TestCase):
     """A bound literal naming a macro of a header the parse did not read gets its value."""
 
