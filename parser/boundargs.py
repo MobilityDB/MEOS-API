@@ -68,8 +68,10 @@ _FALSE = re.compile(r"^(?:false|FALSE)$")
 _NUMBER = re.compile(r"^-?\d+(?:\.\d+)?$")
 _ENUM = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _IDENT = re.compile(r"^\w+$")
-# A shared helper takes the call info plus the parameters the wrappers bind.
-_HELPER = re.compile(r"Datum\s+(?P<name>\w+)\s*\(\s*FunctionCallInfo\s+\w+"
+# A shared helper takes the call info plus the parameters the wrappers bind, whatever it
+# returns: a `Datum` helper answers for the wrapper, a `void` one lays the state a
+# set-returning wrapper then streams (`Tgeo_split_start`, `Stbox_tiles_start`).
+_HELPER = re.compile(r"\b(?P<name>[A-Za-z_]\w*)\s*\(\s*FunctionCallInfo\s+\w+"
                      r"(?P<rest>[^)]*)\)\s*\{")
 # ... and a wrapper delegates to it by passing that same call info straight through.
 _DELEG = re.compile(r"\b(?P<name>\w+)\s*\(\s*fcinfo\s*(?P<args>,[^;]*?)?\)\s*;")
@@ -163,8 +165,11 @@ def extract_helpers(mdb_src: str | Path) -> dict[str, tuple[str, list[str]]]:
 
 
 def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
-    """``(helper_body, {helper_param: literal})`` when ``body`` delegates to a shared
-    helper, passing the call info through and binding the rest to literals."""
+    """``(helper_body, {helper_param: literal}, {helper_param: (k, literal)})`` when
+    ``body`` delegates to a shared helper, passing the call info through: the helper
+    parameters the wrapper binds to literals, and those it binds to a local it reads from
+    argument ``k`` only when the call carries it (#_guarded_default), the literal the
+    local starts from being what a signature omitting argument ``k`` passes on."""
     for m in _DELEG.finditer(body):
         entry = helpers.get(m.group("name"))
         if entry is None:
@@ -172,14 +177,18 @@ def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
         hbody, hparams = entry
         raw = (m.group("args") or "").strip()
         vals = _split_args(raw[1:]) if raw.startswith(",") else []
-        subst = {}
+        subst, gsubst = {}, {}
         for pname, val in zip(hparams, vals):
             lit = _literal(val)
             if lit is not None:
                 subst[pname] = lit
-        if subst:
-            return hbody, subst
-    return None, {}
+            elif _IDENT.match(val):
+                dflt = _guarded_default(body, val)
+                if dflt is not None:
+                    gsubst[pname] = dflt
+        if subst or gsubst:
+            return hbody, subst, gsubst
+    return None, {}, {}
 
 
 # A call to a lowercase C function, the form every MEOS function takes.
@@ -283,13 +292,17 @@ def _guarded_default(body: str, var: str) -> tuple[int, str] | None:
 def _wrapper_bound(body: str, func: dict, drift: list,
                    documented: dict[str, set],
                    subst: dict[str, str] | None = None,
-                   guarded: dict[str, tuple[int, str]] | None = None) -> dict[str, str]:
+                   guarded: dict[str, tuple[int, str]] | None = None,
+                   gsubst: dict[str, tuple[int, str]] | None = None) -> dict[str, str]:
     """The literals wrapper ``body`` binds in its call to ``func['name']``, keyed by
     ``func``'s parameter name. Empty if the wrapper does not call ``func`` by name.
 
     A local the wrapper reads from argument ``k`` only when the call carries it
     (``_guarded_default``) is caller-sourced for a signature stating ``k`` and a literal
-    for one omitting it; it goes into ``guarded`` as ``{param: (k, literal)}``.
+    for one omitting it; it goes into ``guarded`` as ``{param: (k, literal)}``. When
+    ``body`` is a helper the wrapper delegates to, ``gsubst`` holds the helper parameters
+    such a local reaches (#_delegated), and a call argument naming one of them goes into
+    ``guarded`` the same way.
 
     ``documented`` maps a MEOS function to the set of its ``@param``-documented parameter
     names (``parser.outparam.extract_param_names``). A bare-identifier argument bound to a
@@ -301,6 +314,7 @@ def _wrapper_bound(body: str, func: dict, drift: list,
     if not args:
         return {}
     subst = subst or {}
+    gsubst = gsubst or {}
     assigned = {m.group("var") for m in _ASSIGNED.finditer(body)}
     doc_params = documented.get(func["name"], frozenset())
     params = func.get("params", [])
@@ -314,6 +328,10 @@ def _wrapper_bound(body: str, func: dict, drift: list,
         if a in subst:
             # a helper parameter the delegating wrapper bound to a literal
             bound[pname] = subst[a]
+            continue
+        if a in gsubst and guarded is not None:
+            # a helper parameter the delegating wrapper feeds from a guarded local
+            guarded.setdefault(pname, gsubst[a])
             continue
         if a in assigned and _IDENT.match(a) and guarded is not None:
             dflt = _guarded_default(body, a)
@@ -339,7 +357,14 @@ def _group_bound(body: str, group: list, helpers: dict, drift: list,
     from its call to whichever member of ``group`` it names (branches such as the RGEO
     ternary agree, and the first wins), or from its delegation to a shared helper when it
     names none, or from its call to the generic the members wrap when it does neither --
-    a function none of them is whose parameter names, in ``generics``, equal a member's."""
+    a function none of them is whose parameter names, in ``generics``, equal a member's.
+
+    A helper can reach none of the members either: a set-returning wrapper hands its
+    arguments to a helper that lays the state it streams through the members' own
+    initialiser (`Tgeo_split_start` calls `tgeo_space_time_split_init`, not
+    `tgeo_space_split`). The initialiser takes the members' parameters under the same
+    names among others, so each argument of that call binds to the member parameter of
+    its name, as the generic twin binds by name."""
     bound: dict[str, str] = {}
     guarded: dict[str, tuple[int, str]] = {}
     for func in group:
@@ -350,12 +375,28 @@ def _group_bound(body: str, group: list, helpers: dict, drift: list,
         return bound, guarded
     # The wrapper names no MEOS call of its own: it delegates, and the literal it binds
     # sits at that delegation.
-    hbody, subst = _delegated(body, helpers)
+    hbody, subst, gsubst = _delegated(body, helpers)
     if hbody is not None:
         for func in group:
             for k, v in _wrapper_bound(hbody, func, drift, documented, subst,
-                                       guarded).items():
+                                       guarded, gsubst).items():
                 bound.setdefault(k, v)
+        if not (bound or guarded) and generics:
+            member_params = {p.get("name") for f in group for p in f.get("params", [])}
+            names = {f["name"] for f in group}
+            for m in _CALLEE.finditer(hbody):
+                callee = m.group("name")
+                plist = generics.get(callee)
+                if callee in names or not plist or not set(plist) & member_params:
+                    continue
+                twin = {"name": callee,
+                        "params": [{"name": n if n in member_params else None}
+                                   for n in plist]}
+                for k, v in _wrapper_bound(hbody, twin, drift, documented, subst,
+                                           guarded, gsubst).items():
+                    bound.setdefault(k, v)
+                if bound or guarded:
+                    break
     if bound or guarded or not generics:
         return bound, guarded
     # The wrapper calls a generic its typed members wrap: a function none of them is,
