@@ -16,6 +16,7 @@ from parser.nullable import merge_nullable
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import merge_boundargs, resolve_bound_names
+from parser.compositions import attach_compositions
 from parser.enrich import enrich_idl
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
@@ -341,6 +342,15 @@ def main():
     # type; a row with a column nothing feeds stops the catalog.
     idl, nrows = attach_row_sources(idl)
     print(f"      SQL rows with every column's C source: {nrows}", file=sys.stderr)
+
+    # State each SQL function composed over the functions of another type, its casts,
+    # call and restore named by MEOS function, read from the deployed SQL bodies and
+    # resolved through the signatures above; a step no public MEOS function takes
+    # stops the catalog.
+    if SQL_SRC.exists():
+        idl, ncomp = attach_compositions(idl, SQL_SRC)
+        print(f"      SQL compositions over another type's functions: {ncomp}",
+              file=sys.stderr)
 
     # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
     # a consumer proves it is current by comparing sourceCommit to live upstream master, never by

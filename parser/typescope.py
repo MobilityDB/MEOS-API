@@ -53,7 +53,7 @@ _NOT_A_TYPE = {'unknown'}
 C_BASE_TYPES = {
     'int': 'int4', 'int32': 'int4', 'int64': 'int8', 'double': 'float8',
     'bool': 'bool', 'text': 'text', 'DateADT': 'date',
-    'TimestampTz': 'timestamptz',
+    'TimestampTz': 'timestamptz', 'Interval': 'interval',
     'GSERIALIZED': ('geometry', 'geography'),
 }
 
