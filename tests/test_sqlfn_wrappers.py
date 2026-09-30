@@ -152,7 +152,7 @@ class ReturnTypeTests(unittest.TestCase):
         """PostgreSQL accepts the attributes in any order, so SUPPORT may precede
         the body — `aTouches(tcbuffer, cbuffer)` is the one place MobilityDB
         writes it that way."""
-        rets = {name: ret for name, _, ret, _ in _create_fn_stmts(MDB_SQL)}
+        rets = {name: ret for name, _, ret, _, _ in _create_fn_stmts(MDB_SQL)}
         self.assertEqual(rets["aDwithin"], "boolean")
         self.assertEqual(rets["eDwithin"], "boolean")
 
