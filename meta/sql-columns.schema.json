@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "sql-columns.schema.json",
+  "title": "Columns of returned SQL rows that MEOS does not state",
+  "description": "Declared values of the columns of rows a SQL function returns that its wrapper computes rather than reads from MEOS. Consumed by parser/sqlfn.py, which fails generation on any row with a column neither fed by a C value nor declared here.",
+  "type": "object",
+  "required": ["rows"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "rows": {
+      "type": "object",
+      "description": "Keyed by the composite type a function returns, or by its SQL name when it returns record.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["note", "columns"],
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "What the wrapper computes, and why MEOS does not state it.",
+            "minLength": 1
+          },
+          "columns": {
+            "type": "object",
+            "description": "Keyed by column name.",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "description": "ordinal: the column numbers the rows from 1, as PostgreSQL's WITH ORDINALITY.",
+                  "const": "ordinal"
+                },
+                "offset": {
+                  "description": "A constant the wrapper adds to the C value feeding the column.",
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "./sql-columns.schema.json",
+  "description": "The columns of rows a SQL function returns whose value MEOS does not state. parser/sqlfn.py feeds every column of a returned row from the C value of its type: the value or array the function returns, or an out-parameter. A column its wrapper computes rather than reads is declared here, keyed by the composite type the function returns, or by its SQL name when it returns record; a row with a column neither fed nor declared stops the catalog.",
+  "rows": {
+    "index_tbox": {
+      "note": "The tiles of a temporal box: index numbers them from 1 in the order the MEOS array returns them.",
+      "columns": {"index": {"from": "ordinal"}}
+    },
+    "index_stbox": {
+      "note": "The tiles of a spatiotemporal box: index numbers them from 1 in the order the MEOS array returns them.",
+      "columns": {"index": {"from": "ordinal"}}
+    },
+    "aDisjointPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "aDwithinPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "aIntersectsPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "aTouchesPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "eDisjointPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "eDwithinPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "eIntersectsPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "eTouchesPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "tDisjointPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "tDwithinPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "tIntersectsPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "tTouchesPairs": {
+      "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
+      "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    }
+  }
+}
