@@ -23,7 +23,7 @@ from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
                           lint_ea_sqlfn, lint_positional_sqlfn,
-                          lint_sqlfn_case_collisions)
+                          lint_sqlfn_case_collisions, state_deployed_sqlfn)
 from parser.doxygroup import attach_groups
 from parser.extractors import find_unlisted_foreign_structs
 from parser.families import all_families, use_headers_dir
@@ -276,6 +276,10 @@ def main():
         nbo = sum(1 for f in idl.get("functions", []) if f.get("sqlfnBackingOnly"))
         print(f"      Flagged {nbo} bbox-topological backing @sqlfn tag(s) "
               f"(sqlfnBackingOnly)", file=sys.stderr)
+        # A function whose signatures all carry one SQL name takes it as its sqlfn,
+        # in place of the family member its wrapper's tag names.
+        idl, ndep = state_deployed_sqlfn(idl)
+        print(f"      sqlfn set to the one name its signatures carry: {ndep}", file=sys.stderr)
         # The same map names each position operator once per class (setLeft …
         # stboxLeft): derive those names from its @sqlfn/@sqlop tags.
         idl = attach_position_names(idl)
