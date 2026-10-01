@@ -626,3 +626,20 @@ def enrich_idl(idl: dict) -> dict:
         ),
     }
     return idl
+
+
+def restate_wire(idl: dict) -> dict:
+    """Restate each function's ``network`` and ``wire``, and the exposable count, from
+    ``idl["typeEncodings"]`` as it stands, through #assess as #enrich_idl first states
+    them. #state_type_encodings of parser/codecs.py settles each class's codec after
+    enrich (``Temporal`` reads through ``temporal_from_hexwkb``, not enrich's
+    ``tbigint_in``), so a wire read before it names codecs the catalog no longer
+    states."""
+    enum_names = {e["name"] for e in idl.get("enums", [])}
+    type_encodings = idl.get("typeEncodings", {})
+    functions = idl.get("functions", [])
+    for fn in functions:
+        fn["network"], fn["wire"] = assess(fn, type_encodings, enum_names)
+    idl["enrichment"]["exposableFunctions"] = sum(
+        1 for fn in functions if fn["network"]["exposable"])
+    return idl

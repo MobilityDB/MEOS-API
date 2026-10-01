@@ -109,14 +109,21 @@ For every function:
 "network": { "exposable": true, "method": "POST", "reason": null },
 "wire": {
   "params": [
-    { "name": "temp1", "kind": "serialized", "cType": "Temporal *",
-      "decode": "temporal_in", "encodings": ["mfjson","text","wkb"] },
-    { "name": "temp2", "kind": "serialized", "cType": "Temporal *",
-      "decode": "temporal_in", "encodings": ["mfjson","text","wkb"] }
+    { "name": "temp1", "kind": "serialized", "cType": "const Temporal *",
+      "decode": "temporal_from_hexwkb", "decode_aux": [],
+      "encodings": ["mfjson","text","wkb"] },
+    { "name": "temp2", "kind": "serialized", "cType": "const Temporal *",
+      "decode": "temporal_from_hexwkb", "decode_aux": [],
+      "encodings": ["mfjson","text","wkb"] }
   ],
   "result": { "kind": "json", "json": "boolean" }
 }
 ```
+
+A `serialized` value reads and writes through its class's `in` and `out` with
+their `in_aux` and `out_aux`, as section 2 states them once the SQL signatures
+are in (`parser/enrich.py` `restate_wire`): a `Temporal` reads through
+`temporal_from_hexwkb`, whose WKB carries the subtype.
 
 `wire` element `kind`:
 
