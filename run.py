@@ -15,7 +15,8 @@ from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
-from parser.boundargs import merge_boundargs, resolve_bound_names
+from parser.boundargs import (attach_call_literals, merge_boundargs, resolve_bound_names,
+                              strip_call_literals)
 from parser.compositions import attach_compositions
 from parser.enrich import enrich_idl
 from parser.codecs import state_type_encodings
@@ -171,6 +172,11 @@ def main():
         idl, ngrp = attach_groups(idl, _grp_root / "meos" / "src",
                                   _grp_root / "pgtypes")
         print(f"      attached {ngrp} doxygen @ingroup groups", file=sys.stderr)
+
+        # A trailing input's default is the literal MEOS's own calls pass for a parameter
+        # of its name, where they pass one alone (typmod reads -1).
+        idl, ncall = attach_call_literals(idl, _grp_root / "meos" / "src")
+        print(f"      parameters MEOS's calls pass one literal: {ncall}", file=sys.stderr)
 
     # 1f. Derive service-projection metadata (category / encodings / network).
     #     Runs before the merge so manual annotations override the heuristics.
@@ -377,6 +383,7 @@ def main():
     idl["families"] = list(all_families())
     print(f"      families = {', '.join(idl['families'])}", file=sys.stderr)
 
+    idl = strip_call_literals(idl)
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
         json.dump(idl, f, indent=2)
