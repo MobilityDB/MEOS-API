@@ -79,6 +79,33 @@ class StructLayoutTests(unittest.TestCase):
                     fld["offset_bits"], 0,
                     f"{s['name']}.{fld['name']} has unresolved offset")
 
+    def test_a_structure_declared_first_is_read_from_its_definition(self):
+        # `meos.h` declares MeosArray and SkipList before `meos_internal.h` defines
+        # them, so their layout is read where they are defined
+        for name, field in (("MeosArray", "count"), ("SkipList", "capacity"),
+                            ("varlena", "vl_len_")):
+            self.assertIn(field, self._fields(name), name)
+
+
+class ForwardDeclarationTests(unittest.TestCase):
+    """#_dedup_structs of parser/parser.py over headers that declare a structure before
+    defining it, and one they only declare, parsed as #StructLayoutTests's catalog is."""
+
+    def test_the_definition_wins_and_an_opaque_structure_stays(self):
+        import os
+        import tempfile
+        if not os.environ.get("MDB_SRC_ROOT"):
+            self.skipTest("MDB_SRC_ROOT not set; the parse reads MobilityDB's families")
+        from parser.parser import parse_all_headers
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "a.h").write_text("struct S;\nstruct O;\n"
+                                      "extern int f(struct S *s, struct O *o);\n")
+            (root / "b.h").write_text("struct S { int x; double y; };\n")
+            idl = parse_all_headers(root)
+        structs = {s["name"]: [f["name"] for f in s["fields"]] for s in idl["structs"]}
+        self.assertEqual(structs, {"S": ["x", "y"], "O": []})
+
 
 if __name__ == "__main__":
     unittest.main()

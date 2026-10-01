@@ -170,7 +170,7 @@ def parse_meos(entry: Path, include_dir: Path,
                     struct["name"] = typedef_name
                 else:
                     continue
-            structs.append(struct)
+            structs.append((struct, node.is_definition()))
 
         elif node.kind == clang.cindex.CursorKind.ENUM_DECL and node.spelling:
             enums.append(extract_enum(node))
@@ -186,8 +186,24 @@ def parse_meos(entry: Path, include_dir: Path,
                 result.append(item)
         return result
 
+    def _dedup_structs(items: list) -> list:
+        """One record per structure, as #_dedup keeps one per name, read from its
+        definition when the unit holds one: a forward declaration (`struct varlena;`)
+        met before the definition has no fields, and a structure only ever declared
+        (opaque, `struct NumericData;`) keeps its declaration. The structure keeps the
+        place where the parse first meets it."""
+        order, chosen = [], {}
+        for struct, is_def in items:
+            name = struct["name"]
+            if name not in chosen:
+                order.append(name)
+                chosen[name] = (struct, is_def)
+            elif is_def and not chosen[name][1]:
+                chosen[name] = (struct, is_def)
+        return [chosen[name][0] for name in order]
+
     functions = _dedup(functions)
-    structs   = _dedup(structs)
+    structs   = _dedup_structs(structs)
     enums     = _dedup(enums)
     macros    = _dedup(macros)
 
