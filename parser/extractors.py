@@ -276,6 +276,16 @@ def extract_struct(node) -> dict:
     }
 
 
+def _comment_text(raw: str) -> str:
+    """The text of a doc comment, its `/**`, `/**<`, `*/` and leading `*` removed and
+    nothing else. The parser has no routine keeping a comment's text, only ones blanking it
+    (#strip_comments of parser/temporaltypes.py); libclang's brief comment reads `@>` as a
+    Doxygen command and drops the `@`, so an operator a comment names (`` `@>` operator ``)
+    survives only in the raw text."""
+    text = re.sub(r"^/\*\*<?|\*/$", "", raw.strip())
+    return " ".join(line.strip().lstrip("*").strip() for line in text.splitlines()).strip()
+
+
 def extract_enum(node) -> dict:
     return {
         "name": node.spelling,
@@ -286,6 +296,9 @@ def extract_enum(node) -> dict:
             {
                 "name": v.spelling,
                 "value": v.enum_value,
+                # the value's doc comment, `/**< ... */`, which states what a value
+                # serves (#index_searches of parser/indexsearch.py reads its operator)
+                **({"doc": _comment_text(v.raw_comment)} if v.raw_comment else {}),
             }
             for v in node.get_children()
             if v.kind == clang.cindex.CursorKind.ENUM_CONSTANT_DECL
