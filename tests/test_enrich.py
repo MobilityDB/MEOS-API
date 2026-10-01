@@ -236,6 +236,37 @@ class ExposabilityTests(unittest.TestCase):
         self.assertIn("index", self.n("rtree_insert")["reason"])
 
 
+class StandardIntegerTests(unittest.TestCase):
+    """An integer the catalog states by its C standard name (``int64_t``, ``uint8_t``),
+    as #normalize_canonical of parser/typerecover.py states every integer typedef,
+    reads as an integer, as the builtin spellings in #ExposabilityTests do."""
+
+    def setUp(self):
+        self.fns = by_name(enrich_idl({
+            "functions": [
+                fn("bigint_to_set", "struct Set *", ("int64_t", "i")),
+                fn("set_round", "struct Set *",
+                   ("const struct Set *", "s"), ("int32_t", "maxdd")),
+                fn("set_hash", "uint32_t", ("const struct Set *", "s")),
+                fn("bigintset_in", "struct Set *", ("const char *", "str")),
+                fn("bigintset_out", "char *", ("const struct Set *", "set")),
+            ],
+            "structs": [{"name": "Set", "fields": []}],
+            "enums": [],
+        }))
+
+    def test_a_standard_integer_parameter_is_a_json_integer(self):
+        f = self.fns["bigint_to_set"]
+        self.assertEqual(f["wire"]["params"][0],
+                         {"name": "i", "kind": "json", "json": "integer"})
+        self.assertTrue(f["network"]["exposable"])
+        self.assertEqual(self.fns["set_round"]["wire"]["params"][1]["json"], "integer")
+
+    def test_a_standard_integer_result_is_a_json_integer(self):
+        self.assertEqual(self.fns["set_hash"]["wire"]["result"],
+                         {"kind": "json", "json": "integer"})
+
+
 class ApiClassificationTests(unittest.TestCase):
     def setUp(self):
         self.fns = by_name(make_idl())

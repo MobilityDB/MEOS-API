@@ -8,7 +8,8 @@ from parser.parser import parse_all_headers, merge_meta
 from parser.portable import (attach_portable_aliases, attach_position_names,
                              classify_backing_sqlfn)
 from parser.covering import attach_temporal_covering
-from parser.typerecover import recover_collapsed_types, normalize_canonical
+from parser.typerecover import (recover_collapsed_types, normalize_canonical,
+                                 postgres_scalar_names)
 from parser.header_types import reconcile
 from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
@@ -125,7 +126,8 @@ def main():
     #     source parse leaves them as the typedef. Deriving canonical from the
     #     faithful cType makes both parses agree, so a binding generator (which
     #     keys on canonical) marshals timestamps/jsonb rather than dropping them.
-    idl, ncanon = normalize_canonical(idl)
+    idl, ncanon = normalize_canonical(idl, postgres_scalar_names(
+        Path(os.environ.get("MDB_SRC_ROOT", "./_mobilitydb")) / "pgtypes"))
     if ncanon:
         print(f"      normalized {ncanon} canonical spellings to the cType typedef",
               file=sys.stderr)

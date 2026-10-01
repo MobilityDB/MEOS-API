@@ -202,24 +202,99 @@ def _base_name(t):
     return _BASE_RE.sub(" ", t or "").strip()
 
 
-def normalize_canonical(idl):
+# The fixed-width and size types the C standard names (<stdint.h>, <stddef.h>), the
+# spellings #_c_base of parser/sqlfn.py reads as MEOS's own: the same width on every
+# platform, so a chain of typedefs reaching one is stated by it.
+_C_STANDARD = re.compile(r"^(?:u?int(?:8|16|32|64)_t|u?intptr_t|size_t|ptrdiff_t)$")
+# C's own scalar type names, which a typedef chain ends at when it meets no name above.
+_C_SCALARS = {
+    "char", "signed char", "unsigned char", "short", "signed short", "unsigned short",
+    "short int", "signed short int", "unsigned short int", "int", "signed", "signed int",
+    "unsigned", "unsigned int", "long", "signed long", "unsigned long", "long int",
+    "signed long int", "unsigned long int", "long long", "signed long long",
+    "unsigned long long", "long long int", "signed long long int",
+    "unsigned long long int", "float", "double", "long double", "_Bool", "bool",
+}
+# A typedef of one scalar or of another name: no struct, union, enum, pointer or array.
+_TYPEDEF_DECL = re.compile(
+    r"^\s*typedef\s+(?!(?:struct|union|enum)\b)([A-Za-z_][\w ]*?)\s+([A-Za-z_]\w*)\s*;",
+    re.M)
+
+
+def postgres_scalar_names(pgtypes_root):
+    """The scalar typedefs of MobilityDB's vendored PostgreSQL, ``pgtypes/``, the
+    directory #_public_pgtypes_headers of run.py reads (``TimestampTz``, ``DateADT``,
+    ``TimeADT``, ``Oid``, ``Datum``, ``int32``, ``float8``, ...): the names a ``typedef``
+    of one scalar or of another name declares there, whichever header declares it."""
+    root = Path(pgtypes_root)
+    if not root.is_dir():
+        return frozenset()
+    names = set()
+    for path in root.glob("**/*.h"):
+        text = re.sub(r"/\*.*?\*/|//[^\n]*", " ", path.read_text(errors="ignore"),
+                      flags=re.S)
+        names |= {name for _, name in _TYPEDEF_DECL.findall(text)}
+    return frozenset(names)
+
+
+# The floating types of C, which have no fixed-width name of their own.
+_C_FLOATS = {"float", "double", "long double"}
+
+
+def scalar_spelling(name, typedefs, pg_names):
+    """How the catalog states the scalar type ``name``, read from its typedef chain, as
+    #_recovery reads a collapsed name from its declaration.
+
+    A C standard type (``int64_t``, ``size_t``) is stated by itself. A name defined as
+    its own ``<stdint.h>`` name, as PostgreSQL 18's ``c.h`` defines the "historical
+    names for types in <stdint.h>" (``typedef int32_t int32``), and a name for a C
+    floating type (``typedef double float8``) are stated by the type they name. Any
+    other typedef PostgreSQL declares (#postgres_scalar_names) is a type of its own
+    (``TimestampTz``, ``DateADT``, ``Oid``, ``Datum``) and keeps its name. A chain
+    meeting none of these ends at the C scalar it names. None for a name that is no
+    typedef of a scalar."""
+    seen, cur = set(), name
+    while cur not in seen:
+        seen.add(cur)
+        if _C_STANDARD.match(cur):
+            return cur
+        nxt = typedefs.get(cur)
+        if nxt is None:
+            return cur if cur in _C_SCALARS and cur != name else None
+        nxt = " ".join(re.sub(r"\b(?:const|volatile)\b", " ", nxt).split())
+        if nxt == cur + "_t" or nxt in _C_FLOATS:
+            cur = nxt
+            continue
+        if cur in pg_names:
+            return cur
+        cur = nxt
+    return None
+
+
+def normalize_canonical(idl, pg_names=frozenset()):
     """Re-derive each type slot's ``canonical`` from its ``cType`` typedef.
 
-    ``canonical`` is the MEOS/PG typedef the public API exposes (``_TYPE_MAP``),
-    not libclang's fully-resolved platform type. The self-contained (installed)
-    header parse resolves ``TimestampTz`` -> ``long`` and ``Jsonb *`` -> ``struct
-    varlena *`` while ``cType`` keeps the faithful typedef, so re-derive
-    ``canonical`` from ``cType`` -- a binding generator keys on ``canonical`` and
-    must see the semantic type (a timestamp, a jsonb), never its platform width.
-    Idempotent; a no-op on the source parse (``canonical`` already equals the
-    typedef) and on non-typedef slots (``Temporal *``, ``int *``). Complements
-    ``recover_collapsed_types``: that recovers a ``cType`` the preprocessor erased
-    to ``int``; this trusts a faithful ``cType`` and only re-spells ``canonical``.
+    A scalar typedef is stated by its own typedef chain (#scalar_spelling), as the
+    unit the catalog parsed declares it (``_typedefs``, recorded by the parser): a type
+    PostgreSQL declares keeps its name (``TimestampTz``, ``TimeADT``), and any other
+    reaches the C standard type of its width (``int32`` -> ``int32_t``, ``H3Index`` ->
+    ``uint64_t``), never the platform spelling libclang resolves it to (``TimeADT`` ->
+    ``long``, 32 bits on Windows). Any other typedef keeps the spelling ``_TYPE_MAP``
+    gives it (``Jsonb``, ``GSERIALIZED``), not libclang's (``struct varlena *``).
+
+    A binding generator keys on ``canonical`` and must see the type MEOS declares,
+    never a platform width. Idempotent; a no-op on non-typedef slots (``Temporal *``,
+    ``int *``). Complements ``recover_collapsed_types``: that recovers a ``cType`` the
+    preprocessor erased to ``int``; this trusts a faithful ``cType`` and only
+    re-spells ``canonical``.
     """
     fixed = 0
+    typedefs = idl.pop("_typedefs", None) or {}
 
     def want(ctype):
-        mapped = _TYPE_MAP.get(_base_name(ctype))
+        base = _base_name(ctype)
+        mapped = (scalar_spelling(base, typedefs, pg_names) if base in typedefs
+                  else None) or _TYPE_MAP.get(base)
         if not mapped:
             return None
         const = "const " if re.search(r"\bconst\b", ctype) else ""

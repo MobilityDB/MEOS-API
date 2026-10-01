@@ -42,11 +42,16 @@ CATEGORIES = (
     "other",           # anything not classified above
 )
 
-# Canonical scalar spellings as emitted by libclang.
+# Canonical integer spellings: C's own names, and the fixed-width and size types the C
+# standard names, which #normalize_canonical of parser/typerecover.py states a MEOS or
+# PostgreSQL integer typedef by (`int32` is `int32_t`, `H3Index` is `uint64_t`).
 _INT_BASES = {
     "char", "signed char", "unsigned char",
     "short", "unsigned short", "int", "unsigned int",
     "long", "unsigned long", "long long", "unsigned long long",
+    "int8_t", "int16_t", "int32_t", "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+    "intptr_t", "uintptr_t", "size_t", "ptrdiff_t",
 }
 _FLOAT_BASES = {"float", "double", "long double"}
 _BOOL_BASES = {"bool", "_Bool"}
