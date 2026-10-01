@@ -5,11 +5,11 @@ library — so CI without a MEOS build still passes. Run it with:
 
     MEOS_LIBRARY_PATH=/usr/local/lib/libmeos.so python3 tests/test_engine_integration.py
 
-It drives the exact path the server uses, including the catalog's
-``in_aux``/``out_aux`` defaults (so the *generic* ``temporal_out(temp,
-maxdd=15)`` is called correctly — proving it serialises any subtype), and
-asserts that bad input raises ``MeosError`` instead of terminating the
-process (MEOS's default handler calls ``exit()``).
+It drives the exact path the server uses: a temporal value is read and
+written through the reader and writer the catalog states for its SQL type,
+each called with the trailing inputs the catalog states by name
+(``tfloat_out(temp, maxdd=15)``), and bad input raises ``MeosError`` instead of
+terminating the process (MEOS's default handler calls ``exit()``).
 """
 
 import json
@@ -28,18 +28,13 @@ _CATALOG = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
 _TBOOL = "{t@2000-01-01, f@2000-01-03, t@2000-01-05}"
 _TFLOAT = "{1.5@2000-01-01, 3.5@2000-01-03}"
 
-# A three-instant literal per temporal subtype, keyed by the decoder that reads
-# it. Which decoder the catalog selects for the opaque `Temporal` is settled by
-# an alphabetical tiebreak that build_type_encodings() documents as arbitrary:
-# there is no generic `temporal_in`, so the pick is whichever subtype sorts
-# first, and it MOVES when MobilityDB gains a type (tbigint displaced tbool).
-# The fixture therefore follows the pick instead of naming it.
-_LITERAL_BY_DECODER = {
-    "tbool_in": _TBOOL,
-    "tint_in": "{1@2000-01-01, 2@2000-01-03, 1@2000-01-05}",
-    "tbigint_in": "{1@2000-01-01, 2@2000-01-03, 1@2000-01-05}",
-    "tfloat_in": "{1.5@2000-01-01, 3.5@2000-01-03, 1.5@2000-01-05}",
-    "ttext_in": "{AA@2000-01-01, BB@2000-01-03, AA@2000-01-05}",
+# A temporal value of each SQL type, read through the reader the catalog states
+# for that type: `Temporal` serves twenty types and has no generic public reader.
+_LITERAL_BY_TYPE = {
+    "tbool": _TBOOL,
+    "tint": "{1@2000-01-01, 2@2000-01-03, 1@2000-01-05}",
+    "tfloat": "{1.5@2000-01-01, 3.5@2000-01-03, 1.5@2000-01-05}",
+    "ttext": "{AA@2000-01-01, BB@2000-01-03, AA@2000-01-05}",
 }
 
 _KIND_TAG = {"integer": "int", "number": "double",
@@ -58,41 +53,36 @@ class CtypesIntegrationTests(unittest.TestCase):
         te = (json.loads(_CATALOG.read_text()).get("typeEncodings", {})
               if _CATALOG.exists() else {})
         t = te.get("Temporal", {})
-        cls.tin = t.get("in", "tbool_in")
-        cls.tout = t.get("out", "tbool_out")
-        cls.in_aux = _aux(t.get("in_aux", []))
-        cls.out_aux = _aux(t.get("out_aux", []))
-        cls.tin_literal = _LITERAL_BY_DECODER.get(cls.tin)
+        cls.readers = (t.get("readers") or {}).get("text", {})
+        cls.reader_aux = (t.get("readerAux") or {}).get("text", {})
+        cls.writers = (t.get("writers") or {}).get("text", {})
+        cls.writer_aux = (t.get("writerAux") or {}).get("text", {})
 
-    def test_catalog_selected_in_out(self):
-        # Decoding stays a typed wrapper (subtype-narrow); encoding is the
-        # generic temporal_out with a defaulted maxdd.
-        #
-        # WHICH subtype decodes is not asserted: no `temporal_in` exists, so
-        # build_type_encodings() falls back to an alphabetical pick it calls
-        # arbitrary, and that pick moves when MobilityDB gains a type. What the
-        # design does guarantee is asserted instead — the decoder is one of the
-        # subtype-narrow readers, and the encoder IS the generic root.
-        self.assertIn(self.tin, _LITERAL_BY_DECODER,
-                      f"catalog selected {self.tin!r} as the Temporal decoder; "
-                      f"add its literal to _LITERAL_BY_DECODER")
-        self.assertEqual(self.tout, "temporal_out")
-        self.assertEqual(self.out_aux, [("int", 15)])
+    def read(self, sqltype, literal):
+        return self.eng.decode(self.readers[sqltype], literal,
+                               _aux(self.reader_aux[sqltype]))
+
+    def write(self, sqltype, handle):
+        return self.eng.encode(self.writers[sqltype], handle,
+                               _aux(self.writer_aux[sqltype]))
+
+    def test_each_type_states_its_own_reader_and_writer(self):
+        for sqltype in _LITERAL_BY_TYPE:
+            self.assertEqual(self.readers[sqltype], sqltype + "_in")
+            self.assertEqual(self.writers[sqltype], sqltype + "_out")
+        self.assertEqual(_aux(self.writer_aux["tfloat"]), [("int", 15)])
 
     def test_decode_invoke_scalar(self):
-        h = self.eng.decode(self.tin, self.tin_literal, self.in_aux)
-        self.assertTrue(h)
-        n = self.eng.invoke("temporal_num_instants", [("ptr", h)], "int")
-        self.assertEqual(n, 3)
+        for sqltype, literal in _LITERAL_BY_TYPE.items():
+            h = self.read(sqltype, literal)
+            self.assertTrue(h, sqltype)
+            n = self.eng.invoke("temporal_num_instants", [("ptr", h)], "int")
+            self.assertEqual(n, 3, sqltype)
 
-    def test_generic_encoder_round_trips_any_subtype(self):
-        # The whole point of the gap fix: temporal_out(+maxdd) serialises
-        # a tbool AND a tfloat — a subtype-narrow tbool_out could not.
-        hb = self.eng.decode("tbool_in", _TBOOL)
-        ob = self.eng.encode(self.tout, hb, self.out_aux)
+    def test_each_type_round_trips_through_its_own_writer(self):
+        ob = self.write("tbool", self.read("tbool", _TBOOL))
         self.assertIn("@", ob)
-        hf = self.eng.decode("tfloat_in", _TFLOAT)
-        of = self.eng.encode(self.tout, hf, self.out_aux)
+        of = self.write("tfloat", self.read("tfloat", _TFLOAT))
         self.assertIn("@", of)
         self.assertIn("1.5", of)
 
@@ -137,7 +127,7 @@ class CtypesIntegrationTests(unittest.TestCase):
             "temporal_merge_array",
             [("ptrarray", [h1, h2]), ("int", 2)], "ptr")
         self.assertTrue(merged)
-        out = self.eng.encode(self.tout, merged, self.out_aux)
+        out = self.write("tbool", merged)
         self.assertIn("@", out)
         self.assertIn("2000-01-03", out)        # both instants merged in
 

@@ -243,6 +243,18 @@ class TypeRecoverTests(unittest.TestCase):
         self.assertEqual(canon("pg_time_in", "typmod"), "int32_t")
         self.assertEqual(canon("set_as_wkb", "variant"), "uint8_t")
 
+    def test_a_type_of_its_own_keeps_its_name_beside_its_width(self):
+        # #test_cell_id_canonical_normalized_uniform holds the cells' width; typedef
+        # states what the value is, on the three cell ids and on no PostgreSQL type or
+        # width name
+        idl = json.loads(IDL.read_text())
+        slots = [s for f in idl["functions"]
+                 for s in [f["returnType"]] + f.get("params", [])]
+        named = {(s["typedef"], _base(s["canonical"])) for s in slots if "typedef" in s}
+        self.assertEqual(named, {("H3Index", "uint64_t"), ("Quadbin", "uint64_t"),
+                                 ("S2CellId", "uint64_t")})
+        self.assertEqual(self.by_name["h3index_in"]["returnType"]["typedef"], "H3Index")
+
 
 # C's own integer names: what a typedef must never be stated as.
 _C_INTEGERS = {
