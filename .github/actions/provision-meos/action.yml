@@ -63,8 +63,8 @@ runs:
     - name: Install dev headers for the libclang sysroot
       shell: bash
       run: |
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" update -qq
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y --no-install-recommends \
           clang libclang-dev \
           libjson-c-dev libgsl-dev libproj-dev libgeos-dev \
           postgresql-server-dev-16
@@ -103,14 +103,14 @@ runs:
       shell: bash
       run: |
         sudo service postgresql stop || true
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 --purge remove postgresql* -y || true
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" --purge remove postgresql* -y || true
         sudo rm -rf /var/lib/postgresql/ /etc/postgresql/ /var/log/postgresql/ || true
 
     - name: Add PostgreSQL APT repository (PGDG)
       if: inputs.build-libmeos == 'true'
       shell: bash
       run: |
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y curl ca-certificates gnupg
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y curl ca-certificates gnupg
         curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ \
           $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
@@ -119,8 +119,8 @@ runs:
       if: inputs.build-libmeos == 'true'
       shell: bash
       run: |
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y \
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" update
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y \
           libgeos-dev libproj-dev libjson-c-dev libgsl-dev \
           libh3-dev libgdal-dev libxml2-dev \
           autoconf automake libtool pkg-config \
