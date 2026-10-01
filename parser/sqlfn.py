@@ -992,3 +992,32 @@ def lint_sqlfn_case_collisions(idl, multi=None):
             if sf:
                 by_lower.setdefault(sf.lower(), set()).add(sf)
     return sorted((lo, sorted(sp)) for lo, sp in by_lower.items() if len(sp) > 1)
+
+
+def state_deployed_sqlfn(idl: dict) -> tuple[dict, int]:
+    """Set ``sqlfn`` to the one SQL name every signature of a function carries.
+
+    A wrapper's ``@sqlfn`` names one member of the family it serves: ``Set_in`` is
+    tagged ``intset_in()`` and backs ``floatset_in``, ``geomset_in`` and fifteen more,
+    and the signatures #attach_sqlfn_map keeps for ``floatset_in`` all carry
+    ``sqlName: floatset_in``, the name its ``CREATE FUNCTION`` deploys. When every
+    signature of a function carries one name, that name is the function's ``sqlfn``
+    and the signatures drop the ``sqlName`` that only restated it. A function whose
+    signatures carry several names keeps the tag, each signature its own name; a
+    ``sqlfnBackingOnly`` record, as #classify_backing_sqlfn of parser/portable.py marks
+    it, keeps its backing tag beside its ``publicSqlName``."""
+    n = 0
+    for f in idl.get("functions", []):
+        sigs = f.get("sqlSignatures")
+        if not sigs or f.get("sqlfnBackingOnly"):
+            continue
+        names = {s.get("sqlName", f["sqlfn"]) for s in sigs}
+        if len(names) != 1:
+            continue
+        name = names.pop()
+        for s in sigs:
+            s.pop("sqlName", None)
+        if name != f["sqlfn"]:
+            f["sqlfn"] = name
+            n += 1
+    return idl, n
