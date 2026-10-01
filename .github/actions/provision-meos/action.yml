@@ -25,10 +25,10 @@ inputs:
 outputs:
   catalog-path:
     description: Absolute path to the generated meos-idl.json.
-    value: ${{ steps.catalog.outputs.catalog-path || steps.provision.outputs.catalog-path }}
+    value: ${{ steps.catalog.outputs.catalog-path || steps.provision.outputs.catalog-path || steps.restore.outputs.catalog-path }}
   libmeos-prefix:
     description: Install prefix of libmeos when build-libmeos=true (else empty).
-    value: ${{ steps.provision.outputs.libmeos-prefix }}
+    value: ${{ steps.provision.outputs.libmeos-prefix || steps.restore.outputs.libmeos-prefix }}
   mobilitydb-src:
     description: >-
       The MobilityDB checkout the catalog was derived from. A consumer reads
@@ -110,21 +110,78 @@ runs:
       if: inputs.build-libmeos == 'true'
       shell: bash
       run: |
-        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y curl ca-certificates gnupg
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y --no-install-recommends \
+          curl ca-certificates gnupg
         curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ \
           $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 
+    # The two caches of the build path. The packages: libgdal-dev depends on the -dev
+    # packages of its drivers (mariadb, poppler, spatialite, xerces) and postgresql-server-dev-17
+    # on clang-19 and llvm-19, about 200 MB a runner downloads on every run, so the .deb files
+    # are kept in a runner-writable directory keyed on the runner image and the package list;
+    # a new image restores the previous one's files and downloads only what changed. The
+    # derivation: the libmeos prefix and the catalog are a function of the MobilityDB commit,
+    # the MEOS-API files that derive them, the families and the runner image, so a run on the
+    # same four restores them instead of building. A cross-repo action has no .git, so the
+    # MEOS-API side of the key is a hash of its files' contents.
+    - name: Key the provision caches
+      id: keys
+      if: inputs.build-libmeos == 'true'
+      shell: bash
+      env:
+        PACKAGES: >-
+          libgeos-dev libproj-dev libjson-c-dev libgsl-dev libh3-dev libgdal-dev libxml2-dev
+          autoconf automake libtool pkg-config postgresql-17 postgresql-server-dev-17
+        FAMILIES: ${{ inputs.families }}
+      run: |
+        REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        image="${ImageOS:-unknown}-${ImageVersion:-unknown}"
+        mdb_sha="$(git -C "$GITHUB_WORKSPACE/_mobilitydb_src" rev-parse HEAD)"
+        api_hash="$(cd "$REPO_ROOT" && find run.py requirements.txt parser meta tools \
+          .github/actions/provision-meos -type f -not -path '*/__pycache__/*' -print0 \
+          | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+        pkg_hash="$(echo "$PACKAGES" | tr -s ' \n' '\n\n' | sort | sha256sum | cut -c1-16)"
+        fam_hash="$(echo "$FAMILIES" | sha256sum | cut -c1-16)"
+        {
+          echo "packages=$PACKAGES"
+          echo "deb-prefix=provision-meos-debs-${ImageOS:-unknown}-"
+          echo "deb-key=provision-meos-debs-$image-$pkg_hash"
+          echo "build-key=provision-meos-build-$image-$mdb_sha-$api_hash-$fam_hash"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore the downloaded packages
+      if: inputs.build-libmeos == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/apt-archives
+        key: ${{ steps.keys.outputs.deb-key }}
+        restore-keys: ${{ steps.keys.outputs.deb-prefix }}
+
+    - name: Restore the derived libmeos prefix and catalog
+      id: build-cache
+      if: inputs.build-libmeos == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ runner.temp }}/meos-headers
+          ${{ runner.temp }}/meos-catalog
+        key: ${{ steps.keys.outputs.build-key }}
+
+    # Installed on a cache hit too: libmeos.so is linked against these libraries, and a
+    # consumer builds and runs against it.
     - name: Install libmeos build dependencies
       if: inputs.build-libmeos == 'true'
       shell: bash
+      env:
+        APT_ARCHIVES: ${{ runner.temp }}/apt-archives
       run: |
         bash "$GITHUB_ACTION_PATH/apt-get.sh" update
-        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y \
-          libgeos-dev libproj-dev libjson-c-dev libgsl-dev \
-          libh3-dev libgdal-dev libxml2-dev \
-          autoconf automake libtool pkg-config \
-          postgresql-17 postgresql-server-dev-17
+        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y --no-install-recommends \
+          ${{ steps.keys.outputs.packages }}
+        # The cache step saves the directory as the runner user; apt wrote it as root.
+        sudo chmod -R a+rX "$APT_ARCHIVES"
+        sudo rm -f "$APT_ARCHIVES/lock"
 
     # Build path: provision-meos.sh builds libmeos, stages a clean MEOS-only
     # header prefix ($RUNNER_TEMP/meos-headers) that the parse reads, and installs
@@ -136,7 +193,7 @@ runs:
     # native bindings need. MDB_SRC_ROOT stays the source checkout for @sqlfn/@ingroup.
     - name: Build libmeos and generate the catalog from installed headers
       id: provision
-      if: inputs.build-libmeos == 'true'
+      if: inputs.build-libmeos == 'true' && steps.build-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
@@ -146,3 +203,25 @@ runs:
           --families "${{ inputs.families }}" \
           --parse-prefix "$RUNNER_TEMP/meos-headers" \
           --runtime-prefix /usr/local
+        mkdir -p "$RUNNER_TEMP/meos-catalog"
+        cp "$REPO_ROOT/output/meos-idl.json" "$RUNNER_TEMP/meos-catalog/meos-idl.json"
+
+    # A cache hit holds what the build step leaves: the parse prefix, which `cmake --install`
+    # filled with the same files it installs under /usr/local, and the catalog. Installing the
+    # prefix and placing the catalog where run.py writes it gives the consumer the same files
+    # and the same outputs as a build.
+    - name: Install the cached libmeos prefix and catalog
+      id: restore
+      if: inputs.build-libmeos == 'true' && steps.build-cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        sudo cp -a "$RUNNER_TEMP/meos-headers/." /usr/local/
+        sudo ldconfig
+        mkdir -p "$REPO_ROOT/output"
+        cp "$RUNNER_TEMP/meos-catalog/meos-idl.json" "$REPO_ROOT/output/meos-idl.json"
+        {
+          echo "catalog-path=$REPO_ROOT/output/meos-idl.json"
+          echo "libmeos-prefix=/usr/local"
+        } >> "$GITHUB_OUTPUT"
+        echo "Restored libmeos and the catalog ($(wc -c < "$REPO_ROOT/output/meos-idl.json") bytes)" >&2
