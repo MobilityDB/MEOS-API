@@ -207,7 +207,8 @@ def _aux_specs(params: list):
     return specs
 
 
-def build_type_encodings(functions: list, structs: set) -> dict:
+def build_type_encodings(functions: list, structs: set,
+                         values: frozenset = frozenset()) -> dict:
     """Scan the catalog for the in/out functions of every opaque struct.
 
     A *decoder* turns a wire string into an object (returns ``struct T *``,
@@ -216,6 +217,11 @@ def build_type_encodings(functions: list, structs: set) -> dict:
     *formatting* scalars are allowed and defaulted (see ``_aux_specs``); a
     non-defaultable trailing arg disqualifies the helper. Only declared
     structs qualify, so primitives never register by accident.
+
+    A name in ``values`` is a type passed by value, as PostgreSQL passes its
+    ``TimestampTz`` and ``DateADT``: its decoder returns it and its encoder takes it
+    without a pointer (``TimestampTz timestamptz_in(const char *, int32_t)``,
+    ``char *timestamptz_out(TimestampTz)``).
     """
     enc: dict[str, dict] = {}
 
@@ -235,7 +241,7 @@ def build_type_encodings(functions: list, structs: set) -> dict:
         aux = _aux_specs(params[1:])     # None => non-defaultable trailing arg
 
         # Decoder: const char* (+ defaultable scalar aux) -> opaque struct
-        if (aux is not None and rd >= 1 and rb in structs
+        if (aux is not None and (rd >= 1 or rb in values) and rb in structs
                 and pd == 1 and pb in _STRING_PTR_BASES):
             for rx, encoding in _DECODERS:
                 if rx.search(name):
@@ -246,7 +252,7 @@ def build_type_encodings(functions: list, structs: set) -> dict:
 
         # Encoder: const struct T* (+ defaultable scalar aux) -> char*
         if (aux is not None and rd == 1 and rb in _STRING_PTR_BASES
-                and pd >= 1 and pb in structs):
+                and (pd >= 1 or pb in values) and pb in structs):
             for rx, encoding in _ENCODERS:
                 if rx.search(name):
                     s = slot(pb)
@@ -265,9 +271,13 @@ def build_type_encodings(functions: list, structs: set) -> dict:
     enc_suffix = {"text": "_out", "mfjson": "_as_mfjson",
                   "wkb": "_as_hexwkb"}
 
+    # PostgreSQL's own spelling `pg_X` yields to the name MEOS states it under,
+    # `X`, when both serve a type: `timetz_in` calls `pg_timetz_in`, and only the
+    # first is the MEOS function a binding calls.
     def choose(cands: dict, base: str, suffix: str) -> str:
+        pool = [c for c in cands if not (c.startswith("pg_") and c[3:] in cands)]
         generic = base.lower() + suffix
-        return generic if generic in cands else sorted(cands)[0]
+        return generic if generic in pool else sorted(pool)[0]
 
     # The byte codec of a type, beside its wire encodings: a reader
     # ``T *f(const uint8_t *wkb, size_t size)`` and a writer
@@ -527,7 +537,7 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
     else:
         base, depth = _base(ret), _ptr_depth(ret)
         te = type_encodings.get(base)
-        if depth == 1 and te and te["out"]:
+        if depth <= 1 and te and te["out"]:
             wire_result = {"kind": "serialized", "cType": ret,
                            "encode": te["out"],
                            "encode_aux": te.get("out_aux", []),
@@ -565,15 +575,23 @@ def enrich_idl(idl: dict) -> dict:
     # wrappers can register a codec instead of being dead `no-decoder`s.
     _scalarish = (_INT_BASES | _FLOAT_BASES | _BOOL_BASES | _STRING_PTR_BASES
                   | enum_names | {"void", "text"})
+    # A named type passed by value that is no scalar is PostgreSQL's
+    # (`TimestampTz`, `DateADT`, `TimeADT`, `Timestamp`): the slot keeps the name,
+    # as #normalize_canonical of parser/typerecover.py states it, and the type
+    # registers a codec from its own in/out functions like an opaque one.
     opaque_names = set(struct_names)
+    value_names = set()
     for fn in functions:
         for c in ([fn["returnType"]["canonical"]]
                   + [p["canonical"] for p in fn.get("params", [])]):
             b = _base(c)
-            if _ptr_depth(c) >= 1 and b and b not in _scalarish:
+            if b and b not in _scalarish:
                 opaque_names.add(b)
+                if _ptr_depth(c) == 0:
+                    value_names.add(b)
 
-    type_encodings = build_type_encodings(functions, opaque_names)
+    type_encodings = build_type_encodings(functions, opaque_names,
+                                          frozenset(value_names))
 
     for fn in functions:
         group = fn.get("group")

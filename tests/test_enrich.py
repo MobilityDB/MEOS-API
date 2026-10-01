@@ -238,6 +238,53 @@ class ExposabilityTests(unittest.TestCase):
         self.assertIn("index", self.n("rtree_insert")["reason"])
 
 
+class ValueTypeTests(unittest.TestCase):
+    """A PostgreSQL type passed by value (`TimestampTz`, `DateADT`) registers a codec
+    from its own in/out functions, as a pointer type does in #TypeEncodingTests, and a
+    function taking or returning it is exposable."""
+
+    def setUp(self):
+        idl = {"functions": [
+            fn("timestamptz_in", "TimestampTz", ("const char *", "str"),
+               ("int32_t", "typmod")),
+            fn("timestamptz_out", "char *", ("TimestampTz", "tstz")),
+            fn("timetz_in", "TimeTzADT *", ("const char *", "str"),
+               ("int32_t", "typmod")),
+            fn("pg_timetz_in", "TimeTzADT *", ("const char *", "str"),
+               ("int32_t", "typmod")),
+            fn("timetz_out", "char *", ("const TimeTzADT *", "timetz")),
+            fn("pg_timetz_out", "char *", ("const TimeTzADT *", "timetz")),
+            fn("temporal_start_timestamptz", "TimestampTz", (T, "temp")),
+            fn("tbool_at_timestamptz", "struct Temporal *", (T, "temp"),
+               ("TimestampTz", "t")),
+            fn("tbool_in", "struct Temporal *", ("const char *", "str")),
+            fn("temporal_out", "char *", (T, "temp")),
+            fn("datum_hash", "uint32_t", ("Datum", "d")),
+        ], "structs": [{"name": "Temporal", "fields": []}], "enums": []}
+        self.idl = enrich_idl(idl)
+        self.te = self.idl["typeEncodings"]
+        self.fns = by_name(self.idl)
+
+    def test_a_value_type_reads_and_writes_through_its_functions(self):
+        self.assertEqual((self.te["TimestampTz"]["in"], self.te["TimestampTz"]["out"]),
+                         ("timestamptz_in", "timestamptz_out"))
+
+    def test_a_value_parameter_and_result_are_on_the_wire(self):
+        self.assertTrue(self.fns["tbool_at_timestamptz"]["network"]["exposable"])
+        self.assertEqual(self.fns["tbool_at_timestamptz"]["wire"]["params"][1]["decode"],
+                         "timestamptz_in")
+        self.assertEqual(self.fns["temporal_start_timestamptz"]["wire"]["result"]["encode"],
+                         "timestamptz_out")
+
+    def test_the_postgresql_spelling_yields_to_the_meos_name(self):
+        self.assertEqual((self.te["TimeTzADT"]["in"], self.te["TimeTzADT"]["out"]),
+                         ("timetz_in", "timetz_out"))
+
+    def test_a_value_type_without_a_codec_registers_nothing(self):
+        self.assertNotIn("Datum", self.te)
+        self.assertEqual(self.fns["datum_hash"]["network"]["reason"], "no-decoder:Datum")
+
+
 class StandardIntegerTests(unittest.TestCase):
     """An integer the catalog states by its C standard name (``int64_t``, ``uint8_t``),
     as #normalize_canonical of parser/typerecover.py states every integer typedef,
@@ -300,6 +347,24 @@ class CallLiteralCatalogTests(unittest.TestCase):
         for cls in ("Interval", "TimeTzADT", "NumericData"):
             self.assertEqual(te[cls]["in_aux"],
                              [{"name": "typmod", "kind": "integer", "default": -1}], cls)
+
+
+class ValueTypeCatalogTests(unittest.TestCase):
+    """Over the generated catalog, PostgreSQL's time types read and write through the
+    MEOS functions #ValueTypeTests states, never their `pg_` spelling."""
+
+    def test_the_postgresql_time_types_read_through_their_meos_functions(self):
+        idl_path = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
+        if not idl_path.exists():
+            self.skipTest(f"{idl_path} not generated; run `python run.py` first")
+        te = json.loads(idl_path.read_text())["typeEncodings"]
+        self.assertEqual({c: (te[c]["in"], te[c]["out"]) for c in
+                          ("TimestampTz", "Timestamp", "TimeADT", "DateADT", "TimeTzADT")},
+                         {"TimestampTz": ("timestamptz_in", "timestamptz_out"),
+                          "Timestamp": ("timestamp_in", "timestamp_out"),
+                          "TimeADT": ("time_in", "time_out"),
+                          "DateADT": ("date_in", "date_out"),
+                          "TimeTzADT": ("timetz_in", "timetz_out")})
 
 
 class ApiClassificationTests(unittest.TestCase):
