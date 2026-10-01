@@ -18,7 +18,7 @@ from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import (attach_call_literals, merge_boundargs, resolve_bound_names,
                               strip_call_literals)
 from parser.compositions import attach_compositions
-from parser.enrich import enrich_idl
+from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
@@ -333,6 +333,8 @@ def main():
     if codec_errors:
         raise ValueError("type encodings that contradict themselves:\n  "
                          + "\n  ".join(codec_errors))
+    # Each function's wire names the codec its classes now state.
+    idl = restate_wire(idl)
 
     # 6. Attach the temporal-covering descriptor (Parquet/Iceberg projection)
     print(f"      Attaching temporal covering from {COVERING_PATH}...",

@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from parser.enrich import (_aux_specs, build_type_encodings, classify_category,
-                           enrich_idl)
+                           enrich_idl, restate_wire)
 
 
 def fn(name, ret, *params):
@@ -283,6 +283,55 @@ class ValueTypeTests(unittest.TestCase):
     def test_a_value_type_without_a_codec_registers_nothing(self):
         self.assertNotIn("Datum", self.te)
         self.assertEqual(self.fns["datum_hash"]["network"]["reason"], "no-decoder:Datum")
+
+
+class RestatedWireTests(unittest.TestCase):
+    """A wire read after the classes settle their codec, as #state_type_encodings of
+    parser/codecs.py settles them, names the codec they state, as #ExposabilityTests
+    reads the wire enrich first states."""
+
+    def setUp(self):
+        self.idl = make_idl()
+        te = self.idl["typeEncodings"]["Temporal"]
+        te["in"], te["in_aux"] = "temporal_from_hexwkb", []
+        te["out"] = "temporal_as_mfjson"
+        restate_wire(self.idl)
+        self.fns = by_name(self.idl)
+
+    def test_a_parameter_and_a_result_read_the_settled_codec(self):
+        w = self.fns["tpoint_speed"]["wire"]
+        self.assertEqual(w["params"][0]["decode"], "temporal_from_hexwkb")
+        self.assertEqual(w["result"]["encode"], "temporal_as_mfjson")
+
+    def test_the_exposable_count_follows_the_wire(self):
+        self.assertEqual(self.idl["enrichment"]["exposableFunctions"],
+                         sum(f["network"]["exposable"] for f in self.idl["functions"]))
+
+
+class WireCatalogTests(unittest.TestCase):
+    """Over the generated catalog, every value on the wire reads and writes through the
+    codec its class states, as #RestatedWireTests states."""
+
+    def test_every_wire_value_names_its_class_codec(self):
+        idl_path = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
+        if not idl_path.exists():
+            self.skipTest(f"{idl_path} not generated; run `python run.py` first")
+        idl = json.loads(idl_path.read_text())
+        te = idl["typeEncodings"]
+        stale = []
+        for f in idl["functions"]:
+            w = f["wire"]
+            vals = [(p, "decode", "in") for p in w["params"] if p["kind"] == "serialized"]
+            vals += [(p["element"], "decode", "in") for p in w["params"]
+                     if p["kind"] == "array"]
+            if w["result"].get("kind") == "serialized":
+                vals.append((w["result"], "encode", "out"))
+            for v, key, side in vals:
+                cls = " ".join(v["cType"].replace("const", " ").replace("struct", " ")
+                               .replace("*", " ").split())
+                if v[key] != te[cls][side]:
+                    stale.append((f["name"], v[key], te[cls][side]))
+        self.assertEqual(stale, [])
 
 
 class StandardIntegerTests(unittest.TestCase):
