@@ -18,6 +18,7 @@ from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import merge_boundargs, resolve_bound_names
 from parser.compositions import attach_compositions
 from parser.enrich import enrich_idl
+from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
                           lint_ea_sqlfn, lint_positional_sqlfn,
@@ -313,6 +314,15 @@ def main():
         print(f"      WARNING: unlisted external struct pointer(s) in the API: "
               f"{', '.join(unlisted)} — classify them explicitly so bindings "
               f"handle them uniformly", file=sys.stderr)
+
+    # State the codec of every class once the SQL signatures and the bound literals are
+    # in: the reader of each SQL type a class serves, the hex-WKB writer with the
+    # variant its type's send binds, and every trailing input by name with its value.
+    # A class whose codec contradicts itself stops the catalog.
+    idl, codec_errors = state_type_encodings(idl)
+    if codec_errors:
+        raise ValueError("type encodings that contradict themselves:\n  "
+                         + "\n  ".join(codec_errors))
 
     # 6. Attach the temporal-covering descriptor (Parquet/Iceberg projection)
     print(f"      Attaching temporal covering from {COVERING_PATH}...",

@@ -33,44 +33,60 @@ Each function gets one `category` (first matching rule wins):
 
 ## 2. `typeEncodings`
 
-A top-level map: opaque C type → how it round-trips to the wire. Built by
-scanning the catalog for the type's own in/out functions.
+A top-level map: class → the functions a binding reads and writes its values with, and
+the trailing inputs each takes. `parser/enrich.py` builds the map from the shape of the
+C functions; `parser/codecs.py` completes it once the SQL signatures and the bound
+literals are in the catalog.
 
 ```json
 "typeEncodings": {
-  "Temporal": {
-    "encodings": ["mfjson", "text", "wkb"],
-    "decoders": { "text": "temporal_in",  "mfjson": "temporal_from_mfjson" },
-    "encoders": { "text": "temporal_out", "wkb": "temporal_as_hexwkb" },
-    "in":  "temporal_in",
-    "out": "temporal_out"
+  "Set": {
+    "encodings": ["text", "wkb"],
+    "decoders": { "wkb": "set_from_hexwkb" },
+    "decoderAux": { "wkb": [] },
+    "encoders": { "wkb": "set_as_hexwkb" },
+    "encoderAux": { "wkb": [{"name": "variant", "kind": "integer", "default": 4}] },
+    "readers": { "text": { "intset": "intset_in", "floatset": "floatset_in", "...": "..." } },
+    "readerAux": { "text": { "intset": [], "floatset": [], "...": "..." } },
+    "writers": { "text": { "intset": "intset_out", "floatset": "floatset_out", "...": "..." } },
+    "writerAux": { "text": { "floatset": [{"name": "maxdd", "kind": "integer", "default": 15}] } },
+    "in": "set_from_hexwkb", "in_aux": [],
+    "out": "set_as_hexwkb", "out_aux": [{"name": "variant", "kind": "integer", "default": 4}],
+    "bytes": { "decoder": "set_from_wkb", "encoder": "set_as_wkb",
+               "encoderAux": [{"name": "variant", "kind": "integer", "default": 4}] }
   }
 }
 ```
 
-- **decoder** — `const char * (+ aux) → T *` (`*_in`, `*_from_mfjson`, …)
-- **encoder** — `const T * (+ aux) → char *` (`*_out`, `*_as_mfjson`, …)
-- `in`/`out` — the preferred decoder/encoder, `text` > `mfjson` > `wkb`;
-  among candidates the **generic root** (`<type>_in`/`_out`) is preferred
-  (so `temporal_out` serialises *every* subtype), else a deterministic
-  alphabetical pick. `in_aux`/`out_aux` carry the trailing args.
+- **decoder** — a public `const char * (+ aux) → T` (`*_in`, `*_from_mfjson`,
+  `*_from_hexwkb`, …); **encoder** — a public `T (+ aux) → char *` (`*_out`,
+  `*_as_mfjson`, `*_as_hexwkb`, …). A size the function writes back is an
+  out-parameter, stated in its `shape.outParams` as for any other function.
+- **`readers` / `writers`** — a class several SQL types share (`Set`, `Span`,
+  `SpanSet`, `Temporal`) reads and writes each type through that type's own public
+  function, keyed by the SQL type its signature returns (a reader) or takes (a writer).
+  An encoding with a `readers` or `writers` entry has no single `decoders` or
+  `encoders` entry. Within one SQL type, the function the encoding table names first
+  wins (`cbuffer_out` before `cbuffer_as_ewkt`), then the narrower one
+  (`cbufferset_out` before `spatialset_out`); two that tie stop the catalog. An
+  encoding whose functions carry no SQL signature (`GSERIALIZED`, whose geometry and
+  geography are PostGIS's types) keeps the function the C shapes give it.
+- **`in` / `out`** — the class's single decoder and encoder in the order `text` >
+  `mfjson` > `wkb`, absent when no single function serves the whole class.
+- **Trailing inputs** — every decoder, encoder, reader and writer states the inputs
+  after its value by name with the value a binding passes, in `decoderAux`,
+  `encoderAux`, `readerAux` and `writerAux` (and `in_aux` / `out_aux`,
+  `bytes.encoderAux`). A binding builds each call from the function's own parameters,
+  filling each trailing input by name, and refuses one the catalog does not fill.
+- **`variant`** of a WKB writer — the value the type's own `send` binds
+  (`WKB_EXTENDED`, 4, keeping the SRID), else the value its SQL hex writer passes when
+  the byte order is left out (`asHexWKB(raster, endian DEFAULT '')` passes 0).
+- **A type of its own** — a value whose slot carries a `typedef` (`H3Index`,
+  `Quadbin`, `S2CellId`, each a `uint64_t`) is a class keyed by that name, read and
+  written by its own functions.
 
-> **Auxiliary arguments.** Real MEOS in/out wrappers (the public functions
-> in the `*_meos.c` files) are not pure `(str)->T` / `(T)->str`: they take
-> trailing *formatting* scalars — `temporal_out(temp, int maxdd)`,
-> `*_as_mfjson(temp, with_bbox, flags, precision, srs)`. Those are safe to
-> default (`maxdd`/`precision` → 15, flags/bbox → 0, `srs` → NULL), so the
-> wrapper still satisfies the stateless contract; the defaults are recorded
-> in `in_aux`/`out_aux` for the runtime to pass. A trailing arg that is
-> *not* a defaultable formatting scalar disqualifies the wrapper: a
-> semantic `*type` tag (`temporal_in`'s `temptype` — tagged
-> `@ingroup meos_internal` in MEOS) or a pointer/array (`*_as_wkb`'s
-> `size_out`). So polymorphic `Temporal` *decoding* resolves to a typed
-> wrapper (`tbool_in`, …) — subtype-narrow on input; carrying the subtype
-> on the wire for a universal decode is future work. *Encoding* is already
-> universal via the generic `temporal_out`.
-
-The same data is folded onto each `structs[*]` entry as `serialization`.
+The class's `encodings`, `in` and `out` are folded onto each `structs[*]` entry as
+`serialization`.
 
 ## 3. `network` and `wire`
 

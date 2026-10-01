@@ -161,6 +161,9 @@ def recover_collapsed_types(idl, headers_dir):
         # resolved platform spelling ("unsigned long") -> fall through to normalize canonical.
         if cur not in recoverable and cur != _nospace(recovered):
             return 0
+        # the name the header declares, which #normalize_canonical states as the slot's
+        # `typedef` when it names a type of its own
+        slot["_declared"] = _base_name(original)
         rewrote = slot.get(key) != recovered
         slot[key] = recovered
         canon = _nospace(slot.get("canonical"))
@@ -287,9 +290,24 @@ def normalize_canonical(idl, pg_names=frozenset()):
     ``int *``). Complements ``recover_collapsed_types``: that recovers a ``cType`` the
     preprocessor erased to ``int``; this trusts a faithful ``cType`` and only
     re-spells ``canonical``.
+
+    A slot whose header names a type of its own over a width, a name neither PostgreSQL
+    nor the C standard defines whose chain (#scalar_spelling) reaches a C standard
+    integer (``H3Index``, ``Quadbin``, ``S2CellId`` over ``uint64_t``), keeps that name
+    as ``typedef``: ``canonical`` states the width, ``typedef`` what the value is, which
+    only its own reader produces.
     """
     fixed = 0
     typedefs = idl.pop("_typedefs", None) or {}
+
+    def identity(name):
+        """``name`` when it is a type of its own over a C standard integer, read through
+        #scalar_spelling."""
+        if (not name or name not in typedefs or name in pg_names
+                or _C_STANDARD.match(name)):
+            return None
+        reached = scalar_spelling(name, typedefs, pg_names)
+        return name if reached and _C_STANDARD.match(reached) else None
 
     def want(ctype):
         base = _base_name(ctype)
@@ -306,6 +324,9 @@ def normalize_canonical(idl, pg_names=frozenset()):
         if not (isinstance(slot, dict) and "canonical" in slot):
             return
         ctype = slot.get("cType") or slot.get("c")
+        own = identity(slot.pop("_declared", None) or _base_name(ctype))
+        if own:
+            slot["typedef"] = own
         w = want(ctype) if ctype else None
         if w and _nospace(slot["canonical"]) != _nospace(w):
             slot["canonical"] = w
