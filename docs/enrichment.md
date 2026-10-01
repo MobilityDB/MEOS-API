@@ -62,6 +62,11 @@ literals are in the catalog.
   `*_from_hexwkb`, …); **encoder** — a public `T (+ aux) → char *` (`*_out`,
   `*_as_mfjson`, `*_as_hexwkb`, …). A size the function writes back is an
   out-parameter, stated in its `shape.outParams` as for any other function.
+- **A PostgreSQL type passed by value** (`TimestampTz`, `Timestamp`, `TimeADT`,
+  `DateADT`) is a class like a pointer type, its decoder returning it and its
+  encoder taking it without a pointer (`timestamptz_in` / `timestamptz_out`).
+  PostgreSQL's spelling `pg_X` yields to the name MEOS states it under, `X`,
+  when both serve a class (`timetz_in`, never `pg_timetz_in`).
 - **`readers` / `writers`** — a class several SQL types share (`Set`, `Span`,
   `SpanSet`, `Temporal`) reads and writes each type through that type's own public
   function, keyed by the SQL type its signature returns (a reader) or takes (a writer).
