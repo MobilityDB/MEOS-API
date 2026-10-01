@@ -213,6 +213,131 @@ class TypeRecoverTests(unittest.TestCase):
         self.assertEqual(self._ret("intspan_width"), "int")   # genuine scalar int
         self.assertEqual(self._ret("tint_values"), "int *")   # genuine int array
 
+    # ---- the class: no typedef reads as a platform integer ------------------
+
+    def test_no_typedef_reads_as_a_platform_integer(self):
+        # A slot declared by a name (`int32`, `TimeADT`, `H3Index`) states that name's
+        # definition, never the C integer libclang resolves it to on the host: `long`
+        # is 64 bits on Linux and 32 on Windows, so a binding keying on it reads the
+        # wrong width. The assertion runs over every slot, so a new typedef is held
+        # to it without being named here.
+        idl = json.loads(IDL.read_text())
+        slots = [s for f in idl["functions"]
+                 for s in [f["returnType"]] + f.get("params", [])]
+        slots += [fl for st in idl.get("structs", []) for fl in st.get("fields", [])]
+        bad = sorted({(_base(s.get("c") or s.get("cType")), _base(s.get("canonical")))
+                      for s in slots
+                      if _base(s.get("c") or s.get("cType")) not in _C_INTEGERS
+                      and _base(s.get("canonical")) in _C_INTEGERS})
+        self.assertEqual(bad, [], f"typedefs stated as a platform integer: {bad}")
+
+    def test_postgres_and_standard_types_keep_their_definition(self):
+        def canon(name, pname):
+            p = next(p for p in self.by_name[name]["params"] if p["name"] == pname)
+            return p["canonical"]
+        # TimeADT is PostgreSQL's `time`, as DateADT is its `date`.
+        self.assertEqual(canon("pg_time_out", "time"), "TimeADT")
+        self.assertEqual(canon("date_to_timestamp", "date"), "DateADT")
+        self.assertEqual(self.by_name["pg_time_in"]["returnType"]["canonical"], "TimeADT")
+        # a width name reaches the C standard type PostgreSQL 18 defines it as
+        self.assertEqual(canon("pg_time_in", "typmod"), "int32_t")
+        self.assertEqual(canon("set_as_wkb", "variant"), "uint8_t")
+
+
+# C's own integer names: what a typedef must never be stated as.
+_C_INTEGERS = {
+    "char", "signed char", "unsigned char", "short", "signed short", "unsigned short",
+    "short int", "int", "signed", "signed int", "unsigned", "unsigned int", "long",
+    "signed long", "unsigned long", "long int", "unsigned long int", "long long",
+    "unsigned long long", "long long int", "unsigned long long int",
+}
+
+
+def _base(t):
+    return " ".join(t.replace("const", " ").replace("struct", " ").replace("*", " ")
+                    .split()) if t else ""
+
+
+class ScalarSpellingTests(unittest.TestCase):
+    """#scalar_spelling and #postgres_scalar_names of parser/typerecover.py, over
+    typedef chains as the parser records them, one step each."""
+
+    TYPEDEFS = {
+        "int32": "int32_t", "int32_t": "__int32_t", "__int32_t": "int",
+        "int64": "int64_t", "int64_t": "__int64_t", "__int64_t": "long",
+        "uint64": "uint64_t", "uint64_t": "__uint64_t", "__uint64_t": "unsigned long",
+        "Quadbin": "uint64", "H3Index": "uint64_t",
+        "TimeADT": "int64", "DateADT": "int32", "Oid": "unsigned int",
+        "Datum": "uintptr_t", "uintptr_t": "unsigned long",
+        "float8": "double", "raw16": "signed short", "int16": "signed short",
+        "MeosType": "enum MeosType", "Loop": "Loop",
+    }
+    # every scalar typedef pgtypes declares, its base types included
+    PG = frozenset({"TimeADT", "DateADT", "Oid", "Datum", "int32", "int64", "uint64",
+                    "float8", "int16"})
+
+    def spell(self, name):
+        from parser.typerecover import scalar_spelling
+        return scalar_spelling(name, self.TYPEDEFS, self.PG)
+
+    def test_a_width_name_reaches_its_standard_type(self):
+        self.assertEqual(self.spell("int32"), "int32_t")
+        self.assertEqual(self.spell("int64"), "int64_t")
+
+    def test_a_cell_reaches_uint64_t_through_uint64(self):
+        self.assertEqual(self.spell("Quadbin"), "uint64_t")
+        self.assertEqual(self.spell("H3Index"), "uint64_t")
+
+    def test_a_postgres_type_keeps_its_name(self):
+        # as #test_typedef_canonical_not_platform_resolved holds TimestampTz
+        self.assertEqual(self.spell("TimeADT"), "TimeADT")
+        self.assertEqual(self.spell("DateADT"), "DateADT")
+        self.assertEqual(self.spell("Oid"), "Oid")
+        # a C standard type below it does not make Datum a width name
+        self.assertEqual(self.spell("Datum"), "Datum")
+        # `typedef signed short int16` names no <stdint.h> type, so the chain stops at
+        # PostgreSQL's name rather than at the platform's short
+        self.assertEqual(self.spell("int16"), "int16")
+
+    def test_a_chain_ending_at_a_builtin_states_the_builtin(self):
+        self.assertEqual(self.spell("float8"), "double")
+        self.assertEqual(self.spell("raw16"), "signed short")
+
+    def test_no_scalar_no_spelling(self):
+        self.assertIsNone(self.spell("MeosType"))
+        self.assertIsNone(self.spell("Loop"))
+        self.assertIsNone(self.spell("int"))
+
+    def test_the_postgres_names_are_every_scalar_typedef_wherever_it_sits(self):
+        import tempfile
+        from parser.typerecover import postgres_scalar_names
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "pg_basetypes.h").write_text(
+                "typedef int32_t int32;\ntypedef double float8;\n"
+                "#ifndef DATE_H\ntypedef int32 DateADT;\n#endif\n")
+            (root / "datatype").mkdir()
+            (root / "datatype" / "timestamp.h").write_text(
+                "typedef int64 TimestampTz;\n/* typedef int64 Commented; */\n"
+                "typedef struct varlena bytea;\ntypedef char *Pointer;\n")
+            self.assertEqual(postgres_scalar_names(root),
+                             {"int32", "float8", "DateADT", "TimestampTz"})
+
+    def test_normalize_states_a_slot_by_its_chain(self):
+        from parser.typerecover import normalize_canonical
+        idl = {"_typedefs": dict(self.TYPEDEFS), "functions": [
+            {"name": "pg_time_in", "returnType": {"c": "TimeADT", "canonical": "long"},
+             "params": [{"name": "typmod", "cType": "int32", "canonical": "int"},
+                        {"name": "cells", "cType": "const Quadbin *",
+                         "canonical": "const unsigned long *"}]}]}
+        idl, fixed = normalize_canonical(idl, self.PG)
+        f = idl["functions"][0]
+        self.assertEqual(f["returnType"]["canonical"], "TimeADT")
+        self.assertEqual([p["canonical"] for p in f["params"]],
+                         ["int32_t", "const uint64_t *"])
+        self.assertEqual(fixed, 3)
+        self.assertNotIn("_typedefs", idl)
+
 
 if __name__ == "__main__":
     unittest.main()

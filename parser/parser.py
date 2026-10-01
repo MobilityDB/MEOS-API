@@ -132,9 +132,16 @@ def parse_meos(entry: Path, include_dir: Path,
     own_files = {str(p.resolve()) for p in include_dir.glob("**/*.h")}
     own_files.update(str(h.resolve()) for h in extra_headers)
 
-    # First pass: build a mapping "anonymous struct location -> typedef name"
+    # First pass: build a mapping "anonymous struct location -> typedef name", and
+    # record every typedef of the unit, the C library's and an external family's
+    # (`h3api.h`) included, as the type it names one step down: the chain
+    # #normalize_canonical of parser/typerecover.py follows to state a scalar.
     typedef_map: dict[str, str] = {}
+    typedefs: dict[str, str] = {}
     for node in tu.cursor.walk_preorder():
+        if node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+            typedefs.setdefault(node.spelling,
+                                node.underlying_typedef_type.spelling)
         loc = node.location.file
         if not loc or str(Path(loc.name).resolve()) not in own_files:
             continue
@@ -207,8 +214,9 @@ def parse_meos(entry: Path, include_dir: Path,
     enums     = _dedup(enums)
     macros    = _dedup(macros)
 
+    # `_typedefs` serves the type passes of run.py and leaves the catalog with them.
     idl = {"functions": functions, "structs": structs, "enums": enums,
-           "macros": macros}
+           "macros": macros, "_typedefs": typedefs}
 
     # Resolve types if the mappings file exists
     mappings_path = Path("./meta/type-mappings.json")
