@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.boundargs import extract_wrappers, merge_boundargs, resolve_bound_names
+from parser.boundargs import (attach_call_literals, extract_call_literals, extract_wrappers,
+                              merge_boundargs, resolve_bound_names, strip_call_literals)
 
 # A synthetic MobilityDB wrapper source (mobilitydb/src/**/*.c shape).
 SAMPLE = '''
@@ -814,6 +815,50 @@ class BoundNameValueTests(unittest.TestCase):
         # MISSING has no definition
         _, _, unresolved = self._resolve()
         self.assertEqual(unresolved, ["GUARDED", "MISSING", "SHADOWED"])
+
+
+class CallLiteralTests(unittest.TestCase):
+    """A parameter name MEOS's own calls pass one literal alone reads that literal."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        (Path(self.tmp.name) / "type_in.c").write_text(
+            "GSERIALIZED *\n"
+            "geom_in(const char *str, int32 typmod)\n"
+            "{\n  return pg_geom_in(str, typmod);\n}\n"
+            "void f(const char *s, int32 tm)\n"
+            "{\n"
+            "  /* geom_in(s, 7) in a comment is no call */\n"
+            "  geom_in(s, -1);\n"
+            "  geog_in(s, -1);\n"
+            "  geog_in(s, tm);\n"
+            "  geo_set_srid(g, 0);\n"
+            "  geo_set_srid(g, SRID_UNKNOWN);\n"
+            "}\n")
+        self.functions = [
+            {"name": "geom_in", "params": [{"name": "str"}, {"name": "typmod"}]},
+            {"name": "geog_in", "params": [{"name": "str"}, {"name": "typmod"}]},
+            {"name": "geo_set_srid", "params": [{"name": "gs"}, {"name": "srid"}]}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_one_literal_alone_is_read(self):
+        # the definition's typmod, the variable tm and the commented call are no literals
+        lits = extract_call_literals(self.tmp.name, self.functions)
+        self.assertEqual(lits, {"typmod": "-1"})
+
+    def test_two_literals_state_none(self):
+        self.assertNotIn("srid", extract_call_literals(self.tmp.name, self.functions))
+
+    def test_the_literal_is_attached_then_stripped(self):
+        idl, n = attach_call_literals({"functions": self.functions}, self.tmp.name)
+        self.assertEqual(n, 2)
+        self.assertEqual(idl["functions"][0]["params"][1]["_callLiteral"], "-1")
+        self.assertNotIn("_callLiteral", idl["functions"][2]["params"][1])
+        strip_call_literals(idl)
+        self.assertFalse(any("_callLiteral" in p for f in idl["functions"]
+                             for p in f["params"]))
 
 
 if __name__ == "__main__":

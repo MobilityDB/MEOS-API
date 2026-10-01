@@ -145,6 +145,28 @@ def _is_scalar_pointer(c_type: str, enums: set) -> bool:
     return False
 
 
+# No literal of the parameter's kind: #_call_default answers this rather than None, a value.
+_UNSTATED = object()
+
+
+def _call_default(literal, kind: str):
+    """The value of ``literal``, the ``_callLiteral`` #attach_call_literals of
+    parser/boundargs.py sets, as a ``kind`` (``integer``, ``number``, ``boolean`` or
+    ``string``) default: ``-1`` reads -1, ``NULL`` None for a string; a macro name or a
+    literal of another kind is #_UNSTATED."""
+    if literal is None:
+        return _UNSTATED
+    if kind == "integer" and re.fullmatch(r"-?\d+", literal):
+        return int(literal)
+    if kind == "number" and re.fullmatch(r"-?\d+(?:\.\d+)?", literal):
+        return float(literal)
+    if kind == "boolean" and literal in ("true", "false"):
+        return literal == "true"
+    if kind == "string" and literal == "NULL":
+        return None
+    return _UNSTATED
+
+
 def _aux_specs(params: list):
     """Defaults for the trailing args of an in/out helper.
 
@@ -168,7 +190,10 @@ def _aux_specs(params: list):
         if "type" in nm:                     # temptype/basetype/settype tag
             return None
         j = sc["json"]
-        if j == "integer":
+        passed = _call_default(p.get("_callLiteral"), j)
+        if passed is not _UNSTATED:
+            default = passed
+        elif j == "integer":
             default = (15 if any(k in nm for k in
                                  ("maxdd", "decimal", "digit", "precision"))
                        else 0)

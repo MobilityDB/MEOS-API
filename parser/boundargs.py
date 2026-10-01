@@ -587,3 +587,60 @@ def resolve_bound_names(idl: dict, include_root: str | Path) -> tuple[dict, int,
             "vendored": False, "value": val})
         n += 1
     return idl, n, unresolved
+
+
+# A C comment, block or line.
+_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def extract_call_literals(meos_src: str | Path, functions: list) -> dict[str, str]:
+    """``{parameter name: literal}`` for every parameter name to which MEOS's own calls of
+    catalog functions pass one literal alone, read argument by argument as
+    #_wrapper_bound reads a wrapper's call.
+
+    ``geom_in(wkt, -1)``, ``pg_timestamptz_in(str, -1)`` and every other call passing a
+    literal for a ``typmod`` pass ``-1``, PostgreSQL's unspecified type modifier, so
+    ``typmod`` reads ``-1``. A name receiving two literals (``srid`` is passed ``0`` and
+    ``SRID_UNKNOWN``) states none; an argument that is not a literal is not counted."""
+    params = {f["name"]: [p["name"] for p in f.get("params", [])] for f in functions}
+    seen: dict[str, set[str]] = {}
+    for path in sorted(Path(meos_src).rglob("*.c")):
+        text = _COMMENT.sub(" ", path.read_text(errors="ignore"))
+        for m in _CALLEE.finditer(text):
+            names = params.get(m.group("name"))
+            if not names:
+                continue
+            start, depth = m.end() - 1, 0
+            for i in range(start, len(text)):
+                depth += (text[i] == "(") - (text[i] == ")")
+                if depth == 0:
+                    break
+            if re.match(r"\s*\{", text[i + 1:]):
+                continue                     # the definition, not a call
+            for name, arg in zip(names, _split_args(text[start + 1:i])):
+                lit = _literal(arg)
+                if lit is not None:
+                    seen.setdefault(name, set()).add(lit)
+    return {name: next(iter(lits)) for name, lits in seen.items() if len(lits) == 1}
+
+
+def attach_call_literals(idl: dict, meos_src: str | Path) -> tuple[dict, int]:
+    """Set ``_callLiteral`` on every parameter whose name #extract_call_literals reads one
+    literal for. The key is private: #_aux_specs of parser/enrich.py reads it as a trailing
+    input's default and run.py removes it before writing the catalog."""
+    lits = extract_call_literals(meos_src, idl.get("functions", []))
+    n = 0
+    for f in idl.get("functions", []):
+        for p in f.get("params", []):
+            if p["name"] in lits:
+                p["_callLiteral"] = lits[p["name"]]
+                n += 1
+    return idl, n
+
+
+def strip_call_literals(idl: dict) -> dict:
+    """Remove the private ``_callLiteral`` #attach_call_literals sets."""
+    for f in idl.get("functions", []):
+        for p in f.get("params", []):
+            p.pop("_callLiteral", None)
+    return idl

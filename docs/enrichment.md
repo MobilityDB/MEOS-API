@@ -78,6 +78,13 @@ literals are in the catalog.
   `encoderAux`, `readerAux` and `writerAux` (and `in_aux` / `out_aux`,
   `bytes.encoderAux`). A binding builds each call from the function's own parameters,
   filling each trailing input by name, and refuses one the catalog does not fill.
+- **Default of a trailing input** — the literal MEOS's own calls pass for a
+  parameter of its name, where every call passing a literal passes the same one
+  (`parser/boundargs.py` `extract_call_literals`): every literal `typmod` is -1,
+  PostgreSQL's unspecified type modifier, so `interval_in`, `pg_timetz_in` and
+  `numeric_in` read with -1. A name passed two literals (`srid`, `maxdd`) or one
+  macro takes the formatting default: `maxdd` and `precision` 15, flags 0, `srs`
+  NULL.
 - **`variant`** of a WKB writer — the value the type's own `send` binds
   (`WKB_EXTENDED`, 4, keeping the SRID), else the value its SQL hex writer passes when
   the byte order is left out (`asHexWKB(raster, endian DEFAULT '')` passes 0).

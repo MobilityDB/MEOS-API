@@ -7,13 +7,15 @@ The fixture uses the *canonical* C spellings libclang actually emits
 parameters), so the assertions double as a specification.
 """
 
+import json
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from parser.enrich import enrich_idl, classify_category, build_type_encodings
+from parser.enrich import (_aux_specs, build_type_encodings, classify_category,
+                           enrich_idl)
 
 
 def fn(name, ret, *params):
@@ -265,6 +267,39 @@ class StandardIntegerTests(unittest.TestCase):
     def test_a_standard_integer_result_is_a_json_integer(self):
         self.assertEqual(self.fns["set_hash"]["wire"]["result"],
                          {"kind": "json", "json": "integer"})
+
+
+class CallLiteralDefaultTests(unittest.TestCase):
+    """A trailing input whose name MEOS's calls pass one literal for, as
+    #attach_call_literals of parser/boundargs.py reads it, defaults to that literal;
+    a macro name keeps the default #TypeEncodingTests states."""
+
+    def _aux(self, ctype, name, literal):
+        p = {"name": name, "cType": ctype, "canonical": ctype, "_callLiteral": literal}
+        return _aux_specs([p])[0]["default"]
+
+    def test_the_literal_is_the_default(self):
+        self.assertEqual(self._aux("int32_t", "typmod", "-1"), -1)
+        self.assertIsNone(self._aux("const char *", "srs", "NULL"))
+        self.assertIs(self._aux("bool", "with_bbox", "true"), True)
+
+    def test_a_macro_or_a_literal_of_another_kind_keeps_the_default(self):
+        self.assertEqual(self._aux("int", "maxdd", "OUT_DEFAULT_DECIMAL_DIGITS"), 15)
+        self.assertEqual(self._aux("int", "option", "NULL"), 0)
+
+
+class CallLiteralCatalogTests(unittest.TestCase):
+    """Over the generated catalog, the PostgreSQL readers taking a type modifier read
+    with -1, the modifier MEOS's own calls pass, as #CallLiteralDefaultTests states."""
+
+    def test_a_type_modifier_reads_minus_one(self):
+        idl_path = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
+        if not idl_path.exists():
+            self.skipTest(f"{idl_path} not generated; run `python run.py` first")
+        te = json.loads(idl_path.read_text())["typeEncodings"]
+        for cls in ("Interval", "TimeTzADT", "NumericData"):
+            self.assertEqual(te[cls]["in_aux"],
+                             [{"name": "typmod", "kind": "integer", "default": -1}], cls)
 
 
 class ApiClassificationTests(unittest.TestCase):
