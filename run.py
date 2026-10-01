@@ -18,6 +18,7 @@ from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import (attach_call_literals, merge_boundargs, resolve_bound_names,
                               strip_call_literals)
 from parser.compositions import attach_compositions
+from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
@@ -280,6 +281,13 @@ def main():
         # in place of the family member its wrapper's tag names.
         idl, ndep = state_deployed_sqlfn(idl)
         print(f"      sqlfn set to the one name its signatures carry: {ndep}", file=sys.stderr)
+        # Each topological and position signature states the index search an index runs
+        # for it, with the indexed column on either side of its operator.
+        idl, nidx, idx_errors = attach_index_search(idl, SQL_SRC)
+        if idx_errors:
+            raise ValueError("index searches that do not resolve to one operator each:\n  "
+                             + "\n  ".join(idx_errors))
+        print(f"      signatures stating their index search: {nidx}", file=sys.stderr)
         # The same map names each position operator once per class (setLeft …
         # stboxLeft): derive those names from its @sqlfn/@sqlop tags.
         idl = attach_position_names(idl)

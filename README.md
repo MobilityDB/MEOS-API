@@ -241,6 +241,15 @@ must not be excluded from any parity headline. `python tools/portable_parity.py`
 audits it against the catalog, flagging every operator no catalog family backs
 (no guessing). See [`docs/portable-aliases.md`](docs/portable-aliases.md).
 
+## Index searches
+
+Every boolean SQL signature an index over boxes can answer states the MEOS
+`IndexSearchOp` that answers it, with the indexed column on either side of its
+operator: `indexSearch: {columnLeft, columnRight}`, read from the operator each
+value's doc comment names and the operator's `CREATE OPERATOR` declaration.
+`columnRight` is null for an operator declaring no commutator, where an engine
+scans. See [`docs/index-search.md`](docs/index-search.md).
+
 ## OpenAPI generation
 
 The enriched catalog (the `network` / `wire` / `typeEncodings` produced by the
