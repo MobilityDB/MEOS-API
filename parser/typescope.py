@@ -16,6 +16,11 @@ The scope is read from what MEOS itself states, never from the function's name:
     members the catalog lists,
   * its C parameter types, resolved through the catalog's base-type relations.
 
+Over a shared wrapper, a signal discriminates only when it rules a signature out:
+a scope every signature names states the argument all the claimants share (the
+timestamp set of the constructors from a base value), so the next signal is read
+(#scoped_signatures).
+
 A function whose scope none of those state is UNDERIVABLE: it is either generic
 over every overload or simply unclassified, and the two are indistinguishable
 from outside. Rather than guess — one guess keeps a wrong signature list, the
@@ -145,28 +150,28 @@ def read_bodies(meos_src: str | Path) -> tuple[dict, dict]:
     return bodies, params
 
 
-def scope_of(name: str, facts: TypeFacts, bodies: dict, params: dict,
-             c_types: dict = C_BASE_TYPES) -> tuple[set | None, str]:
-    """This function's type scope and the signal that states it, or
-    ``(None, 'none')`` when MEOS states nothing."""
+def scope_signals(name: str, facts: TypeFacts, bodies: dict, params: dict,
+                  c_types: dict = C_BASE_TYPES):
+    """Every type scope MEOS states for this function, as ``(types, signal)``, in the
+    order #scope_of trusts them."""
     body = bodies.get(name)
     if body is None:
-        return None, 'none'
+        return
 
     stated = {t for macro in _VALIDATE.findall(body)
               for t in facts.validate.get(macro, ())}
     if stated:
-        return facts.widen(stated), 'validate'
+        yield facts.widen(stated), 'validate'
 
     literals = {facts.name[t] for t in _MEOS_TYPE.findall(body) if t in facts.name}
     if literals:
-        return facts.widen(literals), 'meostype'
+        yield facts.widen(literals), 'meostype'
 
     members = {t for pred, types in facts.klass.items()
                if re.search(rf'\b(?:ensure_)?{re.escape(pred)}\s*\(', body)
                for t in types}
     if members:
-        return members, 'class'
+        yield members, 'class'
 
     # A C parameter names a base type (`int64 i` -> int8, `const Cbuffer *cb` ->
     # cbuffer), and the catalog says which containers are built over it.
@@ -180,9 +185,14 @@ def scope_of(name: str, facts: TypeFacts, bodies: dict, params: dict,
     if from_params:
         widened = facts.widen(from_params)
         if widened - from_params:
-            return widened, 'cparam'
+            yield widened, 'cparam'
 
-    return None, 'none'
+
+def scope_of(name: str, facts: TypeFacts, bodies: dict, params: dict,
+             c_types: dict = C_BASE_TYPES) -> tuple[set | None, str]:
+    """This function's type scope and the signal that states it, or
+    ``(None, 'none')`` when MEOS states nothing."""
+    return next(scope_signals(name, facts, bodies, params, c_types), (None, 'none'))
 
 
 def declared_scopes(path: str | Path = _META) -> dict:
@@ -200,6 +210,35 @@ def resolve_scope(name, facts, bodies, params, declared):
     if stated is not None:
         return (EVERY_OVERLOAD if stated == EVERY_OVERLOAD else set(stated)), 'declared'
     return scope_of(name, facts, bodies, params)
+
+
+def scoped_signatures(name, sigs, facts, bodies, params, declared):
+    """The signatures of a shared wrapper this function serves, and the signal that
+    chose them: #resolve_scope read signal by signal, each scope filtered through
+    #signatures_for.
+
+    A scope discriminates the signatures of a shared wrapper only when it rules some
+    out. `tjsonbseq_from_base_tstzset` validates its time argument, so its first
+    signal reads ``{tstzset}``, which every signature of `Tsequence_from_base_tstzset`
+    takes: kept whole, that scope would say the function serves all 19 temporal
+    types. Such a scope states the argument every claimant shares rather than the
+    type this one serves, so the next signal MEOS states is read, here the C type of
+    the value parameter (`const Jsonb *jb` -> jsonb, tjsonb). When no signal rules a
+    signature out, the first one stands, the function serving every overload.
+    A declared scope is authoritative and is taken as stated, as #resolve_scope
+    takes it."""
+    stated = declared.get(name)
+    if stated is not None:
+        scope = EVERY_OVERLOAD if stated == EVERY_OVERLOAD else set(stated)
+        return signatures_for(name, sigs, scope), 'declared'
+    first = None
+    for scope, signal in scope_signals(name, facts, bodies, params):
+        kept = signatures_for(name, sigs, scope)
+        if len(kept) < len(sigs):
+            return kept, signal
+        if first is None:
+            first = (kept, signal)
+    return first if first is not None else (list(sigs), 'none')
 
 
 def require_scopes(claimants, facts, bodies, params, declared):
