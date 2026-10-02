@@ -21,7 +21,7 @@ from pathlib import Path
 from parser.shapeinfer import _out_count_param
 from parser.typescope import (C_BASE_TYPES, TypeFacts, declared_scopes, read_bodies,
                               sql_spellings,
-                              require_scopes, resolve_scope, signatures_for)
+                              require_scopes, scoped_signatures)
 
 # A @csqlfn tag carries one OR MORE #Wrapper() references — comma- or
 # space-separated, and possibly continued across doxygen lines — because a single
@@ -739,10 +739,10 @@ def attach_sqlfn_map(idl, meos_src, mdb_src, sql_src=None):
             # functions a binding projects, and the ones require_scopes has proven a
             # scope for. An internal function is not part of any binding surface.
             if w in shared_wrappers and f.get("api") == "public":
-                scope, _ = resolve_scope(f["name"], scope_facts, scope_bodies,
-                                         scope_params, declared)
-                if scope is not None:
-                    wsigs = signatures_for(f["name"], wsigs, scope)
+                kept, signal = scoped_signatures(f["name"], wsigs, scope_facts,
+                                                 scope_bodies, scope_params, declared)
+                if signal != "none":
+                    wsigs = kept
                     scoped = True
             for s in wsigs:
                 key = (s["sqlName"], tuple(s["args"]), s["ret"], s["retSet"])

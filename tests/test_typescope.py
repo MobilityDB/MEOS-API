@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from parser.typescope import (EVERY_OVERLOAD, SQL_ALIASES, TypeFacts, declared_scopes, scope_of,
-                              signatures_for, sql_spellings)
+                              scoped_signatures, signatures_for, sql_spellings)
 
 META = Path(__file__).resolve().parent.parent / 'meta' / 'type-scope.json'
 
@@ -100,6 +100,66 @@ class CParamScopeTests(unittest.TestCase):
         # the C typedef is not the type name lowercased: S2CellId spells s2cell
         self.assertEqual(self.scope('union_s2cell_set', 'S2CellId'),
                          ({'s2cell', 's2cellset'}, 'cparam'))
+
+
+# `Tsequence_from_base_tstzset` is the body behind tint(integer, tstzset),
+# tjsonb(jsonb, tstzset) and seventeen more, every one taking the tstzset.
+FROM_BASE_TSTZSET = [
+    {'args': ['integer', 'tstzset'], 'ret': 'tint', 'sqlName': 'tint'},
+    {'args': ['jsonb', 'tstzset'], 'ret': 'tjsonb', 'sqlName': 'tjsonb'},
+    {'args': ['geometry', 'tstzset'], 'ret': 'tgeometry', 'sqlName': 'tgeometry'},
+]
+
+
+def jsonb_facts():
+    """The type facts the constructors from a base value and a timestamp set read, in the fields
+    #TypeFacts reads from meos_catalog.c, as #cell_facts states those of the cell grids."""
+    facts = TypeFacts.__new__(TypeFacts)
+    facts.name = {'T_JSONB': 'jsonb', 'T_TSTZSET': 'tstzset'}
+    facts.names = {'jsonb', 'jsonbset', 'tjsonb', 'tstzset'}
+    facts.klass = {}
+    facts.validate = {'VALIDATE_TSTZSET': {'tstzset'}}
+    facts.container = {'jsonb': {'jsonbset', 'tjsonb'}}
+    return facts
+
+
+class SharedWrapperScopeTests(unittest.TestCase):
+    """A scope discriminates the signatures of a shared wrapper only when it rules some out;
+    built as #CParamScopeTests is, over synthetic inputs."""
+
+    def kept(self, fn, ctype, body, declared=None):
+        params = {fn: 'const %s v, const Set *s)' % ctype}
+        bodies = {fn: 'Temporal *\n%s(const %s v, const Set *s)\n{\n%s\n}' % (fn, ctype, body)}
+        return scoped_signatures(fn, FROM_BASE_TSTZSET, jsonb_facts(), bodies, params,
+                                 declared or {})
+
+    def test_a_scope_every_signature_takes_gives_way_to_the_next_signal(self):
+        # VALIDATE_TSTZSET states the time argument every claimant shares; the C type of the
+        # value parameter states the type this one serves
+        kept, signal = self.kept('tjsonbseq_from_base_tstzset', 'Jsonb *',
+                                 '  VALIDATE_TSTZSET(s, NULL);')
+        self.assertEqual(signal, 'cparam')
+        self.assertEqual([s['ret'] for s in kept], ['tjsonb'])
+
+    def test_the_first_signal_stands_when_none_rules_a_signature_out(self):
+        # the generic constructor takes its value as a Datum, so nothing narrows it
+        kept, signal = self.kept('tsequence_from_base_tstzset', 'Datum',
+                                 '  VALIDATE_TSTZSET(s, NULL);')
+        self.assertEqual(signal, 'validate')
+        self.assertEqual(kept, FROM_BASE_TSTZSET)
+
+    def test_a_first_signal_that_rules_signatures_out_is_taken(self):
+        kept, signal = self.kept('tjsonbseq_from_base_tstzset', 'Jsonb *',
+                                 '  return x(v, s, T_JSONB);')
+        self.assertEqual(signal, 'meostype')
+        self.assertEqual([s['ret'] for s in kept], ['tjsonb'])
+
+    def test_a_declared_scope_is_taken_as_stated(self):
+        kept, signal = self.kept('tjsonbseq_from_base_tstzset', 'Jsonb *',
+                                 '  VALIDATE_TSTZSET(s, NULL);',
+                                 {'tjsonbseq_from_base_tstzset': EVERY_OVERLOAD})
+        self.assertEqual(signal, 'declared')
+        self.assertEqual(kept, FROM_BASE_TSTZSET)
 
 
 if __name__ == '__main__':
