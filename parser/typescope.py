@@ -49,12 +49,15 @@ _RELATIONS = ('settype_basetype', 'spantype_basetype', 'temptype_basetype',
 _NOT_A_TYPE = {'unknown'}
 
 # The C spelling of each MEOS base type. `GSERIALIZED` covers both geometry and
-# geography, which is why a C parameter of that type widens to the pair.
+# geography, which is why a C parameter of that type widens to the pair. A cell
+# identifier's C typedef is not its type name lowercased for every grid
+# (`S2CellId` spells `s2cell`), so the three grids are stated, not inferred.
 C_BASE_TYPES = {
     'int': 'int4', 'int32': 'int4', 'int64': 'int8', 'double': 'float8',
     'bool': 'bool', 'text': 'text', 'DateADT': 'date',
     'TimestampTz': 'timestamptz', 'Interval': 'interval',
     'GSERIALIZED': ('geometry', 'geography'),
+    'H3Index': 'h3index', 'Quadbin': 'quadbin', 'S2CellId': 's2cell',
 }
 
 # PostgreSQL's spelling of the MEOS base types: a SQL signature says `integer`
