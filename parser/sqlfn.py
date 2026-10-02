@@ -311,6 +311,17 @@ def sql_signature(sqlname, argdecls, ret, retset, vocab, composites):
             "columns": columns if columns and len(columns) > 1 else None}
 
 
+def _meos_definition_files(meos_src):
+    """Every C file that defines a public MEOS function: meos/src, and the pgtypes library beside
+    it at the repository root, whose base-type functions (jsonb_to_text, interval_make, ...) the
+    public headers declare and run.py's #_public_pgtypes_headers parses. The tags of a function
+    sit on its definition, so a reader of tags walks wherever a definition can be."""
+    src = Path(meos_src)
+    for root in (src, src.parent.parent / "pgtypes"):
+        if root.is_dir():
+            yield from root.rglob("*.c")
+
+
 def _meos_to_mdb(meos_src):
     """MEOS-C function name -> ordered list of MobilityDB-C wrapper names (from
     @csqlfn). One MEOS function can back more than one wrapper — the ever/always
@@ -319,7 +330,7 @@ def _meos_to_mdb(meos_src):
     #Wrapper() references; collect them all (mirrors _mdb_to_sql collecting every
     @sqlfn rather than the first)."""
     out = {}
-    for cf in Path(meos_src).rglob("*.c"):
+    for cf in _meos_definition_files(meos_src):
         text = cf.read_text(errors="ignore")
         for m in _CSQLFN.finditer(text):
             tail = text[m.end():]
@@ -345,7 +356,7 @@ def _meos_agg_names(meos_src):
     _meos_to_mdb, whose #Wrapper() references need a second _mdb_to_sql hop. A member
     shared by two aggregates (spanset_union_finalfn) carries several names."""
     out = {}
-    for cf in Path(meos_src).rglob("*.c"):
+    for cf in _meos_definition_files(meos_src):
         text = cf.read_text(errors="ignore")
         for m in _CSQLAGGFN.finditer(text):
             tail = text[m.end():]
@@ -422,7 +433,7 @@ def _meos_direct_sql(meos_src):
     here), and attach_sqlfn_map consults this map ONLY for functions the wrapper
     chain did not resolve — fill-only, never an override."""
     out = {}
-    for cf in Path(meos_src).rglob("*.c"):
+    for cf in _meos_definition_files(meos_src):
         text = cf.read_text(errors="ignore")
         for bm in _DOXY_BLOCK.finditer(text):
             block = bm.group(0)
