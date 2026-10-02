@@ -417,7 +417,9 @@ class SourceRootResolutionTest(unittest.TestCase):
         finally:
             os.chdir(cwd)
             for k, v in saved.items():
-                if v is not None:
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
                     os.environ[k] = v
 
 
