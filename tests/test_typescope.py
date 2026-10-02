@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-from parser.typescope import (EVERY_OVERLOAD, SQL_ALIASES, declared_scopes,
+from parser.typescope import (EVERY_OVERLOAD, SQL_ALIASES, TypeFacts, declared_scopes, scope_of,
                               signatures_for, sql_spellings)
 
 META = Path(__file__).resolve().parent.parent / 'meta' / 'type-scope.json'
@@ -68,6 +68,38 @@ class DeclaredScopeTests(unittest.TestCase):
     def test_declared_scopes_reads_every_entry(self):
         doc = json.loads(META.read_text())
         self.assertEqual(set(declared_scopes()), set(doc['scopes']))
+
+
+def cell_facts():
+    """The type facts of the three cell grids as meos_catalog.c states them: each base type and
+    the set built over it, in the fields #TypeFacts reads from that file, so no tree is needed."""
+    facts = TypeFacts.__new__(TypeFacts)
+    grids = ('h3index', 'quadbin', 's2cell')
+    facts.name = {}
+    facts.names = set(grids) | {g + 'set' for g in grids}
+    facts.klass, facts.validate = {}, {}
+    facts.container = {g: {g + 'set'} for g in grids}
+    return facts
+
+
+class CParamScopeTests(unittest.TestCase):
+    """A value-first set operation delegating to its set-first twin states its scope only through
+    its C parameter, as union_bigint_set does through `int64`; built as #SignatureFilterTests is,
+    over synthetic inputs."""
+
+    def scope(self, fn, ctype):
+        params = {fn: '%s cell, const Set *s)' % ctype}
+        bodies = {fn: 'Set *\n%s(%s cell, const Set *s)\n{\n  return x(s, cell);\n}' % (fn, ctype)}
+        return scope_of(fn, cell_facts(), bodies, params)
+
+    def test_every_cell_grid_names_its_base_type_through_its_c_typedef(self):
+        self.assertEqual(self.scope('union_h3index_set', 'H3Index'),
+                         ({'h3index', 'h3indexset'}, 'cparam'))
+        self.assertEqual(self.scope('union_quadbin_set', 'Quadbin'),
+                         ({'quadbin', 'quadbinset'}, 'cparam'))
+        # the C typedef is not the type name lowercased: S2CellId spells s2cell
+        self.assertEqual(self.scope('union_s2cell_set', 'S2CellId'),
+                         ({'s2cell', 's2cellset'}, 'cparam'))
 
 
 if __name__ == '__main__':
