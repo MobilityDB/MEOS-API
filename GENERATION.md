@@ -19,7 +19,10 @@ that the preprocessor flattens to `int`), `@ingroup` groups, the `@sqlfn` SQL-na
 portable bare-name aliases, and the type registries: `typeRelations` for each base type's
 set, span, span set and temporal types, and `temporalTypes` for what MEOS states about each
 `Temporal<T>` — its base, its bounding box, the MF-JSON type token `asMFJSON` writes for it,
-and its number, spatial and linear classes. The `generator/` modules project the catalog onto the
+and its number, spatial and linear classes. `aggregates` states every SQL aggregate: its
+arguments, its result type and, for each of its roles (transition, combine, final,
+serialize, deserialize), the SQL function PostgreSQL calls and the public MEOS function
+carrying it. The `generator/` modules project the catalog onto the
 language-**agnostic** service contracts (OpenAPI, MCP, the runtime server, the OGC Moving
 Features projection) — the surfaces that need no foreign toolchain. Language bindings live in
 their own repos and generate from this catalog.
