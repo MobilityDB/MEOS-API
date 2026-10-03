@@ -23,6 +23,7 @@ from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
+                          attach_claims_fit,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
                           lint_ea_sqlfn, lint_positional_sqlfn,
                           lint_sqlfn_case_collisions, state_deployed_sqlfn)
@@ -367,6 +368,13 @@ def main():
     # token from here; carrying a per-type table of its own is a copy that goes stale the
     # moment a family is added.
     idl = attach_temporal_types(idl, MOBILITYDB_SRC)
+
+    # Keep a SQL signature two public functions claim on the one whose C parameters it
+    # fits, matched by type once the object model and the type relations state the C type
+    # of each SQL type.
+    idl, nclaims = attach_claims_fit(idl)
+    print(f"      shared SQL signatures given up by a function they do not fit: {nclaims}",
+          file=sys.stderr)
 
     # Name the C value feeding each column of every row a SQL signature returns, matched
     # by type once the object model and the type relations state the C type of each SQL
