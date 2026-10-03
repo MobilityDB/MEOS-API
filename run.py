@@ -17,6 +17,7 @@ from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import (attach_call_literals, merge_boundargs, resolve_bound_names,
                               strip_call_literals)
+from parser.aggregates import attach_aggregates
 from parser.compositions import attach_compositions
 from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
@@ -381,6 +382,14 @@ def main():
         idl, ncomp = attach_compositions(idl, SQL_SRC)
         print(f"      SQL compositions over another type's functions: {ncomp}",
               file=sys.stderr)
+
+    # State each SQL aggregate: its arguments, its result type and the SQL and MEOS
+    # function of each of its roles, read from the deployed CREATE AGGREGATE statements
+    # and resolved through the signatures above, so a binding builds an aggregate from
+    # MEOS functions as it builds a composition.
+    if SQL_SRC.exists():
+        idl, nagg_sql = attach_aggregates(idl, SQL_SRC)
+        print(f"      SQL aggregates: {nagg_sql}", file=sys.stderr)
 
     # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
     # a consumer proves it is current by comparing sourceCommit to live upstream master, never by
