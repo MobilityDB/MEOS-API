@@ -1014,20 +1014,25 @@ def state_deployed_sqlfn(idl: dict) -> tuple[dict, int]:
     ``sqlName: floatset_in``, the name its ``CREATE FUNCTION`` deploys. When every
     signature of a function carries one name, that name is the function's ``sqlfn``
     and the signatures drop the ``sqlName`` that only restated it. A function whose
-    signatures carry several names keeps the tag, each signature its own name; a
-    ``sqlfnBackingOnly`` record, as #classify_backing_sqlfn of parser/portable.py marks
-    it, keeps its backing tag beside its ``publicSqlName``."""
+    signatures carry several names keeps the tag when one of them carries it, each
+    other signature its own name; when none does, as ``floatset_in`` deploys
+    ``floatset_in`` and ``floatsetFromText`` under a ``Set_in`` tagged ``intset_in()``,
+    its ``sqlfn`` is the name of its first signature, which #attach_sqlfn_map lists
+    from the tagged wrapper first. A ``sqlfnBackingOnly`` record, as
+    #classify_backing_sqlfn of parser/portable.py marks it, keeps its backing tag
+    beside its ``publicSqlName``."""
     n = 0
     for f in idl.get("functions", []):
         sigs = f.get("sqlSignatures")
         if not sigs or f.get("sqlfnBackingOnly"):
             continue
-        names = {s.get("sqlName", f["sqlfn"]) for s in sigs}
-        if len(names) != 1:
+        names = [s.get("sqlName", f["sqlfn"]) for s in sigs]
+        if len(set(names)) != 1 and f["sqlfn"] in names:
             continue
-        name = names.pop()
+        name = names[0]
         for s in sigs:
-            s.pop("sqlName", None)
+            if s.get("sqlName") == name:
+                s.pop("sqlName")
         if name != f["sqlfn"]:
             f["sqlfn"] = name
             n += 1

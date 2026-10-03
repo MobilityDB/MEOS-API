@@ -45,6 +45,20 @@ class DeployedNameTests(unittest.TestCase):
         self.assertEqual(fns["ea_dwithin_tgeo_geo"]["sqlSignatures"], sigs)
         self.assertEqual(n, 0)
 
+    def test_several_names_none_the_tag_take_the_first(self):
+        # As #test_the_one_name_the_signatures_carry_is_the_sqlfn, once the family's
+        # wrappers deploy a second name: the tag names a sibling, never this function.
+        fns, n = _state({"name": "floatset_in", "sqlfn": "intset_in",
+                         "sqlSignatures": [{"args": ["cstring"], "ret": "floatset",
+                                            "sqlName": "floatset_in"},
+                                           {"args": ["text"], "ret": "floatset",
+                                            "sqlName": "floatsetFromText"}]})
+        self.assertEqual(fns["floatset_in"]["sqlfn"], "floatset_in")
+        self.assertEqual(fns["floatset_in"]["sqlSignatures"],
+                         [{"args": ["cstring"], "ret": "floatset"},
+                          {"args": ["text"], "ret": "floatset", "sqlName": "floatsetFromText"}])
+        self.assertEqual(n, 1)
+
     def test_a_backing_tag_stays_beside_its_public_name(self):
         fns, n = _state({"name": "adjacent_tbox_tnumber", "sqlfn": "adjacent_bbox",
                          "sqlfnBackingOnly": True, "publicSqlName": "adjacent",
@@ -76,19 +90,18 @@ class DeployedNameCatalogTests(unittest.TestCase):
                             ("contains_cbuffer_cbuffer", "cbuffer_contains")):
             self.assertEqual(self.fns[name]["sqlfn"], sqlfn, name)
 
-    def test_backing_tags_keep_their_family_name(self):
+    def test_an_operator_function_carries_its_class_prefixed_name(self):
         f = self.fns["adjacent_tbox_tnumber"]
-        self.assertEqual((f["sqlfn"], f["publicSqlName"]), ("adjacent_bbox", "adjacent"))
+        self.assertEqual(f["sqlfn"], "tboxAdjacent")
 
     def test_no_function_names_a_family_member_its_signatures_do_not(self):
         """The condition #state_deployed_sqlfn of parser/sqlfn.py reads, asked of the
-        whole catalog: signatures all carrying one name other than sqlfn, a backing
+        whole catalog: an sqlfn none of the function's signatures carries, a backing
         tag aside."""
         other = [f["name"] for f in self.fns.values()
                  if f.get("sqlSignatures") and not f.get("sqlfnBackingOnly")
-                 and len(names := {s.get("sqlName", f["sqlfn"])
-                                   for s in f["sqlSignatures"]}) == 1
-                 and names != {f["sqlfn"]}]
+                 and f["sqlfn"] not in {s.get("sqlName", f["sqlfn"])
+                                        for s in f["sqlSignatures"]}]
         self.assertEqual(other, [])
 
 
