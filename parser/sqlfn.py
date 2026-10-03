@@ -19,8 +19,10 @@ import re
 from pathlib import Path
 
 from parser.shapeinfer import _out_count_param
-from parser.typescope import (C_BASE_TYPES, TypeFacts, declared_scopes, read_bodies,
-                              sql_spellings,
+from itertools import permutations
+
+from parser.typescope import (C_BASE_TYPES, SQL_ALIASES, TypeFacts, declared_scopes,
+                              read_bodies, sql_spellings,
                               require_scopes, scoped_signatures)
 
 # A @csqlfn tag carries one OR MORE #Wrapper() references — comma- or
@@ -640,6 +642,67 @@ def attach_row_sources(idl, declared=None):
         raise ValueError(
             "SQL rows with a column MEOS states no source for; state it in "
             "meta/sql-columns.json:\n  " + "\n  ".join(sorted(set(unfed))))
+    return idl, n
+
+
+def _signature_fits(func, sig, sqlc):
+    """Whether the arguments of `sig` fit the C input parameters of `func`, in their order
+    or in the one other order a wrapper may pass them in, as #_Resolver.params of
+    parser/compositions.py matches the operands of a call: True or False, or None when the
+    two counts differ (an array passed with its count, an argument left to its default).
+    The parameters `sig` binds and the out-parameters take no argument."""
+    shape = func.get("shape") or {}
+    bound = sig.get("boundArgs") or shape.get("boundArgs") or {}
+    out = set(shape.get("outParams") or ())
+    inputs = [p for p in func.get("params") or ()
+              if p["name"] not in out and p["name"] not in bound]
+    if len(inputs) != len(sig["args"]):
+        return None
+    types = []
+    for a in sig["args"]:
+        t = re.sub(r"\s*\(.*\)$", "", a.strip().lower())
+        types.append(SQL_ALIASES.get(t, t))
+
+    def fit(order):
+        return all(_fits(t, *_c_base(p.get("cType")), sqlc) for t, p in zip(types, order))
+    return fit(inputs) or any(fit(o) for o in permutations(inputs))
+
+
+def attach_claims_fit(idl):
+    """(idl, number of signatures given up) once every claimant of a shared SQL signature
+    keeps it only if its C parameters fit it.
+
+    Two public functions can claim one SQL signature: a wrapper serving a whole family
+    (`Tbox_value_tiles`) is claimed by each typed MEOS function behind it
+    (`tintbox_value_tiles`, `tbigintbox_value_tiles`, `tfloatbox_value_tiles`), and a type
+    scope naming the box all three take keeps every signature on each. A binding then
+    calls whichever claimant it meets first, and `valueTiles(tbox, integer, integer,
+    boolean)` reaches the `int64` kernel. Where another claimant's parameters fit the
+    signature (#_signature_fits), a claimant whose parameters do not gives it up; a
+    signature no claimant or every claimant fits stays where it is. Runs once the object
+    model and the type relations are attached, as #attach_row_sources does, since a
+    parameter is matched to a SQL type by its C type."""
+    sqlc = _sql_ctypes(idl)
+    claims = {}
+    for f in idl["functions"]:
+        if f.get("api") != "public":
+            continue
+        for s in f.get("sqlSignatures") or ():
+            key = (s.get("sqlName") or f.get("sqlfn"), tuple(s["args"]))
+            claims.setdefault(key, []).append((f, s))
+    n = 0
+    for pairs in claims.values():
+        if len(pairs) < 2:
+            continue
+        fits = [(f, s, _signature_fits(f, s, sqlc)) for f, s in pairs]
+        if not any(v is True for _, _, v in fits):
+            continue
+        for f, s, v in fits:
+            if v is False:
+                f["sqlSignatures"] = [x for x in f["sqlSignatures"] if x is not s]
+                n += 1
+    # A function may keep only signatures carrying another name than its sqlfn
+    idl, _ = state_deployed_sqlfn(idl)
     return idl, n
 
 
