@@ -168,9 +168,9 @@ def state_type_encodings(idl):
         """(function and aux, or None; {SQL type: (name, aux)}) of one encoding: what the
         SQL signatures key (#keyed), else the function #build_type_encodings of
         parser/enrich.py states for the encoding, else the encoding's one public
-        candidate. A class whose readers and writers carry no SQL signature
-        (``GSERIALIZED``, whose geometry and geography are PostGIS's types) keeps what
-        enrich states."""
+        candidate. An encoding whose readers and writers carry no SQL signature
+        (the text and MF-JSON forms of ``GSERIALIZED``, whose geometry and geography are
+        PostGIS's types) keeps what enrich states."""
         pick, by_type = keyed(cls, cands, sql_type, side, table) if cands else (None, {})
         if pick or by_type:
             return pick, by_type

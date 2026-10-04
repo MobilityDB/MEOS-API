@@ -74,6 +74,13 @@ FUNCTIONS = [
     # a cell: a value of its own over uint64_t, read and written by its own functions
     fn("h3index_in", "uint64_t", [("const char *", "str")], typedef="H3Index"),
     fn("h3index_out", "char *", [("uint64_t", "cell")], typedef="H3Index"),
+    # geometry and geography share one class: a HexEWKB reader per type, one writer for both
+    fn("geom_from_hexewkb", "GSERIALIZED *", [("const char *", "hexwkb")],
+       [sig(None, ["text"], "geometry")]),
+    fn("geog_from_hexewkb", "GSERIALIZED *", [("const char *", "hexwkb")],
+       [sig(None, ["text"], "geography")]),
+    fn("geo_as_hexewkb", "char *", [("const GSERIALIZED *", "gs"), ("const char *", "endian")],
+       [sig(None, ["geometry", "text"], "text"), sig(None, ["geography", "text"], "text")]),
 ]
 
 
@@ -81,7 +88,7 @@ def _idl(functions=FUNCTIONS):
     return {"functions": json.loads(json.dumps(functions)),
             "macros": [{"name": "WKB_EXTENDED", "value": 4}],
             "structs": [{"name": "Set", "fields": []}, {"name": "Raster", "fields": []}],
-            "typeEncodings": {"Set": {}, "Raster": {}}}
+            "typeEncodings": {"Set": {}, "Raster": {}, "GSERIALIZED": {}}}
 
 
 class CodecTests(unittest.TestCase):
@@ -122,6 +129,15 @@ class CodecTests(unittest.TestCase):
         self.assertEqual(r["encoders"], {"wkb": "raster_as_hexwkb"})
         self.assertEqual(r["out"], "raster_as_hexwkb")
         self.assertEqual(r["encoderAux"]["wkb"][0]["default"], 0)
+
+    def test_a_hexewkb_reader_per_type_and_one_writer_for_both(self):
+        g = self.te["GSERIALIZED"]
+        self.assertEqual(g["readers"]["wkb"], {"geometry": "geom_from_hexewkb",
+                                               "geography": "geog_from_hexewkb"})
+        self.assertNotIn("wkb", g["decoders"])
+        self.assertEqual(g["encoders"]["wkb"], "geo_as_hexewkb")
+        self.assertEqual(g["encoderAux"]["wkb"],
+                         [{"name": "endian", "kind": "string", "default": None}])
 
     def test_a_cell_is_a_class_of_its_own(self):
         h = self.te["H3Index"]
@@ -174,6 +190,9 @@ class CodecContractTests(unittest.TestCase):
         self.assertEqual(te["Set"]["readers"]["text"]["intset"], "intset_in")
         self.assertEqual(te["Temporal"]["writers"]["text"]["tfloat"], "tfloat_out")
         self.assertEqual(te["Raster"]["out"], "raster_as_hexwkb")
+        self.assertEqual(te["GSERIALIZED"]["readers"]["wkb"],
+                         {"geometry": "geom_from_hexewkb", "geography": "geog_from_hexewkb"})
+        self.assertEqual(te["GSERIALIZED"]["encoders"]["wkb"], "geo_as_hexewkb")
         for cell in ("H3Index", "Quadbin", "S2CellId"):
             self.assertIn(cell, te)
 
