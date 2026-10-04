@@ -59,8 +59,8 @@ literals are in the catalog.
 ```
 
 - **decoder** — a public `const char * (+ aux) → T` (`*_in`, `*_from_mfjson`,
-  `*_from_hexwkb`, …); **encoder** — a public `T (+ aux) → char *` (`*_out`,
-  `*_as_mfjson`, `*_as_hexwkb`, …). A size the function writes back is an
+  `*_from_hexwkb`, `*_from_hexewkb`, …); **encoder** — a public `T (+ aux) → char *`
+  (`*_out`, `*_as_mfjson`, `*_as_hexwkb`, `*_as_hexewkb`, …). A size the function writes back is an
   out-parameter, stated in its `shape.outParams` as for any other function.
 - **A PostgreSQL type passed by value** (`TimestampTz`, `Timestamp`, `TimeADT`,
   `DateADT`) is a class like a pointer type, its decoder returning it and its
@@ -68,14 +68,16 @@ literals are in the catalog.
   PostgreSQL's spelling `pg_X` yields to the name MEOS states it under, `X`,
   when both serve a class (`timetz_in`, never `pg_timetz_in`).
 - **`readers` / `writers`** — a class several SQL types share (`Set`, `Span`,
-  `SpanSet`, `Temporal`) reads and writes each type through that type's own public
+  `SpanSet`, `Temporal`, `GSERIALIZED`) reads and writes each type through that type's own public
   function, keyed by the SQL type its signature returns (a reader) or takes (a writer).
   An encoding with a `readers` or `writers` entry has no single `decoders` or
   `encoders` entry. Within one SQL type, the function the encoding table names first
   wins (`cbuffer_out` before `cbuffer_as_ewkt`), then the narrower one
   (`cbufferset_out` before `spatialset_out`); two that tie stop the catalog. An
-  encoding whose functions carry no SQL signature (`GSERIALIZED`, whose geometry and
-  geography are PostGIS's types) keeps the function the C shapes give it.
+  encoding whose functions carry no SQL signature keeps the function the C shapes give
+  it: the text and MF-JSON forms of `GSERIALIZED`, whose geometry and geography are
+  PostGIS's types, while its HexEWKB readers `geom_from_hexewkb` and
+  `geog_from_hexewkb` are keyed by `geometry` and `geography`.
 - **`in` / `out`** — the class's single decoder and encoder in the order `text` >
   `mfjson` > `wkb`, absent when no single function serves the whole class.
 - **Trailing inputs** — every decoder, encoder, reader and writer states the inputs
