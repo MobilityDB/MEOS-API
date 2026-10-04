@@ -176,6 +176,21 @@ VALUE_TIME_SPLIT = {
                                         ("tnumber", "tbigint"))}],
 }
 
+# A row whose two columns are fed by two C values of one type, the returned keys
+# and the out-parameter values, shaped as #VALUE_TIME_SPLIT is.
+EACH_TEXT = {
+    "name": "jsonb_each_text",
+    "sqlfn": "jsonbEachText",
+    "params": [{"name": "jb", "cType": "const Jsonb *"},
+               {"name": "values", "cType": "text **"},
+               _count()],
+    "returnType": {"c": "text **"},
+    "shape": {"arrayReturn": {"element": {"c": "text *"}},
+              "outParams": ["values", "count"]},
+    "sqlSignatures": [{"args": ["jsonb"], "ret": "record", "retSet": True,
+                       "columns": _cols(("key", "text"), ("value", "text"))}],
+}
+
 
 def _pairs(with_periods):
     params = [{"name": "arr1", "cType": "const Temporal **"},
@@ -315,6 +330,27 @@ class UnfedRowTests(unittest.TestCase):
         cols, _ = _attach(_pairs(False))
         self.assertNotIn("offset", cols[0])
 
+    def test_two_c_values_of_one_type_need_a_statement(self):
+        """As #test_a_column_two_c_values_fit_stops_the_catalog, over EACH_TEXT."""
+        with self.assertRaises(ValueError):
+            _attach(copy.deepcopy(EACH_TEXT))
+
+    def test_a_stated_source_naming_no_c_value_stops_the_catalog(self):
+        """As #test_a_column_no_c_value_fits_stops_the_catalog, for a statement."""
+        with self.assertRaises(ValueError):
+            _attach(copy.deepcopy(EACH_TEXT),
+                    {"jsonbEachText": {"key": {"from": "return"},
+                                       "value": {"from": "vals"}}})
+
+    def test_a_stated_source_feeds_its_column(self):
+        """As #test_an_ordinal_column_is_declared_and_a_class_is_one_value states
+        an ordinal, a statement names the C value of each column of EACH_TEXT."""
+        cols, _ = _attach(copy.deepcopy(EACH_TEXT),
+                          {"jsonbEachText": {"key": {"from": "return"},
+                                             "value": {"from": "values"}}})
+        self.assertEqual(cols, [{"name": "key", "type": "text", "from": "return"},
+                                {"name": "value", "type": "text", "from": "values"}])
+
 
 class DeclaredColumnsTests(unittest.TestCase):
 
@@ -326,7 +362,7 @@ class DeclaredColumnsTests(unittest.TestCase):
     def test_an_unknown_source_is_refused(self):
         import jsonschema
         doc = json.loads(COLUMNS.read_text())
-        doc["rows"]["index_tbox"]["columns"]["index"] = {"from": "position"}
+        doc["rows"]["index_tbox"]["columns"]["index"] = {"from": "with ordinality"}
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(doc, json.loads(SCHEMA.read_text()))
 

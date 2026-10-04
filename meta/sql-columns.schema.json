@@ -32,8 +32,9 @@
               "additionalProperties": false,
               "properties": {
                 "from": {
-                  "description": "ordinal: the column numbers the rows from 1, as PostgreSQL's WITH ORDINALITY.",
-                  "const": "ordinal"
+                  "description": "ordinal: the column numbers the rows from 1, as PostgreSQL's WITH ORDINALITY. return, or the name of an out-parameter: the C value feeding the column, where two C values of the column's type leave its source to this statement.",
+                  "type": "string",
+                  "pattern": "^(ordinal|return|[a-z_][a-z0-9_]*)$"
                 },
                 "offset": {
                   "description": "A constant the wrapper adds to the C value feeding the column.",
