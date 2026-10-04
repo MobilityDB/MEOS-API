@@ -49,6 +49,12 @@ When a wrapper calls no member of its group and delegates to no helper, the MEOS
 definition of each function it calls is read, and a function whose parameter names equal
 a member's is the generic that member wraps: its literals bind to the member by parameter
 name.
+
+A function MEOS takes from PostgreSQL is public under PostgreSQL's name only in MEOS, where
+it calls its ``pg_`` twin, which takes the same parameters in the same order; the extension,
+which links PostgreSQL's own function of that name, calls the twin:
+``Jsonb_path_exists_common`` calls ``pg_jsonb_path_exists(jb, jp, vars, silent, tz)``
+for ``jsonb_path_exists``. A call to the twin is read as a call to the member.
 """
 from __future__ import annotations
 
@@ -310,7 +316,7 @@ def _wrapper_bound(body: str, func: dict, drift: list,
     array length (``@param[in] count``), an aggregate state (``@param[in,out] state``) —
     never a hard-coded literal, so it is skipped systematically. Only a bare identifier
     for an UNDOCUMENTED parameter is reported as drift (the exceptional manual gap)."""
-    args = _call_args(body, func["name"])
+    args = _call_args(body, func["name"]) or _call_args(body, "pg_" + func["name"])
     if not args:
         return {}
     subst = subst or {}
