@@ -15,8 +15,8 @@ from parser.shapeinfer import infer_shapes
 from parser.nullable import merge_nullable
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
-from parser.boundargs import (attach_call_literals, merge_boundargs, resolve_bound_names,
-                              strip_call_literals)
+from parser.boundargs import (attach_call_literals, merge_boundargs, merge_sql_arg_params,
+                              resolve_bound_names, strip_call_literals)
 from parser.aggregates import attach_aggregates
 from parser.altsqlfn import attach_alt_sql_names
 from parser.compositions import attach_compositions
@@ -318,6 +318,13 @@ def main():
                   f"(neither caller arg, out-param, nor literal — inspect):", file=sys.stderr)
             for fn, pn, reason in ba_drift:
                 print(f"          {fn}({pn}) — {reason}", file=sys.stderr)
+        # A wrapper can read its SQL arguments in an order other than the C parameters'
+        # (`tgeogpointSeq` reads the interpolation before the bound inclusions, which
+        # `tsequence_make` takes first): `shape.sqlArgParams`, or a signature's own where the
+        # wrappers disagree, names the parameters in SQL argument order.
+        idl, nsap = merge_sql_arg_params(idl, MDB_SRC, sql_src=SQL_SRC, meos_src=MEOS_SRC)
+        print(f"      SQL argument orders other than the C order (`sqlArgParams`): {nsap}",
+              file=sys.stderr)
         # A bound literal can name a macro of a header the parse does not read (the
         # installed headers carry none of temporal/temporal.h); its value comes from the
         # source headers, so the catalog states what every bound literal is.

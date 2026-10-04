@@ -12,8 +12,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.boundargs import (attach_call_literals, extract_call_literals, extract_wrappers,
-                              merge_boundargs, resolve_bound_names, strip_call_literals)
+from parser.boundargs import (_sql_arg_params, attach_call_literals, extract_call_literals,
+                              extract_wrappers, merge_boundargs, resolve_bound_names,
+                              strip_call_literals)
 
 # A synthetic MobilityDB wrapper source (mobilitydb/src/**/*.c shape).
 SAMPLE = '''
@@ -938,6 +939,69 @@ class CallLiteralTests(unittest.TestCase):
         strip_call_literals(idl)
         self.assertFalse(any("_callLiteral" in p for f in idl["functions"]
                              for p in f["params"]))
+
+
+# The sequence constructor reads the instants, the interpolation and the two inclusions, as
+# Tsequence_constructor of mobilitydb/src/temporal/temporal.c does, and passes them in the
+# C order of tsequence_make.
+CONSTRUCTOR = """
+  ArrayType *array = PG_GETARG_ARRAYTYPE_P(0);
+  int count;
+  TInstant **instants = (TInstant **) temparr_extract(array, &count);
+  meosType temptype = instants[0]->temptype;
+  interpType interp = temptype_supports_linear(temptype) ? LINEAR : STEP;
+  if (PG_NARGS() > 1 && ! PG_ARGISNULL(1))
+    interp = input_interp_string(fcinfo, 1);
+  bool lower_inc = true, upper_inc = true;
+  if (PG_NARGS() > 2 && ! PG_ARGISNULL(2))
+    lower_inc = PG_GETARG_BOOL(2);
+  if (PG_NARGS() > 3 && ! PG_ARGISNULL(3))
+    upper_inc = PG_GETARG_BOOL(3);
+  TSequence *result = tsequence_make(instants, count, lower_inc, upper_inc,
+    interp, NORMALIZE);
+"""
+TSEQUENCE_MAKE = {"name": "tsequence_make", "params": [
+    {"name": n} for n in ("instants", "count", "lower_inc", "upper_inc", "interp", "normalize")]}
+# A commuted wrapper passes its arguments in the other order.
+COMMUTED = """
+  GSERIALIZED *gs = PG_GETARG_GSERIALIZED_P(0);
+  Temporal *temp = PG_GETARG_TEMPORAL_P(1);
+  Temporal *result = tdistance_tgeo_geo(temp, gs);
+"""
+TDISTANCE = {"name": "tdistance_tgeo_geo", "params": [{"name": "temp"}, {"name": "gs"}]}
+
+
+class SqlArgParamsTests(unittest.TestCase):
+    """#_sql_arg_params of parser/boundargs.py over synthetic wrapper bodies."""
+
+    def test_the_constructor_reads_its_arguments_in_another_order(self):
+        self.assertEqual(_sql_arg_params(CONSTRUCTOR, TSEQUENCE_MAKE),
+                         ["instants", "interp", "lower_inc", "upper_inc"])
+
+    def test_a_commuted_wrapper_reads_the_second_parameter_first(self):
+        self.assertEqual(_sql_arg_params(COMMUTED, TDISTANCE), ["gs", "temp"])
+
+    def test_the_c_order_is_not_stated(self):
+        body = COMMUTED.replace("tdistance_tgeo_geo(temp, gs)", "tdistance_tgeo_geo(gs, temp)")
+        self.assertIsNone(_sql_arg_params(body, {"name": "tdistance_tgeo_geo",
+                                                  "params": [{"name": "gs"}, {"name": "temp"}]}))
+
+
+IDL = Path(__file__).resolve().parent.parent / "output" / "meos-idl.json"
+
+
+class SqlArgParamsContractTests(unittest.TestCase):
+    """Over the generated catalog: the sequence constructor states the order its wrapper reads."""
+
+    def setUp(self):
+        if not IDL.exists():
+            self.skipTest(f"{IDL} not generated; run `python run.py` first")
+        import json
+        self.fns = {f["name"]: f for f in json.loads(IDL.read_text())["functions"]}
+
+    def test_the_sequence_constructor_reads_the_interpolation_second(self):
+        self.assertEqual(self.fns["tsequence_make"]["shape"]["sqlArgParams"],
+                         ["instants", "interp", "lower_inc", "upper_inc"])
 
 
 if __name__ == "__main__":
