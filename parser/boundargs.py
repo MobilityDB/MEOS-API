@@ -561,17 +561,57 @@ def _caller_index(body: str, arg: str, depth: int = 0) -> int | None:
     return via.pop() if len(via) == 1 else None
 
 
-def _sql_arg_params(body: str, func: dict) -> list[str] | None:
+def extract_meos_bodies(meos_src: str | Path) -> dict[str, str]:
+    """``{function: body_text}`` for every documented MEOS definition under ``meos_src``,
+    read with the definition pattern #extract_param_lists reads."""
+    from parser.outparam import _FUNC
+    out: dict[str, str] = {}
+    for f in sorted(Path(meos_src).rglob("*.c")):
+        text = f.read_text(errors="ignore")
+        for m in _FUNC.finditer(text):
+            out.setdefault(m.group("name"), _COMMENT.sub(" ", _body(text, m.end() - 1)))
+    return out
+
+
+def _kernel_args(body: str, func: dict, meos_body: str | None) -> list[str | None] | None:
+    """The call arguments of the wrapper ``body`` standing for the parameters of ``func``,
+    one per parameter, where the two meet at a shared kernel rather than the wrapper calling
+    ``func``, one hop down as #_delegated follows a wrapper into its shared helper:
+    ``Distance_value_set`` calls ``distance_set_value(s, value)`` over the value it reads
+    first, and ``distance_set_int`` calls the same kernel over ``s`` and its integer ``i``
+    converted, so ``i`` stands where the wrapper passes ``value``. The kernel is the first
+    callee of ``meos_body`` the wrapper calls with as many arguments; a parameter named in no
+    argument of that call, or in two, stands for None."""
+    if not meos_body:
+        return None
+    names = [p["name"] for p in func.get("params", [])]
+    for m in _CALLEE.finditer(meos_body):
+        margs = _call_args(meos_body, m.group("name"))
+        wargs = _call_args(body, m.group("name"))
+        if not margs or not wargs or len(margs) != len(wargs):
+            continue
+        out: list[str | None] = []
+        for n in names:
+            pos = [j for j, a in enumerate(margs) if n in re.findall(r"\b[A-Za-z_]\w*\b", a)]
+            out.append(wargs[pos[0]] if len(pos) == 1 else None)
+        if any(a is not None for a in out):
+            return out
+    return None
+
+
+def _sql_arg_params(body: str, func: dict, meos_body: str | None = None) -> list[str] | None:
     """The C parameters of ``func`` in the order of the SQL arguments the wrapper ``body``
     reads for them, or None when that is their C order or cannot be read: the call
-    arguments carrying SQL arguments 0 to n-1, one each."""
-    args = _call_args(body, func["name"])
+    arguments carrying SQL arguments 0 to n-1, one each. They are read off the wrapper's call
+    of ``func``, else off the kernel the wrapper and ``meos_body``, the body of ``func``,
+    both call (#_kernel_args)."""
+    args = _call_args(body, func["name"]) or _kernel_args(body, func, meos_body)
     if not args:
         return None
     params = func.get("params", [])
     by_k: dict[int, str] = {}
     for a, p in zip(args, params):
-        if a.strip().startswith("&") or _literal(a.strip()) is not None:
+        if a is None or a.strip().startswith("&") or _literal(a.strip()) is not None:
             continue
         k = _caller_index(body, a)
         if k is not None:
@@ -606,6 +646,7 @@ def merge_sql_arg_params(idl: dict, mdb_src: str | Path,
     wrappers = extract_wrappers(mdb_src)
     m2d = _meos_to_mdb(meos_src) if meos_src else {}
     w2sig = _wrapper_sql_sigs(sql_src) if sql_src else {}
+    bodies = extract_meos_bodies(meos_src) if meos_src else {}
     n = 0
     for func in idl["functions"]:
         primary = func.get("mdbC")
@@ -614,8 +655,8 @@ def merge_sql_arg_params(idl: dict, mdb_src: str | Path,
         ws = [primary] + [w for w in m2d.get(func["name"]) or () if w != primary]
         sigs = func.get("sqlSignatures") or []
         sig_ws = [_signature_wrapper(func, s, ws, w2sig) or primary for s in sigs] or [primary]
-        orders = [_sql_arg_params(wrappers[w], func) if w in wrappers else None
-                  for w in sig_ws]
+        orders = [_sql_arg_params(wrappers[w], func, bodies.get(func["name"]))
+                  if w in wrappers else None for w in sig_ws]
         if len({tuple(o or ()) for o in orders}) == 1:
             if orders[0]:
                 func.setdefault("shape", {})["sqlArgParams"] = orders[0]

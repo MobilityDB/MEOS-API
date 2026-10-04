@@ -969,6 +969,21 @@ COMMUTED = """
   Temporal *result = tdistance_tgeo_geo(temp, gs);
 """
 TDISTANCE = {"name": "tdistance_tgeo_geo", "params": [{"name": "temp"}, {"name": "gs"}]}
+# A commuted wrapper calling the kernel the public function calls, as Distance_value_set of
+# mobilitydb/src/temporal/set_ops.c and distance_set_int of meos/src/temporal/set_ops_meos.c do;
+# the public function passes its value converted.
+KERNEL_WRAPPER = """
+  Datum value = PG_GETARG_DATUM(0);
+  Set *s = PG_GETARG_SET_P(1);
+  Datum result = distance_set_value(s, value);
+  PG_FREE_IF_COPY(s, 1);
+  PG_RETURN_DATUM(result);
+"""
+KERNEL_PUBLIC = """
+  VALIDATE_INTSET(s, INT_MAX);
+  return (int) distance_set_value(s, (long) i);
+"""
+DISTANCE_SET_INT = {"name": "distance_set_int", "params": [{"name": "s"}, {"name": "i"}]}
 
 
 class SqlArgParamsTests(unittest.TestCase):
@@ -986,6 +1001,21 @@ class SqlArgParamsTests(unittest.TestCase):
         self.assertIsNone(_sql_arg_params(body, {"name": "tdistance_tgeo_geo",
                                                   "params": [{"name": "gs"}, {"name": "temp"}]}))
 
+    def test_a_shared_kernel_states_the_order(self):
+        """#test_a_commuted_wrapper_reads_the_second_parameter_first, through a kernel."""
+        self.assertEqual(_sql_arg_params(KERNEL_WRAPPER, DISTANCE_SET_INT, KERNEL_PUBLIC),
+                         ["i", "s"])
+
+    def test_a_shared_kernel_in_the_c_order_is_not_stated(self):
+        """#test_the_c_order_is_not_stated, through a kernel."""
+        body = KERNEL_WRAPPER.replace("PG_GETARG_DATUM(0)", "PG_GETARG_DATUM(1)").replace(
+            "PG_GETARG_SET_P(1)", "PG_GETARG_SET_P(0)")
+        self.assertIsNone(_sql_arg_params(body, DISTANCE_SET_INT, KERNEL_PUBLIC))
+
+    def test_without_the_public_body_nothing_is_stated(self):
+        """#test_a_shared_kernel_states_the_order without the body of the public function."""
+        self.assertIsNone(_sql_arg_params(KERNEL_WRAPPER, DISTANCE_SET_INT))
+
 
 IDL = Path(__file__).resolve().parent.parent / "output" / "meos-idl.json"
 
@@ -1002,6 +1032,13 @@ class SqlArgParamsContractTests(unittest.TestCase):
     def test_the_sequence_constructor_reads_the_interpolation_second(self):
         self.assertEqual(self.fns["tsequence_make"]["shape"]["sqlArgParams"],
                          ["instants", "interp", "lower_inc", "upper_inc"])
+
+    def test_the_number_first_reads_through_the_shared_kernel(self):
+        """#test_the_sequence_constructor_reads_the_interpolation_second, for
+        nearestApproachDistance(float, tfloat), whose wrapper NAD_number_tnumber calls the
+        kernel nad_tfloat_float calls."""
+        sigs = self.fns["nad_tfloat_float"]["sqlSignatures"]
+        self.assertEqual([s.get("sqlArgParams") for s in sigs], [None, ["d", "temp"]])
 
 
 if __name__ == "__main__":
