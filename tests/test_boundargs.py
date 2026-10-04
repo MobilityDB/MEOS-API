@@ -173,6 +173,85 @@ class DelegatingWrapperTests(unittest.TestCase):
         self.assertNotIn("key", bound)
 
 
+PG_TWIN = """
+static Datum
+Jsonb_path_exists_common(FunctionCallInfo fcinfo, bool tz)
+{
+  Jsonb *jb = PG_GETARG_JSONB_P(0);
+  JsonPath *jp = PG_GETARG_JSONPATH_P(1);
+  Jsonb *vars = PG_GETARG_JSONB_P(2);
+  bool silent = PG_GETARG_BOOL(3);
+  int result = pg_jsonb_path_exists(jb, jp, vars, silent, tz);
+  PG_RETURN_BOOL(result == 1);
+}
+
+PGDLLEXPORT Datum Jsonb_path_exists(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Jsonb_path_exists);
+Datum
+Jsonb_path_exists(PG_FUNCTION_ARGS)
+{
+  return Jsonb_path_exists_common(fcinfo, false);
+}
+
+PGDLLEXPORT Datum Jsonb_path_exists_tz(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Jsonb_path_exists_tz);
+Datum
+Jsonb_path_exists_tz(PG_FUNCTION_ARGS)
+{
+  return Jsonb_path_exists_common(fcinfo, true);
+}
+
+static Datum
+Jsonb_path_match_common(FunctionCallInfo fcinfo, bool tz)
+{
+  Jsonb *jb = PG_GETARG_JSONB_P(0);
+  JsonPath *jp = PG_GETARG_JSONPATH_P(1);
+  bool result = path_match_other(jb, jp, tz);
+  PG_RETURN_BOOL(result);
+}
+
+PGDLLEXPORT Datum Jsonb_path_match(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Jsonb_path_match);
+Datum
+Jsonb_path_match(PG_FUNCTION_ARGS)
+{
+  return Jsonb_path_match_common(fcinfo, false);
+}
+"""
+
+
+class PgTwinTests(unittest.TestCase):
+    """A wrapper reaching a function MEOS takes from PostgreSQL through its pg_ twin, the
+    delegation #DelegatingWrapperTests reads, whose helper calls the twin."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        src = Path(self.tmp.name) / "src"
+        src.mkdir()
+        (src / "twin.c").write_text(PG_TWIN)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _idl(self, name, wrapper):
+        return {"functions": [
+            {"name": name, "mdbC": wrapper,
+             "params": [{"name": "jb"}, {"name": "jp"}, {"name": "vars"},
+                        {"name": "silent"}, {"name": "tz"}]}]}
+
+    def test_the_twin_binds_the_literal_of_each_wrapper(self):
+        for wrapper, tz in (("Jsonb_path_exists", "false"), ("Jsonb_path_exists_tz", "true")):
+            idl, _, drift = merge_boundargs(self._idl("jsonb_path_exists", wrapper),
+                                            self.tmp.name)
+            self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], {"tz": tz})
+            self.assertEqual(drift, [])
+
+    def test_a_callee_that_is_not_the_twin_binds_nothing(self):
+        idl, _, _ = merge_boundargs(self._idl("jsonb_path_match", "Jsonb_path_match"),
+                                    self.tmp.name)
+        self.assertNotIn("boundArgs", idl["functions"][0].get("shape") or {})
+
+
 class BoundArgsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
