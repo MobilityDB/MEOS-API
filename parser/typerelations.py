@@ -8,9 +8,13 @@ maps a ``MeosType`` to its public name. Reading the relations out of the entries
 and resolving through the names yields, for each base type name, the names of
 its set, span, span set and temporal types.
 
-``Temporal<T>`` is the one template a base instantiates more than once, so the
-``temporal`` role is a list: a geometry carries ``tgeompoint`` and ``tgeometry``,
-a pose carries ``tpose`` and ``trgeometry``.
+The ``temporal`` role names every temporal type whose instants store a value of the
+base, the inverse of ``temptype_basetype``, so it is a list: the instants of
+``tgeompoint`` and ``tgeometry`` store a geometry, and those of ``tpose`` and
+``trgeometry`` a pose. A ``trgeometry`` is not ``Temporal<pose>``: it is the
+concatenation of a reference geometry and a temporal pose, each instant storing the
+pose that places the geometry, so its value at an instant is a geometry while
+``getValue`` reads the stored pose.
 
 This is the static metadata a binding generator needs to pick the concrete
 collection type of a value-domain result — ``SpanSet<float>`` is ``floatspanset``
@@ -135,8 +139,9 @@ def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
                 related[role][meos_type] = fields[forward]
             if inverse in fields:
                 related[role][fields[inverse]] = meos_type
-        # A base names no temporal type of its own, and one base carries SEVERAL of them: a
-        # geometry is the base of tgeompoint and tgeometry, a pose of tpose and trgeometry. So
+        # A base names no temporal type of its own, and the instants of SEVERAL may store it:
+        # those of tgeompoint and tgeometry a geometry, those of tpose and trgeometry (a
+        # reference geometry and a temporal pose) a pose. So
         # the temporal role is the inverse of temptype_basetype, and it is every type naming
         # that base, in MeosType order. Keeping one of them drops the others from the registry
         # entirely, and a generator projecting the temporal types out of it then emits a

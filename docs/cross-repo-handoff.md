@@ -57,11 +57,13 @@ results across all three platforms using the bare names only.
 - **`cbuffer`, `npoint`, `pose`, `rgeo` are full user-facing temporal
   types**, covered like every other type; they are never excluded from a
   parity headline.
-- **One base type carries several temporal types.** A geometry is the base of
-  `tgeompoint` and `tgeometry`, a geography of `tgeogpoint` and `tgeography`,
-  a pose of `tpose` and `trgeometry`. `typeRelations.byBase[...].temporal` is a
-  list for that reason, one entry or several, so a consumer reads one shape;
-  taking a single name loses three types MEOS has.
+- **The instants of several temporal types store one base type.** Those of
+  `tgeompoint` and `tgeometry` store a geometry, of `tgeogpoint` and `tgeography`
+  a geography, of `tpose` and `trgeometry` a pose. `typeRelations.byBase[...].temporal`
+  is a list for that reason, one entry or several, so a consumer reads one shape;
+  taking a single name loses three types MEOS has. A `trgeometry` is not
+  `Temporal<pose>`: it is the concatenation of a reference geometry and a temporal
+  pose, its value at an instant the geometry the stored pose places.
 - **A surface that speaks MF-JSON reads the type token from
   `temporalTypes[...].mfjson`.** It differs per type and MEOS states it in one
   place, `temptype_as_mfjson_sb`. A type the switch does not name carries no
