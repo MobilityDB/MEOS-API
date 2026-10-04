@@ -18,6 +18,7 @@ from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import (attach_call_literals, merge_boundargs, resolve_bound_names,
                               strip_call_literals)
 from parser.aggregates import attach_aggregates
+from parser.altsqlfn import attach_alt_sql_names
 from parser.compositions import attach_compositions
 from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
@@ -375,6 +376,17 @@ def main():
     idl, nclaims = attach_claims_fit(idl)
     print(f"      shared SQL signatures given up by a function they do not fit: {nclaims}",
           file=sys.stderr)
+
+    # State on each SQL signature the name a Spark or Flink binding publishes where the
+    # engine owns the PostgreSQL one (@altsqlfn), resolved through the type relations and
+    # the startValue signatures above; a signature selecting no name or several stops the
+    # catalog.
+    if MEOS_SRC.exists() and MDB_SRC.exists() and SQL_SRC.exists():
+        idl, nalt, alt_errors = attach_alt_sql_names(idl, MEOS_SRC, MDB_SRC, SQL_SRC)
+        if alt_errors:
+            raise ValueError("SQL signatures whose @altsqlfn does not resolve to one name:\n  "
+                             + "\n  ".join(alt_errors))
+        print(f"      SQL signatures stating their alternative name: {nalt}", file=sys.stderr)
 
     # Name the C value feeding each column of every row a SQL signature returns, matched
     # by type once the object model and the type relations state the C type of each SQL

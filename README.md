@@ -250,6 +250,18 @@ value's doc comment names and the operator's `CREATE OPERATOR` declaration.
 `columnRight` is null for an operator declaring no commutator, where an engine
 scans. See [`docs/index-search.md`](docs/index-search.md).
 
+## Alternative SQL names
+
+Every SQL signature whose wrapper states `@altsqlfn` carries the name a Spark or
+Flink binding publishes where the engine owns the PostgreSQL one:
+`altSqlName: floatRound` on `round(tfloat, integer)`. A wrapper with several
+`@sqlfn` names pairs each with the alternative name in its position; one listing
+several alternative names under one `@sqlfn` name gives each signature the name
+whose prefix names the base type of its first argument, a temporal type's base
+being the value its `startValue` returns, so `trgeometry`, a reference geometry
+and a temporal pose, takes `geoRound`. A signature selecting no name or several
+stops the catalog. See [`parser/altsqlfn.py`](parser/altsqlfn.py).
+
 ## OpenAPI generation
 
 The enriched catalog (the `network` / `wire` / `typeEncodings` produced by the
