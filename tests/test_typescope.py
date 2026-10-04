@@ -162,5 +162,24 @@ class SharedWrapperScopeTests(unittest.TestCase):
         self.assertEqual(kept, FROM_BASE_TSTZSET)
 
 
+IDL = Path(__file__).resolve().parent.parent / 'output' / 'meos-idl.json'
+
+
+class DeclaredScopeContractTests(unittest.TestCase):
+    """Over the generated catalog, as #CodecContractTests of tests/test_codecs.py reads it: a
+    function declared generic serves every overload its wrapper declares."""
+
+    def setUp(self):
+        if not IDL.exists():
+            self.skipTest(f"{IDL} not generated; run `python run.py` first")
+        self.fns = {f['name']: f for f in json.loads(IDL.read_text())['functions']}
+
+    def test_the_array_accessors_serve_every_temporal_type(self):
+        for name in ('temporal_instants', 'temporal_sequences', 'temporal_segments'):
+            first = {s['args'][0] for s in self.fns[name].get('sqlSignatures') or ()}
+            self.assertTrue({'tint', 'tfloat', 'ttext', 'tgeompoint', 'tgeogpoint'} <= first,
+                            f'{name} serves {sorted(first)}')
+
+
 if __name__ == '__main__':
     unittest.main()

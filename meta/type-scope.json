@@ -26,6 +26,18 @@
       "types": "*",
       "note": "Generic over Temporal *: accessor on any temporal type."
     },
+    "temporal_instants": {
+      "types": "*",
+      "note": "Generic over Temporal *: the distinct instants of any temporal type, the call behind instants."
+    },
+    "temporal_sequences": {
+      "types": "*",
+      "note": "Generic over Temporal *: the sequences of any temporal type, the call behind sequences."
+    },
+    "temporal_segments": {
+      "types": "*",
+      "note": "Generic over Temporal *: the segments of any temporal type, the call behind segments."
+    },
     "temporal_start_instant": {
       "types": "*",
       "note": "Generic over Temporal *: accessor on any temporal type."
