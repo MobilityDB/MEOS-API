@@ -57,6 +57,10 @@
     "tTouchesPairs": {
       "note": "i and j are positions in the SQL arrays, from 1; MEOS returns the C indices, from 0.",
       "columns": {"i": {"offset": 1}, "j": {"offset": 1}}
+    },
+    "jsonbEachText": {
+      "note": "The key and the value are both text: the key is the array jsonb_each_text returns, the value its out-parameter values.",
+      "columns": {"key": {"from": "return"}, "value": {"from": "values"}}
     }
   }
 }

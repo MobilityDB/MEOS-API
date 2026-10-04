@@ -589,14 +589,32 @@ def _column_sources(func, sig, sqlc, declared, struct):
     `meta/sql-columns.json` states what only the wrapper does: a column numbering
     the rows from 1, as PostgreSQL's WITH ORDINALITY (`"from": "ordinal"`, the index
     of a tile), and a constant the wrapper adds (`"offset": 1`, turning a C array
-    index into a SQL array position)."""
+    index into a SQL array position). It also states the C value feeding a column
+    where two C values of the column's type fit it (`"from": "return"` or the name
+    of an out-parameter, the key and the value of `jsonbEachText`); the column
+    takes that value, and a statement naming no C value of the function stops the
+    catalog as a column nothing feeds does."""
     stated = declared.get(sig["ret"]) or declared.get(sig.get("sqlName") or func.get("sqlfn")) or {}
     cols = sig["columns"]
-    fed = [c for c in cols if "from" not in stated.get(c["name"], {})]
+    fed = [c for c in cols if stated.get(c["name"], {}).get("from") != "ordinal"]
     classes = {c for cs in sqlc.values() for c in cs}
     slots = _row_slots(func, sig.get("retSet", False), len(fed), struct, classes)
     used, out = set(), {}
+    # A column stated with the C value feeding it takes that value: two C values of
+    # one type leave the source of their columns to the statement, never to order.
     for c in fed:
+        src = stated.get(c["name"], {}).get("from")
+        if src is None:
+            continue
+        named = [k for k, (slot, _, _) in enumerate(slots)
+                 if slot["from"] == src and k not in used]
+        if len(named) != 1:
+            return None
+        used.add(named[0])
+        out[c["name"]] = dict(slots[named[0]][0])
+    for c in fed:
+        if c["name"] in out:
+            continue
         fits = [k for k, (_, base, stars) in enumerate(slots)
                 if k not in used and _fits(c["type"], base, stars, sqlc)]
         if not fits or len({slots[k][0]["from"] for k in fits}) > 1:
