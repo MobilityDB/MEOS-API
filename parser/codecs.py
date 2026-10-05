@@ -128,7 +128,8 @@ def state_type_encodings(idl):
         for the class only when it is the encoding's one candidate (``interval_in``). Two
         functions of one encoding for one SQL type rank by ``table``, whose first match
         names the encoding (``cbuffer_out`` before ``cbuffer_as_text`` and
-        ``cbuffer_as_ewkt``), then by how many SQL types each serves, the narrower first,
+        ``cbuffer_as_ewkt``, ``cbuffer_as_hexwkb`` before ``cbuffer_as_hexewkb``), then by
+        how many SQL types each serves, the narrower first,
         as PostgreSQL resolves an overload to its most specific candidate
         (``cbufferset_out`` before ``spatialset_out`` for a ``cbufferset``). Two that tie
         on both contradict each other."""

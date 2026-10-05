@@ -139,6 +139,32 @@ class CodecTests(unittest.TestCase):
         self.assertEqual(g["encoderAux"]["wkb"],
                          [{"name": "endian", "kind": "string", "default": None}])
 
+    def test_the_plain_hex_writer_and_reader_rank_before_the_e_ones(self):
+        """A class having both the plain and the E hex-WKB functions keeps the plain ones,
+        as #test_a_hexewkb_reader_per_type_and_one_writer_for_both keeps the E ones of a
+        class having no other."""
+        cb = "const Cbuffer *"
+        both = FUNCTIONS + [
+            fn("cbuffer_from_hexwkb", "Cbuffer *", [("const char *", "hexwkb")],
+               [sig("cbufferFromHexWKB", ["text"], "cbuffer")]),
+            fn("cbuffer_from_hexewkb", "Cbuffer *", [("const char *", "hexwkb")],
+               [sig("cbufferFromHexEWKB", ["text"], "cbuffer")]),
+            fn("cbuffer_as_hexwkb", "char *",
+               [(cb, "cb"), ("uint8_t", "variant"), ("size_t *", "size_out")],
+               [sig("asHexWKB", ["cbuffer", "text"], "text")],
+               shape={"outParams": ["size_out"]}),
+            fn("cbuffer_as_hexewkb", "char *",
+               [(cb, "cb"), ("uint8_t", "variant"), ("size_t *", "size_out")],
+               [sig("asHexEWKB", ["cbuffer", "text"], "text")],
+               shape={"outParams": ["size_out"]})]
+        idl = _idl(both)
+        idl["typeEncodings"]["Cbuffer"] = {}
+        idl, errors = state_type_encodings(idl)
+        c = idl["typeEncodings"]["Cbuffer"]
+        self.assertEqual((c["decoders"]["wkb"], c["encoders"]["wkb"]),
+                         ("cbuffer_from_hexwkb", "cbuffer_as_hexwkb"))
+        self.assertEqual(errors, [])
+
     def test_a_cell_is_a_class_of_its_own(self):
         h = self.te["H3Index"]
         self.assertEqual((h["in"], h["out"]), ("h3index_in", "h3index_out"))
