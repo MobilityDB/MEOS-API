@@ -65,7 +65,10 @@ _ENCODERS = [
     (re.compile(r"_as_e?wkt$"), "text"),
     (re.compile(r"_as_mfjson$"), "mfjson"),
     (re.compile(r"_as_geojson$"), "mfjson"),
-    (re.compile(r"_as_hex_?e?wkb$"), "wkb"),
+    # The plain hex-WKB writer ranks before the E one, so a class having both keeps the
+    # plain one as its codec (#keyed of parser/codecs.py ranks by this order).
+    (re.compile(r"_as_hex_?wkb$"), "wkb"),
+    (re.compile(r"_as_hex_?ewkb$"), "wkb"),
     (re.compile(r"_as_e?wkb$"), "wkb"),
 ]
 _DECODERS = [
@@ -74,7 +77,8 @@ _DECODERS = [
     (re.compile(r"_from_text$"), "text"),
     (re.compile(r"_from_mfjson$"), "mfjson"),
     (re.compile(r"_from_geojson$"), "mfjson"),
-    (re.compile(r"_from_hex_?e?wkb$"), "wkb"),
+    (re.compile(r"_from_hex_?wkb$"), "wkb"),
+    (re.compile(r"_from_hex_?ewkb$"), "wkb"),
     (re.compile(r"_from_e?wkb$"), "wkb"),
 ]
 _IO_RE = [rx for rx, _ in _DECODERS + _ENCODERS]
