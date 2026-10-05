@@ -87,7 +87,7 @@ class DeployedNameCatalogTests(unittest.TestCase):
     def test_per_type_functions_carry_their_own_name(self):
         for name, sqlfn in (("floatset_in", "floatset_in"), ("tfloat_in", "tfloat_in"),
                             ("tfloatinst_make", "tfloat"), ("tfloat_values", "valueSet"),
-                            ("contains_cbuffer_cbuffer", "cbuffer_contains")):
+                            ("contains_cbuffer_cbuffer", "cbufferContains")):
             self.assertEqual(self.fns[name]["sqlfn"], sqlfn, name)
 
     def test_an_operator_function_carries_its_class_prefixed_name(self):
