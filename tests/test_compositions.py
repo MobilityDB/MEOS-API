@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.compositions import attach_compositions
+from parser.compositions import attach_compositions, attach_wrapper_compositions
 
 
 def _fn(name, sqlfn, params, sigs, api="public", shape=None):
@@ -312,6 +312,98 @@ CREATE FUNCTION eDisjoint(tnpoint, geometry)
   LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
 """)
         self.assertIn("no CREATE CAST from tnpoint to tgeompoint", str(cm.exception))
+
+
+CAST_WRAPPERS = '''
+Datum
+Eintersects_tpose_geo(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  GSERIALIZED *gs = PG_GETARG_GSERIALIZED_P(1);
+  Temporal *tpoint = tpose_to_tpoint(temp);
+  int result = eintersects_tgeo_geo(tpoint, gs);
+  pfree(tpoint);
+  PG_RETURN_BOOL(result ? true : false);
+}
+
+Datum
+Eintersects_tgeo_geo(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  GSERIALIZED *gs = PG_GETARG_GSERIALIZED_P(1);
+  int result = eintersects_tgeo_geo(temp, gs);
+  PG_RETURN_BOOL(result ? true : false);
+}
+'''
+
+CAST_SQL = '''
+CREATE FUNCTION eIntersects(tpose, geometry)
+  RETURNS boolean
+  AS 'MODULE_PATHNAME', 'Eintersects_tpose_geo'
+  SUPPORT tspatial_supportfn
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION eIntersects(tgeompoint, geometry)
+  RETURNS boolean
+  AS 'MODULE_PATHNAME', 'Eintersects_tgeo_geo'
+  SUPPORT tspatial_supportfn
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+'''
+
+CAST_MEOS = '''
+/**
+ * @brief Return 1 if a temporal geo ever intersects a geometry
+ * @csqlfn #Eintersects_tgeo_geo(), #Eintersects_tpose_geo()
+ */
+int
+eintersects_tgeo_geo(const Temporal *temp, const GSERIALIZED *gs)
+{
+  return 0;
+}
+'''
+
+
+class WrapperCompositionTests(unittest.TestCase):
+    """#attach_wrapper_compositions: a C wrapper casting an argument through a public cast
+    states a composition, and its sibling passing the argument as it is keeps its
+    signature."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        for sub, name, text in (("src", "rels.c", CAST_WRAPPERS), ("sql", "rels.in.sql", CAST_SQL),
+                                ("meos", "rels_meos.c", CAST_MEOS)):
+            (root / sub).mkdir()
+            (root / sub / name).write_text(text)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _attach(self):
+        root = Path(self.tmp.name)
+        idl = {"functions": [
+            {"name": "eintersects_tgeo_geo", "api": "public", "mdbC": "Eintersects_tgeo_geo",
+             "sqlfn": "eIntersects", "params": [{"name": "temp"}, {"name": "gs"}],
+             "sqlSignatures": [{"args": ["tgeompoint", "geometry"], "ret": "boolean"},
+                               {"args": ["tpose", "geometry"], "ret": "boolean"}]},
+            {"name": "tpose_to_tpoint", "api": "public", "params": [{"name": "temp"}],
+             "sqlSignatures": []}],
+            "compositions": []}
+        return attach_wrapper_compositions(idl, root / "src", root / "sql", root / "meos")
+
+    def test_the_cast_wrapper_states_a_composition(self):
+        idl, n = self._attach()
+        self.assertEqual(n, 1)
+        self.assertEqual(idl["compositions"], [{
+            "sqlName": "eIntersects", "args": ["tpose", "geometry"], "required": 2,
+            "argDefaults": [None, None], "ret": "boolean",
+            "operands": [{"arg": 0, "casts": ["tpose_to_tpoint"], "param": "temp"},
+                         {"arg": 1, "param": "gs"}],
+            "call": "eintersects_tgeo_geo"}])
+
+    def test_the_wrapper_casting_nothing_keeps_its_signature(self):
+        idl, _ = self._attach()
+        self.assertEqual([s["args"] for s in idl["functions"][0]["sqlSignatures"]],
+                         [["tgeompoint", "geometry"]])
 
 
 if __name__ == "__main__":
