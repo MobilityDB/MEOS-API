@@ -494,3 +494,75 @@ def attach_compositions(idl, sql_src):
                          + "\n  ".join(errors))
     idl["compositions"] = out
     return idl, len(out)
+
+
+_CAST_CALL = re.compile(r"^\s*(\w+)\s*\(\s*(\w+)\s*\)\s*$")
+
+
+def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
+    """(idl, count): the signatures a C wrapper states by converting an argument through a
+    public cast before it calls its MEOS function, moved from that function's
+    ``sqlSignatures`` to the top-level ``compositions`` #attach_compositions builds.
+
+    ``Eintersects_tpose_geo`` reads a tpose, casts it with ``tpoint = tpose_to_tpoint(temp)``
+    and calls ``eintersects_tgeo_geo(tpoint, gs)``, which states the wrapper in its
+    ``@csqlfn``: ``eIntersects(tpose, geometry)`` is then the composition
+    ``{"operands": [{"arg": 0, "casts": ["tpose_to_tpoint"], "param": "temp"},
+    {"arg": 1, "param": "gs"}], "call": "eintersects_tgeo_geo"}``, the form a SQL body
+    casting its argument takes, so a binding passes the function a value of the type it
+    reads. PostgreSQL keeps the C wrapper, whose planner support function an inlined SQL
+    body cannot reach. Each signature is traced to the wrapper whose CREATE FUNCTION
+    states it (#_signature_wrapper of parser/boundargs.py) and each argument of the call to
+    the SQL argument it carries (#_caller_index); a cast is a public catalog function of
+    one parameter. A signature whose wrapper casts nothing stays where it is."""
+    from parser.boundargs import (_call_args, _caller_index, _signature_wrapper,
+                                  extract_wrappers)
+    from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs
+    wrappers = extract_wrappers(mdb_src)
+    m2d = _meos_to_mdb(meos_src)
+    w2sig = _wrapper_sql_sigs(sql_src)
+    public = {f["name"]: f for f in idl["functions"] if f.get("api") == "public"}
+    out = idl.setdefault("compositions", [])
+    n = 0
+    for func in idl["functions"]:
+        claimed = [w for w in [func.get("mdbC")] + list(m2d.get(func["name"]) or ()) if w]
+        sigs = func.get("sqlSignatures") or []
+        if not claimed or not sigs:
+            continue
+        outs = set((func.get("shape") or {}).get("outParams") or ())
+        params = [p["name"] for p in func.get("params") or () if p["name"] not in outs]
+        keep = []
+        for sig in sigs:
+            w = _signature_wrapper(func, sig, claimed, w2sig)
+            body = wrappers.get(w) if w else None
+            args = _call_args(body, func["name"]) if body else None
+            operands = None
+            if args is not None and len(args) == len(params):
+                operands, cast_seen = [], False
+                for a, p in zip(args, params):
+                    a = a.strip()
+                    rhs = [m.group(1) for m in re.finditer(
+                        r"(?<![\w.>])" + re.escape(a) + r"\s*=(?!=)\s*([^;]+);", body)]
+                    hit = _CAST_CALL.match(rhs[0]) if len(rhs) == 1 else None
+                    cast = hit.group(1) if hit else None
+                    if cast in public and len(public[cast].get("params") or ()) == 1:
+                        operands.append({"arg": _caller_index(body, hit.group(2)),
+                                         "casts": [cast], "param": p})
+                        cast_seen = True
+                    else:
+                        operands.append({"arg": _caller_index(body, a), "param": p})
+                if not cast_seen or any(o["arg"] is None for o in operands):
+                    operands = None
+            if operands is None:
+                keep.append(sig)
+                continue
+            nargs = len(sig.get("args") or ())
+            dflt = list(sig.get("argDefaults") or [None] * nargs)
+            out.append({"sqlName": sig.get("sqlName") or func.get("sqlfn"),
+                        "args": list(sig.get("args") or ()),
+                        "required": sum(1 for d in dflt if d is None),
+                        "argDefaults": dflt, "ret": sig.get("ret"),
+                        "operands": operands, "call": func["name"]})
+            n += 1
+        func["sqlSignatures"] = keep
+    return idl, n

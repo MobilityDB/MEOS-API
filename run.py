@@ -19,7 +19,7 @@ from parser.boundargs import (attach_call_literals, merge_boundargs, merge_sql_a
                               resolve_bound_names, strip_call_literals)
 from parser.aggregates import attach_aggregates
 from parser.altsqlfn import attach_alt_sql_names
-from parser.compositions import attach_compositions
+from parser.compositions import attach_compositions, attach_wrapper_compositions
 from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
@@ -409,6 +409,12 @@ def main():
         idl, ncomp = attach_compositions(idl, SQL_SRC)
         print(f"      SQL compositions over another type's functions: {ncomp}",
               file=sys.stderr)
+        # A C wrapper casting an argument before its call states a composition too:
+        # PostgreSQL keeps the wrapper for its planner support function.
+        if MEOS_SRC.exists() and MDB_SRC.exists():
+            idl, nwcomp = attach_wrapper_compositions(idl, MDB_SRC, SQL_SRC, MEOS_SRC)
+            print(f"      C wrapper compositions through a public cast: {nwcomp}",
+                  file=sys.stderr)
 
     # State each SQL aggregate: its arguments, its result type and the SQL and MEOS
     # function of each of its roles, read from the deployed CREATE AGGREGATE statements
