@@ -497,6 +497,7 @@ def attach_compositions(idl, sql_src):
 
 
 _CAST_CALL = re.compile(r"^\s*(\w+)\s*\(\s*(\w+)\s*\)\s*$")
+_C_LITERAL = re.compile(r"^(?:true|false|-?\d+(?:\.\d+)?)$")
 
 
 def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
@@ -514,7 +515,9 @@ def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
     body cannot reach. Each signature is traced to the wrapper whose CREATE FUNCTION
     states it (#_signature_wrapper of parser/boundargs.py) and each argument of the call to
     the SQL argument it carries (#_caller_index); a cast is a public catalog function of
-    one parameter. A signature whose wrapper casts nothing stays where it is."""
+    one parameter. A C literal the wrapper passes, as ``true`` for the ``spheroid`` of
+    ``edwithin_tgeo_geo``, is a value operand. A signature whose wrapper casts nothing
+    stays where it is."""
     from parser.boundargs import (_call_args, _caller_index, _signature_wrapper,
                                   extract_wrappers)
     from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs
@@ -545,13 +548,15 @@ def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
                         r"(?<![\w.>])" + re.escape(a) + r"\s*=(?!=)\s*([^;]+);", body)]
                     hit = _CAST_CALL.match(rhs[0]) if len(rhs) == 1 else None
                     cast = hit.group(1) if hit else None
-                    if cast in public and len(public[cast].get("params") or ()) == 1:
+                    if _C_LITERAL.match(a):
+                        operands.append({"value": a, "param": p})
+                    elif cast in public and len(public[cast].get("params") or ()) == 1:
                         operands.append({"arg": _caller_index(body, hit.group(2)),
                                          "casts": [cast], "param": p})
                         cast_seen = True
                     else:
                         operands.append({"arg": _caller_index(body, a), "param": p})
-                if not cast_seen or any(o["arg"] is None for o in operands):
+                if not cast_seen or any("arg" in o and o["arg"] is None for o in operands):
                     operands = None
             if operands is None:
                 keep.append(sig)
