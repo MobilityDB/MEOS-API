@@ -334,6 +334,18 @@ Eintersects_tgeo_geo(PG_FUNCTION_ARGS)
   int result = eintersects_tgeo_geo(temp, gs);
   PG_RETURN_BOOL(result ? true : false);
 }
+
+Datum
+Edwithin_tpose_geo(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  GSERIALIZED *gs = PG_GETARG_GSERIALIZED_P(1);
+  double dist = PG_GETARG_FLOAT8(2);
+  Temporal *tpoint = tpose_to_tpoint(temp);
+  int result = edwithin_tgeo_geo(tpoint, gs, dist, true);
+  pfree(tpoint);
+  PG_RETURN_BOOL(result ? true : false);
+}
 '''
 
 CAST_SQL = '''
@@ -347,6 +359,11 @@ CREATE FUNCTION eIntersects(tgeompoint, geometry)
   AS 'MODULE_PATHNAME', 'Eintersects_tgeo_geo'
   SUPPORT tspatial_supportfn
   LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION eDwithin(tpose, geometry, float)
+  RETURNS boolean
+  AS 'MODULE_PATHNAME', 'Edwithin_tpose_geo'
+  SUPPORT tspatial_supportfn
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 '''
 
 CAST_MEOS = '''
@@ -356,6 +373,17 @@ CAST_MEOS = '''
  */
 int
 eintersects_tgeo_geo(const Temporal *temp, const GSERIALIZED *gs)
+{
+  return 0;
+}
+
+/**
+ * @brief Return 1 if a temporal geo is ever within a distance of a geometry
+ * @csqlfn #Edwithin_tpose_geo()
+ */
+int
+edwithin_tgeo_geo(const Temporal *temp, const GSERIALIZED *gs, double dist,
+  bool spheroid)
 {
   return 0;
 }
@@ -386,19 +414,31 @@ class WrapperCompositionTests(unittest.TestCase):
              "sqlSignatures": [{"args": ["tgeompoint", "geometry"], "ret": "boolean"},
                                {"args": ["tpose", "geometry"], "ret": "boolean"}]},
             {"name": "tpose_to_tpoint", "api": "public", "params": [{"name": "temp"}],
-             "sqlSignatures": []}],
+             "sqlSignatures": []},
+            {"name": "edwithin_tgeo_geo", "api": "public", "sqlfn": "eDwithin",
+             "params": [{"name": "temp"}, {"name": "gs"}, {"name": "dist"},
+                        {"name": "spheroid"}],
+             "sqlSignatures": [{"args": ["tpose", "geometry", "float"], "ret": "boolean"}]}],
             "compositions": []}
         return attach_wrapper_compositions(idl, root / "src", root / "sql", root / "meos")
 
     def test_the_cast_wrapper_states_a_composition(self):
         idl, n = self._attach()
-        self.assertEqual(n, 1)
-        self.assertEqual(idl["compositions"], [{
+        self.assertEqual(n, 2)
+        self.assertEqual(idl["compositions"][:1], [{
             "sqlName": "eIntersects", "args": ["tpose", "geometry"], "required": 2,
             "argDefaults": [None, None], "ret": "boolean",
             "operands": [{"arg": 0, "casts": ["tpose_to_tpoint"], "param": "temp"},
                          {"arg": 1, "param": "gs"}],
             "call": "eintersects_tgeo_geo"}])
+
+    def test_a_literal_argument_is_a_value_operand(self):
+        idl, _ = self._attach()
+        self.assertEqual(idl["compositions"][1]["operands"], [
+            {"arg": 0, "casts": ["tpose_to_tpoint"], "param": "temp"},
+            {"arg": 1, "param": "gs"}, {"arg": 2, "param": "dist"},
+            {"value": "true", "param": "spheroid"}])
+        self.assertEqual(idl["functions"][2]["sqlSignatures"], [])
 
     def test_the_wrapper_casting_nothing_keeps_its_signature(self):
         idl, _ = self._attach()
