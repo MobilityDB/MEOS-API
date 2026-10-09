@@ -535,6 +535,88 @@ def merge_boundargs(idl: dict, mdb_src: str | Path,
     return idl, n, list(dict.fromkeys(drift))
 
 
+# A local a wrapper sets from the class of a temporal type: `interp =
+# temptype_supports_linear(temptype) ? LINEAR : STEP`.
+_TYPE_CHOICE = r"(?<![\w.>]){var}\s*=(?!=)\s*temptype_supports_linear\s*\(\s*(\w+)\s*\)" \
+               r"\s*\?\s*(\w+)\s*:\s*(\w+)\s*;"
+# The temporal type of the call, read from its return or from argument i:
+# `temptype = oid_meostype(get_fn_expr_rettype(fcinfo->flinfo))`.
+_CALL_TYPE = r"(?<![\w.>]){var}\s*=(?!=)\s*oid_meostype\s*\(\s*get_fn_expr_(rettype|argtype)" \
+             r"\s*\(\s*fcinfo\s*->\s*flinfo\s*(?:,\s*(\d+)\s*)?\)\s*\)"
+
+
+def _type_choice(body: str, var: str) -> tuple[int | None, str, int | None, str, str] | None:
+    """``(k, source, i, linear, other)`` when local ``var`` of wrapper ``body`` is set to
+    ``temptype_supports_linear(t) ? linear : other`` and ``t`` is the temporal type of the
+    call's return (``source`` "ret") or of its argument ``i`` (``source`` "arg"); ``k`` is
+    the SQL argument the wrapper otherwise reads ``var`` from (#_caller_index), None when it
+    reads none."""
+    m = re.search(_TYPE_CHOICE.format(var=re.escape(var)), body)
+    if not m:
+        return None
+    t = re.search(_CALL_TYPE.format(var=re.escape(m.group(1))), body)
+    if not t:
+        return None
+    k = _caller_index(body, var)
+    return (k, "ret" if t.group(1) == "rettype" else "arg",
+            int(t.group(2)) if t.group(2) else None, m.group(2), m.group(3))
+
+
+def attach_type_derived_args(idl: dict, mdb_src: str | Path,
+                             sql_src: str | Path | None = None,
+                             meos_src: str | Path | None = None) -> tuple[dict, int]:
+    """(idl, number of arguments bound) once each SQL signature carries in ``boundArgs`` the
+    value a wrapper derives from the temporal type of the signature.
+
+    A wrapper that reads no interpolation from the call takes the one the type supports,
+    ``interp = temptype_supports_linear(temptype) ? LINEAR : STEP`` with ``temptype`` the
+    type the function returns (``Tsequenceset_constructor_gaps``) or the type of one of
+    its arguments (``Temporal_append_tinstant``), and reads argument ``k`` instead only
+    when the call carries it. A signature stating at most ``k`` arguments therefore passes
+    LINEAR or STEP as fixed as a literal, the class #attach_temporal_types states for its
+    temporal type (``linear``, read from ``temptype_supports_linear``), so it is bound on
+    the signature as #merge_boundargs binds a literal the wrapper starts a local from. Runs
+    once the temporal types are attached; the wrappers are traced as #merge_boundargs
+    traces them."""
+    from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs
+    wrappers = extract_wrappers(mdb_src)
+    m2d = _meos_to_mdb(meos_src) if meos_src else {}
+    w2sig = _wrapper_sql_sigs(sql_src) if sql_src else {}
+    linear = {t: rec.get("linear") for t, rec in (idl.get("temporalTypes") or {}).items()}
+    n = 0
+    for func in idl["functions"]:
+        primary = func.get("mdbC")
+        if not primary:
+            continue
+        ws = [primary] + [w for w in m2d.get(func["name"]) or () if w != primary]
+        params = [p.get("name") for p in func.get("params", [])]
+        for sig in func.get("sqlSignatures") or []:
+            w = _signature_wrapper(func, sig, ws, w2sig) or ws[0]
+            body = wrappers.get(w)
+            if not body:
+                continue
+            args = _call_args(body, func["name"]) or _call_args(body, "pg_" + func["name"])
+            for pos, a in enumerate(args or ()):
+                if pos >= len(params) or not _IDENT.match(a):
+                    continue
+                choice = _type_choice(body, a)
+                if choice is None:
+                    continue
+                k, source, i, lin, other = choice
+                sargs = sig.get("args") or []
+                if k is not None and len(sargs) > k:
+                    continue
+                t = sig.get("ret") if source == "ret" else (
+                    sargs[i] if i is not None and i < len(sargs) else None)
+                if t not in linear:
+                    continue
+                bound = sig.setdefault("boundArgs", {})
+                if params[pos] not in bound:
+                    bound[params[pos]] = lin if linear[t] else other
+                    n += 1
+    return idl, n
+
+
 # The SQL argument a wrapper reads: `PG_GETARG_<T>(k)`, or a helper handed the call info
 # with the index, as `input_interp_string(fcinfo, 1)` reads argument 1.
 _GETARG = re.compile(r"PG_GETARG_\w+\s*\(\s*(\d+)\s*\)|\bfcinfo\s*,\s*(\d+)\s*\)")

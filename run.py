@@ -15,7 +15,8 @@ from parser.shapeinfer import infer_shapes, attach_struct_input_arrays
 from parser.nullable import merge_nullable, extract_param_docs
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
-from parser.boundargs import (attach_call_literals, merge_boundargs, merge_sql_arg_params,
+from parser.boundargs import (attach_call_literals, attach_type_derived_args, merge_boundargs,
+                              merge_sql_arg_params,
                               resolve_bound_names, strip_call_literals)
 from parser.aggregates import attach_aggregates
 from parser.altsqlfn import attach_alt_sql_names
@@ -379,6 +380,15 @@ def main():
     # token from here; carrying a per-type table of its own is a copy that goes stale the
     # moment a family is added.
     idl = attach_temporal_types(idl, MOBILITYDB_SRC)
+
+    # State on each SQL signature the value a wrapper derives from its temporal type where
+    # the call carries none, the interpolation `temptype_supports_linear(temptype) ? LINEAR :
+    # STEP` of appendInstant and the sequence set constructors: it reads the classes the
+    # temporal types above state.
+    if MDB_SRC.exists():
+        idl, ntd = attach_type_derived_args(idl, MDB_SRC, sql_src=SQL_SRC, meos_src=MEOS_SRC)
+        print(f"      arguments a wrapper derives from the signature's temporal type: {ntd}",
+              file=sys.stderr)
 
     # Keep a SQL signature two public functions claim on the one whose C parameters it
     # fits, matched by type once the object model and the type relations state the C type
