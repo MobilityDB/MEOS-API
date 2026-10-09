@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.boundargs import (_sql_arg_params, attach_call_literals, extract_call_literals,
+from parser.boundargs import (_sql_arg_params, attach_call_literals, attach_type_derived_args,
+                              extract_call_literals,
                               extract_wrappers, merge_boundargs, resolve_bound_names,
                               strip_call_literals)
 
@@ -1130,6 +1131,108 @@ class SqlArgParamsContractTests(unittest.TestCase):
         kernel nad_tfloat_float calls."""
         sigs = self.fns["nad_tfloat_float"]["sqlSignatures"]
         self.assertEqual([s.get("sqlArgParams") for s in sigs], [None, ["d", "temp"]])
+
+
+# The interpolation two wrappers take from the class of a temporal type, of the call's
+# argument 1 and of its return, where the call carries none (Temporal_append_tinstant,
+# Tsequenceset_constructor_gaps).
+TYPE_DERIVED = '''
+PGDLLEXPORT Datum Temporal_append_tinstant(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Temporal_append_tinstant);
+Datum
+Temporal_append_tinstant(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  TInstant *inst = PG_GETARG_TINSTANT_P(1);
+  interpType interp;
+  if (PG_NARGS() == 2 || PG_ARGISNULL(2))
+  {
+    MeosType temptype = oid_meostype(get_fn_expr_argtype(fcinfo->flinfo, 1));
+    interp = temptype_supports_linear(temptype) ? LINEAR : STEP;
+  }
+  else
+    interp = input_interp_string(fcinfo, 2);
+  Temporal *result = temporal_append_tinstant(temp, inst, interp, 0.0, NULL, false);
+  PG_RETURN_TEMPORAL_P(result);
+}
+
+PGDLLEXPORT Datum Tsequenceset_constructor_gaps(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Tsequenceset_constructor_gaps);
+Datum
+Tsequenceset_constructor_gaps(PG_FUNCTION_ARGS)
+{
+  ArrayType *array = PG_GETARG_ARRAYTYPE_P(0);
+  double maxdist = -1.0;
+  Interval *maxt = NULL;
+  MeosType temptype = oid_meostype(get_fn_expr_rettype(fcinfo->flinfo));
+  interpType interp = temptype_supports_linear(temptype) ? LINEAR : STEP;
+  if (PG_NARGS() > 1 && ! PG_ARGISNULL(1))
+    maxt = PG_GETARG_INTERVAL_P(1);
+  if (PG_NARGS() > 2 && ! PG_ARGISNULL(2))
+    maxdist = PG_GETARG_FLOAT8(2);
+  if (PG_NARGS() > 3 && ! PG_ARGISNULL(3))
+    interp = input_interp_string(fcinfo, 3);
+  int count;
+  TInstant **instants = (TInstant **) temparr_extract(array, &count);
+  TSequenceSet *result = tsequenceset_make_gaps(instants, count, interp, maxt, maxdist);
+  PG_RETURN_TSEQUENCESET_P(result);
+}
+'''
+
+
+class TypeDerivedArgTests(unittest.TestCase):
+    """#attach_type_derived_args binds the interpolation a wrapper derives from the
+    temporal type of a signature, as #DelegatingWrapperTests reads a literal behind a
+    helper, only on the signatures that do not carry it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        src = Path(self.tmp.name) / "src"
+        src.mkdir()
+        (src / "temporal.c").write_text(TYPE_DERIVED)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _idl():
+        def sig(name, args, ret):
+            return {"sqlName": name, "args": args, "ret": ret}
+        return {
+            "temporalTypes": {"tfloat": {"linear": True}, "tint": {"linear": False}},
+            "functions": [
+                {"name": "temporal_append_tinstant", "mdbC": "Temporal_append_tinstant",
+                 "params": [{"name": n} for n in
+                            ("temp", "inst", "interp", "maxdist", "maxt", "expand")],
+                 "sqlSignatures": [sig("appendInstant", ["tfloat", "tfloat"], "tfloat"),
+                                   sig("appendInstant", ["tint", "tint"], "tint"),
+                                   sig("appendInstant", ["tfloat", "tfloat", "text"],
+                                       "tfloat")]},
+                {"name": "tsequenceset_make_gaps", "mdbC": "Tsequenceset_constructor_gaps",
+                 "params": [{"name": n} for n in
+                            ("instants", "count", "interp", "maxt", "maxdist")],
+                 "sqlSignatures": [sig("tintSeqSetGaps", ["tint[]", "interval", "float"],
+                                       "tint"),
+                                   sig("tfloatSeqSetGaps",
+                                       ["tfloat[]", "interval", "float", "text"],
+                                       "tfloat")]}]}
+
+    def test_the_class_of_the_argument_type_is_bound(self):
+        idl, n = attach_type_derived_args(self._idl(), self.tmp.name)
+        sigs = idl["functions"][0]["sqlSignatures"]
+        self.assertEqual(sigs[0]["boundArgs"], {"interp": "LINEAR"})
+        self.assertEqual(sigs[1]["boundArgs"], {"interp": "STEP"})
+
+    def test_the_class_of_the_return_type_is_bound(self):
+        idl, _ = attach_type_derived_args(self._idl(), self.tmp.name)
+        self.assertEqual(idl["functions"][1]["sqlSignatures"][0]["boundArgs"],
+                         {"interp": "STEP"})
+
+    def test_a_signature_carrying_the_interpolation_binds_none(self):
+        idl, n = attach_type_derived_args(self._idl(), self.tmp.name)
+        self.assertNotIn("boundArgs", idl["functions"][0]["sqlSignatures"][2])
+        self.assertNotIn("boundArgs", idl["functions"][1]["sqlSignatures"][1])
+        self.assertEqual(n, 3)
 
 
 if __name__ == "__main__":
