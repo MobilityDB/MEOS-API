@@ -207,7 +207,7 @@ def _strip_sql_comments(text):
     return "".join(out)
 
 
-def _create_fn_stmts(text, bodies=False):
+def _create_fn_stmts(text, bodies=False, strict=False):
     """Yield (sqlName, [raw arg decls], returnType|None, wrapper|None, retSet) for every
     CREATE FUNCTION in `text`, each parsed STATEMENT-BOUNDED (to its terminating `;`).
     returnType is the type of one returned row; retSet is True for `RETURNS SETOF`,
@@ -218,7 +218,9 @@ def _create_fn_stmts(text, bodies=False):
     garbage return types. wrapper is None for a LANGUAGE SQL / $$ body (no C symbol).
     With `bodies`, each tuple ends with that body, read from the same `AS` clause
     #_AS_WRAPPER reads a C symbol from, its quotes undoubled; None for a function
-    with a C symbol."""
+    with a C symbol. With `strict`, each tuple ends with whether the function is STRICT
+    (`RETURNS NULL ON NULL INPUT`), PostgreSQL's `proisstrict`: a strict function answers
+    NULL for a NULL argument without calling its wrapper."""
     for m in _CREATE_FN.finditer(text):
         sqlname = m.group(1)
         i, depth, start = m.end(), 1, m.end()
@@ -241,6 +243,11 @@ def _create_fn_stmts(text, bodies=False):
             # return type `boolean SUPPORT tspatial_supportfn`. Keep only the type.
             ret = _RET_ATTR.split(ret, maxsplit=1)[0].strip() or ret
         argdecls = [a for a in _split_top_commas(text[start:arg_close]) if a.strip()]
+        if strict:
+            yield (sqlname, argdecls, ret, wrapper, retset,
+                   bool(re.search(r"\bSTRICT\b|\bRETURNS\s+NULL\s+ON\s+NULL\s+INPUT\b",
+                                  tail, re.I)))
+            continue
         if not bodies:
             yield sqlname, argdecls, ret, wrapper, retset
             continue
@@ -272,6 +279,27 @@ def _wrapper_sql_sigs(sql_src):
             continue                                            # LANGUAGE SQL / $$ body — no C symbol
         out.setdefault(wrapper, []).append(
             sql_signature(sqlname, argdecls, ret, retset, vocab, composites))
+    return out
+
+
+def _wrapper_sql_strict(sql_src):
+    """MobilityDB-C wrapper name -> {(sqlName, args, ret, retSet): STRICT} for each of its
+    SQL signatures, the signatures #_wrapper_sql_sigs reads, keyed as #_signature_wrapper
+    matches a catalog signature to the CREATE FUNCTION stating it."""
+    out = {}
+    _, vocab, composites = sql_statements(sql_src)
+    sql_src = Path(sql_src)
+    if not sql_src.exists():
+        return out
+    for sf in sorted(sql_src.rglob("*.sql")):
+        text = _strip_sql_comments(sf.read_text(errors="ignore"))
+        for sqlname, argdecls, ret, wrapper, retset, strict in _create_fn_stmts(text,
+                                                                                strict=True):
+            if wrapper is None:
+                continue
+            s = sql_signature(sqlname, argdecls, ret, retset, vocab, composites)
+            out.setdefault(wrapper, {})[
+                (s["sqlName"], tuple(s["args"]), s["ret"], s["retSet"])] = strict
     return out
 
 

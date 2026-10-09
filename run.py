@@ -15,7 +15,8 @@ from parser.shapeinfer import infer_shapes, attach_struct_input_arrays
 from parser.nullable import merge_nullable, extract_param_docs
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
-from parser.boundargs import (attach_call_literals, attach_type_derived_args, merge_boundargs,
+from parser.boundargs import (attach_call_literals, attach_null_default_binds,
+                              attach_type_derived_args, merge_boundargs,
                               merge_sql_arg_params,
                               resolve_bound_names, strip_call_literals)
 from parser.aggregates import attach_aggregates
@@ -389,6 +390,11 @@ def main():
         idl, ntd = attach_type_derived_args(idl, MDB_SRC, sql_src=SQL_SRC, meos_src=MEOS_SRC)
         print(f"      arguments a wrapper derives from the signature's temporal type: {ntd}",
               file=sys.stderr)
+        # State what a wrapper passes for an argument a call leaves to its NULL default,
+        # `maxdist` -1.0 of `tintSeqSetGaps(tint[], interval)`, on the signatures whose
+        # CREATE FUNCTION is not STRICT.
+        idl, nnd = attach_null_default_binds(idl, MDB_SRC, SQL_SRC, meos_src=MEOS_SRC)
+        print(f"      arguments left to a NULL default a wrapper fills: {nnd}", file=sys.stderr)
 
     # Keep a SQL signature two public functions claim on the one whose C parameters it
     # fits, matched by type once the object model and the type relations state the C type
