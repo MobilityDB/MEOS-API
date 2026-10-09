@@ -344,6 +344,20 @@ def _wrapper_bound(body: str, func: dict, drift: list,
             if dflt is not None:
                 guarded.setdefault(pname, dflt)
                 continue
+        if (a in assigned and _IDENT.match(a)
+                and pname in ((func.get("shape") or {}).get("nullable") or ())
+                and not _assigned_from_argument(body, a)
+                and not re.search(r"(?<![\w.>])" + re.escape(a) + r"\s*=(?!=)[^;]*\b"
+                                  + re.escape(func["name"]) + r"\s*\(", body)
+                and _caller_index(body, a) in _directly_carried(
+                    body, [o for o in args if o != a], assigned)):
+            # a value the host derives from an SQL argument another parameter carries
+            # itself, for a parameter the function reads as NULL where the caller gives
+            # none, as Temporal_as_mfjson fills srs from the table spatial_ref_sys by the
+            # SRID of the temporal value temp carries: a binding passes NULL and the
+            # function derives it itself
+            bound[pname] = "NULL"
+            continue
         if a.startswith("&") or "PG_GETARG" in a or a in assigned:
             continue  # out-param or caller-sourced local
         lit = _literal(a)
@@ -530,6 +544,32 @@ _CAST = re.compile(r"^\(\s*[\w\s*]+\)\s*")
 
 def _direct_indices(expr: str) -> set[int]:
     return {int(a or b) for a, b in _GETARG.findall(expr)}
+
+
+def _assigned_from_argument(body: str, var: str) -> bool:
+    """True when an assignment of the local ``var`` in the wrapper ``body`` reads an SQL
+    argument itself, as ``option = PG_GETARG_INT32(1)`` does, rather than deriving its value
+    from other locals, as ``srs = get_srs_cache_by_srid(fcinfo, srid, true)`` does: the first
+    step #_caller_index takes, without the walk through other locals it then makes. An
+    argument read by a running index, as ``sorigin = PG_GETARG_GSERIALIZED_P(i++)``, reads
+    one too."""
+    rhs = re.finditer(r"(?<![\w.>])" + re.escape(var) + r"\s*=(?!=)\s*([^;]+);", body)
+    return any(_direct_indices(m.group(1)) or "PG_GETARG" in m.group(1) for m in rhs)
+
+
+def _directly_carried(body: str, args: list[str], assigned: set) -> set[int]:
+    """The SQL arguments the call arguments ``args`` of a wrapper ``body`` carry themselves:
+    an argument reading ``PG_GETARG_<T>(k)``, or a local an assignment of which reads it,
+    as #_assigned_from_argument reads it, and not a value derived from such a local."""
+    out: set[int] = set()
+    for o in args:
+        o = o.strip()
+        if "PG_GETARG" in o or (o in assigned and _IDENT.match(o)
+                                and _assigned_from_argument(body, o)):
+            k = _caller_index(body, o)
+            if k is not None:
+                out.add(k)
+    return out
 
 
 def _caller_index(body: str, arg: str, depth: int = 0) -> int | None:

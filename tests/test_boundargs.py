@@ -404,6 +404,97 @@ set_round_to(const Set *s, int maxdd)
 '''
 
 
+DERIVED = r"""
+Datum
+Temporal_as_mfjson(PG_FUNCTION_ARGS)
+{
+  int option = 0;
+  char *srs = NULL;
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  if (PG_NARGS() > 1 && ! PG_ARGISNULL(1))
+    option = PG_GETARG_INT32(1);
+  int32_t srid = tspatial_srid(temp);
+  if (srid != SRID_UNKNOWN)
+    srs = get_srs_cache_by_srid(fcinfo, srid, true);
+  char *mfjson = temporal_as_mfjson(temp, option, srs);
+  PG_RETURN_TEXT_P(cstring_to_text(mfjson));
+}
+
+Datum
+Tgeo_space_boxes(PG_FUNCTION_ARGS)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  int i = 1;
+  GSERIALIZED *sorigin = PG_GETARG_GSERIALIZED_P(i++);
+  STBox *boxes = tgeo_space_boxes(temp, sorigin);
+  PG_RETURN_POINTER(boxes);
+}
+
+Datum
+Raster_clip(PG_FUNCTION_ARGS)
+{
+  Raster *rast = PG_GETARG_RASTER_P(0);
+  ArrayType *array = PG_GETARG_ARRAYTYPE_P(1);
+  int nbands;
+  int *bands = intarr_extract(array, &nbands);
+  Raster *result = raster_clip(rast, bands, nbands);
+  PG_RETURN_POINTER(result);
+}
+
+Datum
+Temporal_tcount_transfn(PG_FUNCTION_ARGS)
+{
+  SkipList *state;
+  INPUT_AGG_TRANS_STATE(fcinfo, state, ctx);
+  Temporal *temp = PG_GETARG_TEMPORAL_P(1);
+  state = temporal_tcount_transfn(state, temp);
+  PG_RETURN_POINTER(state);
+}
+"""
+
+
+def _derived_idl():
+    def fn(name, wrapper, params, nullable):
+        return {"name": name, "mdbC": wrapper, "params": [{"name": p} for p in params],
+                "shape": {"nullable": nullable}}
+    return {"functions": [
+        fn("temporal_as_mfjson", "Temporal_as_mfjson", ["temp", "option", "srs"], ["srs"]),
+        fn("tgeo_space_boxes", "Tgeo_space_boxes", ["temp", "sorigin"], ["sorigin"]),
+        fn("raster_clip", "Raster_clip", ["rast", "bands", "nbands"], ["bands"]),
+        fn("temporal_tcount_transfn", "Temporal_tcount_transfn", ["state", "temp"],
+           ["state"])]}
+
+
+class HostDerivedNullableTests(unittest.TestCase):
+    """A nullable parameter the wrapper fills from a value it derives from an SQL argument
+    another parameter carries itself is NULL for a binding; one carrying an SQL argument of
+    its own, or threaded through the call, is not."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        src = Path(self.tmp.name) / "src"
+        src.mkdir()
+        (src / "derived.c").write_text(DERIVED)
+        self.idl, _, _ = merge_boundargs(_derived_idl(), self.tmp.name)
+        self.bound = {f["name"]: (f.get("shape") or {}).get("boundArgs")
+                      for f in self.idl["functions"]}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_name_the_host_derives_is_null_for_a_binding(self):
+        self.assertEqual(self.bound["temporal_as_mfjson"], {"srs": "NULL"})
+
+    def test_an_argument_read_by_a_running_index_is_carried(self):
+        self.assertIsNone(self.bound["tgeo_space_boxes"])
+
+    def test_an_array_argument_derived_into_two_parameters_is_carried(self):
+        self.assertIsNone(self.bound["raster_clip"])
+
+    def test_a_state_threaded_through_the_call_is_not_bound(self):
+        self.assertIsNone(self.bound["temporal_tcount_transfn"])
+
+
 class SiblingWrapperTests(unittest.TestCase):
     """One MEOS function behind two wrappers, one per SQL signature."""
 
