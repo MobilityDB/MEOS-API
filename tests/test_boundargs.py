@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.boundargs import (_sql_arg_params, attach_call_literals, attach_type_derived_args,
+from parser.boundargs import (_sql_arg_params, attach_call_literals, attach_null_default_binds,
+                              attach_type_derived_args,
                               extract_call_literals,
                               extract_wrappers, merge_boundargs, resolve_bound_names,
                               strip_call_literals)
@@ -1233,6 +1234,62 @@ class TypeDerivedArgTests(unittest.TestCase):
         self.assertNotIn("boundArgs", idl["functions"][0]["sqlSignatures"][2])
         self.assertNotIn("boundArgs", idl["functions"][1]["sqlSignatures"][1])
         self.assertEqual(n, 3)
+
+
+class NullDefaultBindTests(unittest.TestCase):
+    """#attach_null_default_binds states what a wrapper passes for an argument left to its
+    NULL default, read from the wrapper of #TypeDerivedArgTests, and only for a CREATE
+    FUNCTION that is not STRICT."""
+
+    SQL = '''
+CREATE FUNCTION tintSeqSetGaps(tint[], maxt interval DEFAULT NULL,
+    maxdist float DEFAULT NULL)
+  RETURNS tint
+  AS 'MODULE_PATHNAME', 'Tsequenceset_constructor_gaps'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION tfloatSeqSetGaps(tfloat[], maxt interval DEFAULT NULL,
+    maxdist float DEFAULT NULL)
+  RETURNS tfloat
+  AS 'MODULE_PATHNAME', 'Tsequenceset_constructor_gaps'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+'''
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "src").mkdir()
+        (root / "src" / "temporal.c").write_text(TYPE_DERIVED)
+        (root / "sql").mkdir()
+        (root / "sql" / "022_temporal.in.sql").write_text(self.SQL)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _idl(self):
+        def sig(name, t):
+            return {"sqlName": name, "args": [t + "[]", "interval", "float"], "ret": t,
+                    "argDefaults": [None, "NULL", "NULL"]}
+        return {
+            "temporalTypes": {"tfloat": {"linear": True}, "tint": {"linear": False}},
+            "functions": [
+                {"name": "tsequenceset_make_gaps", "mdbC": "Tsequenceset_constructor_gaps",
+                 "params": [{"name": n} for n in
+                            ("instants", "count", "interp", "maxt", "maxdist")],
+                 "sqlSignatures": [sig("tintSeqSetGaps", "tint"),
+                                   sig("tfloatSeqSetGaps", "tfloat")]}]}
+
+    def test_each_null_default_takes_the_value_the_wrapper_passes(self):
+        idl, n = attach_null_default_binds(self._idl(), Path(self.tmp.name) / "src",
+                                           Path(self.tmp.name) / "sql")
+        self.assertEqual(idl["functions"][0]["sqlSignatures"][0]["nullDefaultBinds"],
+                         {"1": {"maxt": "NULL"}, "2": {"maxdist": "-1.0"}})
+        self.assertEqual(n, 2)
+
+    def test_a_strict_function_binds_none(self):
+        # PostgreSQL answers NULL for the NULL argument without calling the wrapper
+        idl, _ = attach_null_default_binds(self._idl(), Path(self.tmp.name) / "src",
+                                           Path(self.tmp.name) / "sql")
+        self.assertNotIn("nullDefaultBinds", idl["functions"][0]["sqlSignatures"][1])
 
 
 if __name__ == "__main__":

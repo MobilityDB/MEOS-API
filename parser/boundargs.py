@@ -617,6 +617,92 @@ def attach_type_derived_args(idl: dict, mdb_src: str | Path,
     return idl, n
 
 
+# A local a wrapper takes from argument k unless it is NULL:
+# `quadbin = PG_ARGISNULL(1) ? 0 : PG_GETARG_QUADBIN(1)`.
+_ISNULL_CHOICE = r"(?<![\w.>]){var}\s*=(?!=)\s*PG_ARGISNULL\s*\(\s*(\d+)\s*\)\s*\?\s*([^:;]+?)\s*:"
+
+
+def _null_value(body: str, var: str, k: int, sig: dict, linear: dict) -> str | None:
+    """The literal local ``var`` of wrapper ``body`` holds when SQL argument ``k`` is NULL,
+    or None when the wrapper states none: the literal it starts from and replaces only under
+    ``PG_NARGS() > k`` (#_guarded_default), the interpolation of the signature's temporal
+    type it takes when the call carries no ``k`` (#_type_choice), or the literal of
+    ``var = PG_ARGISNULL(k) ? literal : ...``."""
+    g = _guarded_default(body, var)
+    if g is not None and g[0] == k:
+        return g[1]
+    c = _type_choice(body, var)
+    if c is not None and c[0] == k:
+        _, source, i, lin, other = c
+        sargs = sig.get("args") or []
+        t = sig.get("ret") if source == "ret" else (
+            sargs[i] if i is not None and i < len(sargs) else None)
+        if t in linear:
+            return lin if linear[t] else other
+    m = re.search(_ISNULL_CHOICE.format(var=re.escape(var)), body)
+    if m and int(m.group(1)) == k:
+        return _literal(m.group(2).strip())
+    return None
+
+
+def attach_null_default_binds(idl: dict, mdb_src: str | Path, sql_src: str | Path,
+                              meos_src: str | Path | None = None) -> tuple[dict, int]:
+    """(idl, number of positions stated) once each SQL signature states in
+    ``nullDefaultBinds`` what its wrapper passes for an argument left to a NULL default.
+
+    A SQL argument declared ``DEFAULT NULL`` reaches the wrapper as NULL when the call
+    leaves it out, and the wrapper chooses what the MEOS function receives:
+    ``tintSeqSetGaps(tint[], maxt interval DEFAULT NULL, maxdist float DEFAULT NULL)``
+    passes ``maxt`` NULL and ``maxdist`` -1.0 (#_null_value). For each such position ``k``
+    of a signature whose CREATE FUNCTION is not STRICT (a STRICT one answers NULL without
+    calling the wrapper), ``nullDefaultBinds[k]`` maps every C parameter argument ``k``
+    feeds (#_caller_index) to that value, stated only when the wrapper gives every one of
+    them a value. Runs once the temporal types are attached; the wrappers are traced as
+    #merge_boundargs traces them."""
+    from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs, _wrapper_sql_strict
+    wrappers = extract_wrappers(mdb_src)
+    m2d = _meos_to_mdb(meos_src) if meos_src else {}
+    w2sig = _wrapper_sql_sigs(sql_src)
+    w2strict = _wrapper_sql_strict(sql_src)
+    linear = {t: rec.get("linear") for t, rec in (idl.get("temporalTypes") or {}).items()}
+    n = 0
+    for func in idl["functions"]:
+        primary = func.get("mdbC")
+        if not primary:
+            continue
+        ws = [primary] + [w for w in m2d.get(func["name"]) or () if w != primary]
+        params = [p.get("name") for p in func.get("params", [])]
+        for sig in func.get("sqlSignatures") or []:
+            nulls = [k for k, d in enumerate(sig.get("argDefaults") or [])
+                     if d is not None and d.strip().upper() == "NULL"]
+            if not nulls:
+                continue
+            w = _signature_wrapper(func, sig, ws, w2sig) or ws[0]
+            key = (sig.get("sqlName") or func.get("sqlfn"), tuple(sig.get("args") or ()),
+                   sig.get("ret"), bool(sig.get("retSet")))
+            body = wrappers.get(w)
+            if not body or (w2strict.get(w) or {}).get(key, True):
+                continue
+            args = _call_args(body, func["name"]) or _call_args(body, "pg_" + func["name"])
+            if not args:
+                continue
+            fed = {}
+            for pos, a in enumerate(args):
+                if pos < len(params) and _IDENT.match(a):
+                    k = _caller_index(body, a)
+                    if k is not None:
+                        fed.setdefault(k, []).append((params[pos], a))
+            binds = {}
+            for k in nulls:
+                vals = {p: _null_value(body, a, k, sig, linear) for p, a in fed.get(k, ())}
+                if vals and all(v is not None for v in vals.values()):
+                    binds[str(k)] = vals
+            if binds:
+                sig["nullDefaultBinds"] = binds
+                n += len(binds)
+    return idl, n
+
+
 # The SQL argument a wrapper reads: `PG_GETARG_<T>(k)`, or a helper handed the call info
 # with the index, as `input_interp_string(fcinfo, 1)` reads argument 1.
 _GETARG = re.compile(r"PG_GETARG_\w+\s*\(\s*(\d+)\s*\)|\bfcinfo\s*,\s*(\d+)\s*\)")
