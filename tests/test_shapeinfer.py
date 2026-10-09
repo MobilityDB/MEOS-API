@@ -11,7 +11,7 @@ Plain unittest, no pytest dependency; fully synthetic IDL, no build artifacts.
 """
 import unittest
 
-from parser.shapeinfer import infer_shapes
+from parser.shapeinfer import infer_shapes, attach_struct_input_arrays
 
 
 def _fn(name, ret, params):
@@ -232,6 +232,38 @@ class ShapeInferTests(unittest.TestCase):
         self.assertEqual(idl["functions"][1]["shape"]["outputArrays"],
                          [{"param": "periods"}])
         self.assertEqual(stats["outputArrays"], 1)
+
+
+class StructInputArrayTests(unittest.TestCase):
+    """#attach_struct_input_arrays reads a contiguous array of structs from the @param text."""
+
+    def test_a_documented_array_of_structs_is_an_input_array(self):
+        idl = {"functions": [_fn("spanset_make", "SpanSet *",
+                                 [("spans", "Span *"), ("count", "int")])]}
+        docs = {"spanset_make": {"spans": "Array of spans",
+                                 "count": "Number of elements in the array"}}
+        idl, n = attach_struct_input_arrays(idl, docs)
+        self.assertEqual(n, 1)
+        self.assertEqual(idl["functions"][0]["shape"]["inputArrays"], [{
+            "param": "spans",
+            "lengthFrom": {"kind": "param", "name": "count"},
+            "element": {"c": "Span", "canonical": "Span"}}])
+
+    def test_one_struct_and_an_integer_is_no_array(self):
+        idl = {"functions": [_fn("stbox_round", "STBox *",
+                                 [("box", "const STBox *"), ("maxdd", "int")])]}
+        docs = {"stbox_round": {"box": "Spatiotemporal box",
+                                "maxdd": "Maximum number of decimal digits"}}
+        idl, n = attach_struct_input_arrays(idl, docs)
+        self.assertEqual(n, 0)
+        self.assertNotIn("shape", idl["functions"][0])
+
+    def test_an_array_read_at_an_index_is_no_input_array(self):
+        idl = {"functions": [_fn("meos_array_get", "void *",
+                                 [("array", "MeosArray *"), ("n", "int")])]}
+        docs = {"meos_array_get": {"array": "Array", "n": "Index"}}
+        idl, n = attach_struct_input_arrays(idl, docs)
+        self.assertEqual(n, 0)
 
 
 if __name__ == "__main__":

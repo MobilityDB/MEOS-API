@@ -11,8 +11,8 @@ from parser.covering import attach_temporal_covering
 from parser.typerecover import (recover_collapsed_types, normalize_canonical,
                                  postgres_scalar_names)
 from parser.header_types import reconcile
-from parser.shapeinfer import infer_shapes
-from parser.nullable import merge_nullable
+from parser.shapeinfer import infer_shapes, attach_struct_input_arrays
+from parser.nullable import merge_nullable, extract_param_docs
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import (attach_call_literals, merge_boundargs, merge_sql_arg_params,
@@ -158,6 +158,9 @@ def main():
     _doxy_root = _src_root if (_src_root / "src").is_dir() else HEADERS_DIR.parent
     idl, nn = merge_nullable(idl, _doxy_root)
     print(f"      nullable params from Doxygen `may be NULL`: {nn}",
+          file=sys.stderr)
+    idl, nsa = attach_struct_input_arrays(idl, extract_param_docs(_doxy_root))
+    print(f"      input arrays of structs from Doxygen `Array of`: {nsa}",
           file=sys.stderr)
     idl, no, out_drift = merge_outparams(idl, _doxy_root)
     print(f"      out params from Doxygen `@param[out]`: {no}", file=sys.stderr)

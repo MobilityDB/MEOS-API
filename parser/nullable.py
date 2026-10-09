@@ -52,6 +52,25 @@ def extract_nullable(meos_root: str | Path) -> dict[str, list[str]]:
     return out
 
 
+def extract_param_docs(meos_root: str | Path) -> dict[str, dict[str, str]]:
+    """Return ``{function: {parameter: description}}`` from the MEOS C Doxygen, the
+    ``@param`` text #extract_nullable reads, whitespace collapsed, over the same files."""
+    root = Path(meos_root)
+    out: dict[str, dict[str, str]] = {}
+    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
+    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
+    for f in files:
+        txt = Path(f).read_text(errors="ignore")
+        for m in _FUNC.finditer(txt):
+            docs = out.setdefault(m.group("name"), {})
+            for pm in _PARAM.finditer(m.group("doc")):
+                desc = " ".join(pm.group("desc").split())
+                for p in (n.strip() for n in pm.group("names").split(",")):
+                    if p:
+                        docs.setdefault(p, desc)
+    return out
+
+
 def merge_nullable(idl: dict, meos_root: str | Path) -> tuple[dict, int]:
     """Fold the extracted nullability into each function's ``shape.nullable``."""
     nul = extract_nullable(meos_root)

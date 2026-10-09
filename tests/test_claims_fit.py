@@ -89,6 +89,27 @@ class ClaimsFitTests(unittest.TestCase):
             _fn("two", "f", [("box", TB), ("a", "double")], sig)))
         self.assertEqual(n, 0)
 
+    def test_an_array_length_takes_no_argument(self):
+        # As #test_a_bound_parameter_takes_no_argument for a bound parameter: the count
+        # shape.inputArrays names for an array takes no SQL argument, so Set_constructor's
+        # set(float[]) stays on floatset_make and cbufferset_make gives it up
+        def shape(element):
+            return {"inputArrays": [{"param": "values",
+                                     "lengthFrom": {"kind": "param", "name": "count"},
+                                     "element": {"c": element, "canonical": element}}]}
+        sig = [{"args": ["float[]"], "ret": "floatset"}]
+        idl = _idl(
+            _fn("floatset_make", "set", [("values", "const double *"), ("count", "int")],
+                sig, shape=shape("double")),
+            _fn("cbufferset_make", "set", [("values", "const Cbuffer *"), ("count", "int")],
+                sig, shape=shape("Cbuffer")))
+        idl["objectModel"]["classes"]["Cbuffer"] = {"cType": "Cbuffer *"}
+        idl, n = attach_claims_fit(idl)
+        fns = {f["name"]: f for f in idl["functions"]}
+        self.assertEqual(_args(fns["floatset_make"]), [("float[]",)])
+        self.assertEqual(fns["cbufferset_make"]["sqlSignatures"], [])
+        self.assertEqual(n, 1)
+
     def test_an_internal_claimant_is_left_alone(self):
         idl, n = attach_claims_fit(_idl(_kernel("tintbox_value_tiles", "int"),
                                         _kernel("internal_tiles", "int64") | {"api": "internal"}))
