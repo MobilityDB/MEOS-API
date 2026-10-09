@@ -29,6 +29,7 @@ every binding generated from the IDL.
 """
 from __future__ import annotations
 
+import re
 
 # Parameters that accept NULL by MEOS convention regardless of the function.
 # ``srs`` is the optional spatial-reference string of every ``*_as_*json`` /
@@ -162,6 +163,53 @@ def _input_arrays(func: dict) -> list:
                 })
         start = end
     return out
+
+
+_ARRAY_DOC = re.compile(r"(an\s+)?array\b", re.I)
+_COUNT_DOC = re.compile(r"number of elements\b", re.I)
+
+
+def attach_struct_input_arrays(idl: dict, docs: dict) -> tuple[dict, int]:
+    """(idl, number of arrays added) once ``shape.inputArrays`` also names each contiguous
+    array of structs a function reads.
+
+    A pointer to one struct and a pointer to the first of several are the same C type:
+    ``spanset_make(Span *spans, int count)`` reads ``count`` spans, ``stbox_round(const
+    STBox *box, int maxdd)`` one box. The MEOS documentation tells them apart, which is
+    why this runs once the ``@param`` text is read (#extract_param_docs of
+    parser/nullable.py): a single-pointer parameter documented as an array (``Array of
+    spans``) followed by a by-value integer documented as its number of elements
+    (``Number of elements in the array``) is an input array with that length, as
+    #_input_arrays states an array of pointers or of scalars. An integer documented
+    otherwise (``Index`` in ``meos_array_get``) is not a length."""
+    n = 0
+    for func in idl["functions"]:
+        params = func.get("params", [])
+        fdocs = docs.get(func["name"]) or {}
+        shape = func.get("shape") or {}
+        known = {a["param"] for a in shape.get("inputArrays") or ()}
+        found = []
+        for prm, nxt in zip(params, params[1:]):
+            ctype = _bare(prm.get("cType"))
+            if (prm["name"] in known or not ctype.endswith("*") or ctype.endswith("**")
+                    or _bare(nxt.get("cType")) not in _LENGTH_TYPES):
+                continue
+            if not (_ARRAY_DOC.match(fdocs.get(prm["name"], ""))
+                    and _COUNT_DOC.match(fdocs.get(nxt["name"], ""))):
+                continue
+            found.append({
+                "param": prm["name"],
+                "lengthFrom": {"kind": "param", "name": nxt["name"]},
+                "element": {
+                    "c": _strip_one_ptr(ctype),
+                    "canonical": _strip_one_ptr(
+                        _bare(prm.get("canonical") or prm.get("cType"))),
+                },
+            })
+        if found:
+            func.setdefault("shape", {}).setdefault("inputArrays", []).extend(found)
+            n += len(found)
+    return idl, n
 
 
 def _is_index_pair_return(func: dict, count: str) -> bool:

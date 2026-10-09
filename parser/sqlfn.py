@@ -667,11 +667,14 @@ def _signature_fits(func, sig, sqlc):
     """Whether the arguments of `sig` fit the C input parameters of `func`, in their order
     or in the one other order a wrapper may pass them in, as #_Resolver.params of
     parser/compositions.py matches the operands of a call: True or False, or None when the
-    two counts differ (an array passed with its count, an argument left to its default).
-    The parameters `sig` binds and the out-parameters take no argument."""
+    two counts differ (an argument left to its default). The parameters `sig` binds, the
+    out-parameters and the length of each input array take no argument: a SQL array is
+    the C array together with its count (`shape.inputArrays`)."""
     shape = func.get("shape") or {}
     bound = sig.get("boundArgs") or shape.get("boundArgs") or {}
     out = set(shape.get("outParams") or ())
+    out |= {(a.get("lengthFrom") or {}).get("name") for a in shape.get("inputArrays") or ()
+            if (a.get("lengthFrom") or {}).get("kind") == "param"}
     inputs = [p for p in func.get("params") or ()
               if p["name"] not in out and p["name"] not in bound]
     if len(inputs) != len(sig["args"]):
