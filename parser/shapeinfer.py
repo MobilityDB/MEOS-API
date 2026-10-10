@@ -7,6 +7,8 @@ codegens need is fully derivable from the headers — no hand-maintained table:
     TYPE **f(..., TYPE **extra, int *count)   -> primary array return PLUS one
                                                   or more parallel out-arrays
     f(..., TYPE **values, int count, ...)     -> reads an array of ``count``
+    TYPE **f(..., TYPE **values, int count)   -> reads and returns an array of
+                                                  ``count``
 
 The output length is always passed *by pointer* (``int *count``); an *input*
 array instead carries its length *by value* (``int count``).  That pointer/value
@@ -209,6 +211,48 @@ def attach_struct_input_arrays(idl: dict, docs: dict) -> tuple[dict, int]:
         if found:
             func.setdefault("shape", {}).setdefault("inputArrays", []).extend(found)
             n += len(found)
+    return idl, n
+
+
+def attach_counted_array_returns(idl: dict) -> tuple[dict, int]:
+    """(idl, number of returns stated) once ``shape.arrayReturn`` also states each array
+    a function returns as long as an array it reads.
+
+    ``temparr_round(Temporal **temp, int count, int maxdd)`` answers one rounded value
+    per value it reads, so its ``Temporal **`` holds ``count`` elements, and no ``int
+    *count`` out-parameter says so, as #infer_shapes requires. The types say it: the
+    return is the element of a stated input array with one more pointer level, which is
+    how an array of that element is spelled. ``stboxarr_round(const STBox *boxarr, int
+    count, int maxdd)`` reads ``count`` boxes and returns ``count`` boxes as ``STBox *``.
+    A return of the element type itself is one element, not an array:
+    ``temporal_merge_array(Temporal **temparr, int count)`` returns one ``Temporal *``.
+
+    The array return takes its length from that input array's ``lengthFrom`` and reads
+    its ``element`` from the return, as #infer_shapes states both. It runs after
+    #attach_struct_input_arrays, which states the arrays of structs it compares with."""
+    n = 0
+    for func in idl["functions"]:
+        shape = func.get("shape") or {}
+        if "arrayReturn" in shape or _out_count_param(func):
+            continue
+        rtype = func.get("returnType", {})
+        ret = rtype.get("c", "")
+        if not ret.rstrip().endswith("*"):
+            continue
+        elem = _bare(_strip_one_ptr(ret))
+        lengths = {a["lengthFrom"]["name"]: a["lengthFrom"]
+                   for a in shape.get("inputArrays") or ()
+                   if _bare(a["element"]["c"]) == elem}
+        if len(lengths) != 1:
+            continue
+        shape["arrayReturn"] = {
+            "lengthFrom": dict(next(iter(lengths.values()))),
+            "element": {
+                "c": _strip_one_ptr(ret),
+                "canonical": _strip_one_ptr(rtype.get("canonical", ret)),
+            },
+        }
+        n += 1
     return idl, n
 
 

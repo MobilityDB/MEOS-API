@@ -11,7 +11,8 @@ Plain unittest, no pytest dependency; fully synthetic IDL, no build artifacts.
 """
 import unittest
 
-from parser.shapeinfer import infer_shapes, attach_struct_input_arrays
+from parser.shapeinfer import (infer_shapes, attach_struct_input_arrays,
+                               attach_counted_array_returns)
 
 
 def _fn(name, ret, params):
@@ -264,6 +265,70 @@ class StructInputArrayTests(unittest.TestCase):
         docs = {"meos_array_get": {"array": "Array", "n": "Index"}}
         idl, n = attach_struct_input_arrays(idl, docs)
         self.assertEqual(n, 0)
+
+
+class CountedArrayReturnTests(unittest.TestCase):
+    """#attach_counted_array_returns states an array return as long as an input array."""
+
+    def test_an_array_of_the_input_arrays_element_is_as_long_as_it(self):
+        idl = {"functions": [_fn("temparr_round", "Temporal **",
+                                 [("temp", "Temporal **"), ("count", "int"),
+                                  ("maxdd", "int")])]}
+        idl, _ = infer_shapes(idl)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 1)
+        self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"], {
+            "lengthFrom": {"kind": "param", "name": "count"},
+            "element": {"c": "Temporal *", "canonical": "Temporal *"}})
+
+    def test_an_array_of_structs_is_as_long_as_the_array_of_structs_read(self):
+        idl = {"functions": [_fn("stboxarr_round", "STBox *",
+                                 [("boxarr", "const STBox *"), ("count", "int"),
+                                  ("maxdd", "int")])]}
+        docs = {"stboxarr_round": {"boxarr": "Array of spatiotemporal boxes",
+                                   "count": "Number of elements in the array",
+                                   "maxdd": "Maximum number of decimal digits"}}
+        idl, _ = infer_shapes(idl)
+        idl, _ = attach_struct_input_arrays(idl, docs)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 1)
+        self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"], {
+            "lengthFrom": {"kind": "param", "name": "count"},
+            "element": {"c": "STBox", "canonical": "STBox"}})
+
+    def test_one_element_of_the_input_arrays_type_is_no_array(self):
+        # Refuting case: the return is the element type itself, one value made of
+        # the `count` read, so it states no array return.
+        idl = {"functions": [_fn("temporal_merge_array", "Temporal *",
+                                 [("temparr", "Temporal **"), ("count", "int")])]}
+        idl, _ = infer_shapes(idl)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 0)
+        self.assertNotIn("arrayReturn", idl["functions"][0]["shape"])
+
+    def test_one_struct_and_an_integer_is_no_array(self):
+        # Refuting case: without an input array there is no length to take.
+        idl = {"functions": [_fn("stbox_round", "STBox *",
+                                 [("box", "const STBox *"), ("maxdd", "int")])]}
+        docs = {"stbox_round": {"box": "Spatiotemporal box",
+                                "maxdd": "Maximum number of decimal digits"}}
+        idl, _ = infer_shapes(idl)
+        idl, _ = attach_struct_input_arrays(idl, docs)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 0)
+        self.assertNotIn("arrayReturn", idl["functions"][0].get("shape") or {})
+
+    def test_an_output_count_keeps_its_length(self):
+        # geo_cluster_intersecting reads `ngeoms` geometries and returns `*count`
+        # clusters: the output count, not the input length, is the length.
+        idl = {"functions": [_fn("geo_cluster_intersecting", "GSERIALIZED **",
+                                 [("geoms", "const GSERIALIZED **"),
+                                  ("ngeoms", "int"), ("count", "int *")])]}
+        idl, _ = infer_shapes(idl)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 0)
+        self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"]["lengthFrom"],
+                         {"kind": "param", "name": "count"})
 
 
 if __name__ == "__main__":

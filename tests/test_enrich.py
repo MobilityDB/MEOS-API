@@ -94,6 +94,25 @@ FUNCTIONS = [
     # array; the count out-param is implicit, result is a JSON array.
     fn("temporal_components", "struct Temporal **",
        (T, "temp"), ("int *", "count")),
+    # Array return as long as an array argument: Elem **f(Elem **arr, int count, ..)
+    # returns `count` elements, as `shape.arrayReturn` states; the response is a JSON
+    # array as long as the request's.
+    dict(fn("temparr_round", "struct Temporal **",
+            ("struct Temporal **", "temp"), ("int", "count"), ("int", "maxdd")),
+         shape={"arrayReturn": {"lengthFrom": {"kind": "param", "name": "count"},
+                                "element": {"c": "struct Temporal *",
+                                            "canonical": "struct Temporal *"}}}),
+    # The same return counted by an array of structs the request carries as one value:
+    # its length is not the request's, so it is refused naming that argument.
+    dict(fn("boxarr_round", "struct Box *",
+            ("const struct Box *", "boxarr"), ("int", "count"), ("int", "maxdd")),
+         shape={"inputArrays": [{"param": "boxarr",
+                                 "lengthFrom": {"kind": "param", "name": "count"},
+                                 "element": {"c": "struct Box",
+                                             "canonical": "struct Box"}}],
+                "arrayReturn": {"lengthFrom": {"kind": "param", "name": "count"},
+                                "element": {"c": "struct Box",
+                                            "canonical": "struct Box"}}}),
 ]
 
 STRUCTS = [{"name": n, "fields": []} for n in
@@ -232,6 +251,23 @@ class ExposabilityTests(unittest.TestCase):
         r = self.n("temporal_timestamps")["reason"]
         self.assertFalse(self.n("temporal_timestamps")["exposable"])
         self.assertIn("unsupported-return:int *", r)
+
+    def test_array_return_as_long_as_an_array_argument(self):
+        f = self.fns["temparr_round"]
+        self.assertTrue(f["network"]["exposable"])
+        self.assertEqual([p["name"] for p in f["wire"]["params"]], ["temp", "maxdd"])
+        self.assertEqual(f["wire"]["params"][0]["count_param"], "count")
+        r = f["wire"]["result"]
+        self.assertEqual(r["kind"], "array")
+        self.assertEqual(r["count_param"], "count")
+        self.assertNotIn("count_outparam", r)
+        self.assertEqual(r["element"]["encode"], "temporal_out")
+
+    def test_array_return_counted_by_an_argument_read_as_one_value(self):
+        f = self.fns["boxarr_round"]
+        self.assertFalse(f["network"]["exposable"])
+        self.assertIn("array-or-out-param:boxarr", f["network"]["reason"])
+        self.assertEqual(f["wire"]["result"], {"kind": "unsupported"})
 
     def test_lifecycle_and_index_not_exposable(self):
         self.assertIn("lifecycle", self.n("meos_initialize")["reason"])
@@ -493,8 +529,9 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(e["internalFunctions"], 1)        # internal_op
         self.assertEqual(e["publicFunctions"], len(FUNCTIONS) - 1)
         # 13 + setspan_value_n + boxset_value_n + temporal_merge_array
-        # + temporal_components (array return); internal_op excluded.
-        self.assertEqual(e["exposableFunctions"], 17)
+        # + temporal_components (array return) + temparr_round (array return as
+        # long as an array argument); internal_op excluded.
+        self.assertEqual(e["exposableFunctions"], 18)
 
 
 if __name__ == "__main__":

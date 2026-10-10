@@ -74,7 +74,8 @@ def build_routes(catalog: dict) -> dict:
                        "out_ctype": r.get("out_ctype"),
                        "presence_return": r.get("presence_return", False),
                        "element": r.get("element"),
-                       "count_outparam": r.get("count_outparam")},
+                       "count_outparam": r.get("count_outparam"),
+                       "count_param": r.get("count_param")},
         }
     return routes
 
@@ -168,9 +169,17 @@ def _dispatch(body: dict, route: dict, engine: Engine, enums: dict):
         return {"result": bool(val) if res.get("json") == "boolean" else val}
 
     if res["kind"] == "array":
-        # Elem **f(.., int *count): MEOS returns a fresh array + byref count.
         el = res["element"]
-        ptrs = engine.invoke_array(route["name"], args)
+        if res.get("count_param"):
+            # Elem **f(Elem **arr, int count, ..): one element per element of
+            # the request's array of that count.
+            n = next(len(body[p["name"]]) for p in route["params"]
+                     if p["kind"] == "array"
+                     and p["count_param"] == res["count_param"])
+            ptrs = engine.invoke_counted_array(route["name"], args, n)
+        else:
+            # Elem **f(.., int *count): MEOS returns a fresh array + byref count.
+            ptrs = engine.invoke_array(route["name"], args)
         return {"result": [engine.encode(el["encode"], p,
                                          _aux_args(el.get("encode_aux", [])))
                            for p in ptrs]}

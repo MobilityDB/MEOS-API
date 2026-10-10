@@ -58,6 +58,11 @@ class Engine:
         """``Elem **f(.., int *count)`` — return a list of element handles."""
         raise NotImplementedError
 
+    def invoke_counted_array(self, fn_name: str, args: list, count: int):
+        """``Elem **f(Elem **arr, int count, ..)`` — return the ``count`` element
+        handles of an array as long as an array argument."""
+        raise NotImplementedError
+
     def close(self) -> None:
         pass
 
@@ -85,6 +90,9 @@ class StubEngine(Engine):
         return True, 0
 
     def invoke_array(self, fn_name, args):
+        return []
+
+    def invoke_counted_array(self, fn_name, args, count):
         return []
 
 
@@ -248,6 +256,15 @@ class CtypesEngine(Engine):
         if not ret or count <= 0:
             return []
         arr = ct.cast(ret, ct.POINTER(ct.c_void_p))
+        return [arr[i] for i in range(count)]
+
+    def invoke_counted_array(self, fn_name, args, count):
+        # Elem **f(Elem **arr, int count, ...): MEOS allocates an array as long
+        # as the argument array, so its length is the one the caller passed.
+        ret = self.invoke(fn_name, args, "ptr")
+        if not ret or count <= 0:
+            return []
+        arr = self._ct.cast(ret, self._ct.POINTER(self._ct.c_void_p))
         return [arr[i] for i in range(count)]
 
 

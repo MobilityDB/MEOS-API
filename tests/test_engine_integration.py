@@ -142,6 +142,18 @@ class CtypesIntegrationTests(unittest.TestCase):
                 for p in ptrs]
         self.assertTrue(all("@" in o for o in outs))
 
+    def test_counted_array_return_round_trip(self):
+        # Temporal **temparr_round(Temporal **temp, int count, int maxdd): MEOS
+        # allocates an array as long as the argument array.
+        h1 = self.eng.decode("tfloat_in", "1.23456@2000-01-01")
+        h2 = self.eng.decode("tfloat_in", "7.65432@2000-01-03")
+        ptrs = self.eng.invoke_counted_array(
+            "temparr_round", [("ptrarray", [h1, h2]), ("int", 2), ("int", 2)], 2)
+        self.assertEqual(len(ptrs), 2)
+        outs = [self.eng.encode("tfloat_out", p, [("int", 15)]) for p in ptrs]
+        self.assertIn("1.23@", outs[0])
+        self.assertIn("7.65@", outs[1])
+
     def test_bad_input_raises_not_exits(self):
         with self.assertRaises(MeosError):
             self.eng.decode("tbool_in", "not a temporal value at all")
