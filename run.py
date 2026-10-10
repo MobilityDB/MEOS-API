@@ -281,8 +281,8 @@ def main():
                 print(f"        {cname} -> {wrapper}", file=sys.stderr)
 
         # Now that both the @sqlfn/@sqlop map (step 4) and the portable bare-name map
-        # (step 3) are attached, classify the shared bbox-topological BACKING tags
-        # (same_bbox/contains_bbox/…) so bindings register the bare public name, not the
+        # (step 3) are attached, classify the shared bounding-box BACKING tags of a bare
+        # name (same_bbox) so bindings register the bare public name, not the
         # catalog-only backing tag.
         idl = classify_backing_sqlfn(idl)
         nbo = sum(1 for f in idl.get("functions", []) if f.get("sqlfnBackingOnly"))
@@ -299,12 +299,13 @@ def main():
             raise ValueError("index searches that do not resolve to one operator each:\n  "
                              + "\n  ".join(idx_errors))
         print(f"      signatures stating their index search: {nidx}", file=sys.stderr)
-        # The same map names each position operator once per class (setLeft …
-        # stboxLeft): derive those names from its @sqlfn/@sqlop tags.
+        # The same map names each position or topological operator once per class
+        # (setLeft … stboxLeft, setOverlaps … stboxOverlaps): derive those names from
+        # its @sqlfn/@sqlop tags.
         idl = attach_position_names(idl)
         pn = idl.get("portableAliases", {}).get("positionNames", {})
         print(f"      Derived {sum(len(c) for c in pn.values())} position SQL "
-              f"name(s) by class for {len(pn)} position operator(s) "
+              f"name(s) by class for {len(pn)} position or topological operator(s) "
               f"(positionNames)", file=sys.stderr)
 
         # A PG wrapper can BIND a MEOS input to a fixed literal instead of exposing

@@ -16,38 +16,41 @@ family, and is **type-agnostic** (it applies to every temporal type):
 
 | Family | Operator → bare name |
 |---|---|
-| Topology | `&&`→`overlaps` `@>`→`contains` `<@`→`contained` `-\|-`→`adjacent` |
 | Temporal comparison | `#=`→`tEqual` `#<>`→`tNotEqual` `#<`→`tLessThan` `#<=`→`tLessEqual` `#>`→`tGreaterThan` `#>=`→`tGreaterEqual` |
 | Ever comparison | `?=`→`eEqual` `?<>`→`eNotEqual` `?<`→`eLessThan` `?<=`→`eLessEqual` `?>`→`eGreaterThan` `?>=`→`eGreaterEqual` |
 | Always comparison | `%=`→`aEqual` `%<>`→`aNotEqual` `%<`→`aLessThan` `%<=`→`aLessEqual` `%>`→`aGreaterThan` `%>=`→`aGreaterEqual` |
 | Distance | `<->`→`tDistance` `\|=\|`→`nearestApproachDistance` |
 | Same | `~=`→`same` |
 
-25 operator→bare-name pairs. Already-canonical (no aliasing needed):
+21 operator→bare-name pairs. Already-canonical (no aliasing needed):
 `eIntersects`, `atTime`, restriction and spatial-relationship functions.
 
-## Position operators
+## Position and topological operators
 
-A position operator has one name per class of its operands instead: the
-class followed by the position, a temporal operand taking the class of its
-bounding box (MobilityDB#2717). `<<` is `setLeft`, `spanLeft`,
-`spansetLeft`, `tboxLeft`, `stboxLeft` and `tpcboxLeft`; the Y and Z
-positions exist for `stbox` and `tpcbox`. The mapping holds each operator
-with its position, the stem those names and the MEOS C functions share
-(`left_set_set`, `left_tspatial_tspatial`), under `positionFamilies`:
+A position or a topological operator has one name per class of its operands
+instead: the class followed by the stem, a temporal operand taking the class
+of its bounding box. `<<` is `setLeft`, `spanLeft`, `spansetLeft`,
+`tboxLeft`, `stboxLeft` and `tpcboxLeft` (MobilityDB#2717); the Y and Z
+positions exist for `stbox` and `tpcbox`. `&&` is `setOverlaps`,
+`spanOverlaps`, `spansetOverlaps`, `tboxOverlaps`, `stboxOverlaps` and
+`tpcboxOverlaps` (MobilityDB#2930). The mapping holds each operator with its
+stem, which those names and the MEOS C functions share (`left_set_set`,
+`overlaps_tspatial_tspatial`), under `positionFamilies`, where the key
+`position` names the stem:
 
-| Family | Operator → position |
+| Family | Operator → stem |
 |---|---|
+| Topology | `&&`→`overlaps` `@>`→`contains` `<@`→`contained` `-\|-`→`adjacent` |
 | Time position | `<<#`→`before` `#>>`→`after` `&<#`→`overbefore` `#&>`→`overafter` |
 | Space X | `<<`→`left` `>>`→`right` `&<`→`overleft` `&>`→`overright` |
 | Space Y | `<<\|`→`below` `\|>>`→`above` `&<\|`→`overbelow` `\|&>`→`overabove` |
 | Space Z | `<</`→`front` `/>>`→`back` `&</`→`overfront` `/&>`→`overback` |
 
 The catalog derives the names by class from the `@sqlfn` tags of the
-functions whose `@sqlop` is the operator (`positionNames`, 64 names for the
-16 operators). A name that is not the class followed by the position, or an
-operator that no function carries, stops the pipeline: either means the
-tags and the mapping disagree.
+functions whose `@sqlop` is the operator (`positionNames`, 88 names for the
+20 operators over MobilityDB `96d665686e`). A name that is not the class
+followed by the stem, or an operator that no function carries, stops the
+pipeline: either means the tags and the mapping disagree.
 
 ## In the catalog
 
@@ -56,12 +59,14 @@ plus derived lookups for codegen:
 
 ```json
 "portableAliases": {
-  "byOperator": { "&&": "overlaps", "#=": "tEqual", "~=": "same", ... },
-  "byBareName": { "overlaps": "&&", "tEqual": "#=", "same": "~=", ... },
+  "byOperator": { "#=": "tEqual", "<->": "tDistance", "~=": "same", ... },
+  "byBareName": { "tEqual": "#=", "tDistance": "<->", "same": "~=", ... },
   "bareNames":  ["aEqual", "aGreaterEqual", ..., "tLessEqual", "tLessThan", "tNotEqual"],
-  "count": 25,
-  "byPositionOperator": { "<<": "left", "<<#": "before", ... },
+  "count": 21,
+  "byPositionOperator": { "&&": "overlaps", "<<": "left", "<<#": "before", ... },
   "positionNames": {
+    "&&": { "set": "setOverlaps", "span": "spanOverlaps", "spanset": "spansetOverlaps",
+            "stbox": "stboxOverlaps", "tbox": "tboxOverlaps", "tpcbox": "tpcboxOverlaps" },
     "<<": { "set": "setLeft", "span": "spanLeft", "spanset": "spansetLeft",
             "stbox": "stboxLeft", "tbox": "tboxLeft", "tpcbox": "tpcboxLeft" },
     "<<|": { "stbox": "stboxBelow", "tpcbox": "tpcboxBelow" }, ...
@@ -94,8 +99,9 @@ end state.
 `portable_parity.py` is the meos-api.json analogue of MobilityDB's
 `tools/portable_aliases/generate.py --check`: it cross-references every
 bare name against the catalog's function families (by the MEOS bare-name
-prefix convention), and every position operator against the family its
-position prefixes (`left_*`, `before_*`) with its SQL names by class, and
+prefix convention), and every position or topological operator against the
+family its stem prefixes (`left_*`, `before_*`, `overlaps_*`) with its SQL
+names by class, and
 writes `output/meos-portable-parity.json`. A bare name whose C family
 prefix differs is backed by the functions whose `@sqlfn` is the bare name
 (`tEqual` by the `teq_*` family, `eEqual` by `ever_eq_*`, `tDistance` by
