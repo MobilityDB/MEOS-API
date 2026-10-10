@@ -20,11 +20,11 @@ from parser.portable import (attach_portable_aliases, attach_position_names,
 MAP = ROOT / "meta" / "portable-aliases.json"
 SCHEMA = ROOT / "meta" / "portable-aliases.schema.json"
 _EXPECTED_FAMILY_SIZES = {
-    "topology": 4, "temporalComparison": 6, "everComparison": 6,
+    "temporalComparison": 6, "everComparison": 6,
     "alwaysComparison": 6, "distance": 2, "same": 1,
 }
 _EXPECTED_POSITION_SIZES = {
-    "timePosition": 4, "spaceX": 4, "spaceY": 4, "spaceZ": 4,
+    "topology": 4, "timePosition": 4, "spaceX": 4, "spaceY": 4, "spaceZ": 4,
 }
 
 
@@ -37,8 +37,8 @@ def _attach_map(data):
 
 
 def _stbox_position_functions(skip=()):
-    """One stbox function per position operator, named as MobilityDB names it
-    (`left_stbox_stbox`, @sqlfn stboxLeft, @sqlop <<)."""
+    """One stbox function per position or topological operator, named as MobilityDB
+    names it (`left_stbox_stbox`, @sqlfn stboxLeft, @sqlop <<)."""
     d = json.loads(MAP.read_text())
     return [{"name": f"{p['position']}_stbox_stbox",
              "sqlfn": "stbox" + p["position"][0].upper() + p["position"][1:],
@@ -66,24 +66,25 @@ class MappingFileTests(unittest.TestCase):
     def test_known_mappings_verbatim(self):
         flat = {p["operator"]: p["bareName"]
                 for fam in self.d["families"].values() for p in fam}
-        for op, bn in [("&&", "overlaps"), ("@>", "contains"),
-                       ("-|-", "adjacent"), ("#=", "tEqual"),
+        for op, bn in [("#=", "tEqual"),
                        ("#<>", "tNotEqual"), ("?=", "eEqual"), ("%=", "aEqual"),
                        ("|=|", "nearestApproachDistance"), ("~=", "same")]:
             self.assertEqual(flat[op], bn)
-        self.assertEqual(sum(_EXPECTED_FAMILY_SIZES.values()), 25)
-        self.assertEqual(len(flat), 25)
+        self.assertEqual(sum(_EXPECTED_FAMILY_SIZES.values()), 21)
+        self.assertEqual(len(flat), 21)
 
     def test_known_positions_verbatim(self):
         flat = {p["operator"]: p["position"]
                 for fam in self.d["positionFamilies"].values() for p in fam}
-        for op, pos in [("<<#", "before"), ("#&>", "overafter"),
+        for op, pos in [("&&", "overlaps"), ("@>", "contains"),
+                        ("<@", "contained"), ("-|-", "adjacent"),
+                        ("<<#", "before"), ("#&>", "overafter"),
                         ("<<", "left"), ("&>", "overright"),
                         ("|&>", "overabove"), ("/&>", "overback")]:
             self.assertEqual(flat[op], pos)
-        self.assertEqual(sum(_EXPECTED_POSITION_SIZES.values()), 16)
-        self.assertEqual(len(flat), 16)
-        # a position operator has names by class, never a bare name
+        self.assertEqual(sum(_EXPECTED_POSITION_SIZES.values()), 20)
+        self.assertEqual(len(flat), 20)
+        # a position or topological operator has names by class, never a bare name
         bare_ops = {p["operator"]
                     for fam in self.d["families"].values() for p in fam}
         self.assertFalse(set(flat) & bare_ops)
@@ -146,22 +147,25 @@ class AttachTests(unittest.TestCase):
     def test_attach_and_derive(self):
         idl = attach_portable_aliases({"functions": []}, MAP)
         pa = idl["portableAliases"]
-        self.assertEqual(pa["count"], 25)
-        self.assertEqual(pa["byOperator"]["&&"], "overlaps")
-        self.assertEqual(pa["byBareName"]["overlaps"], "&&")
+        self.assertEqual(pa["count"], 21)
+        self.assertEqual(pa["byOperator"]["#="], "tEqual")
+        self.assertEqual(pa["byBareName"]["tEqual"], "#=")
         self.assertEqual(pa["bareNames"], sorted(pa["byBareName"]))
-        # bijective: 25 distinct operators and 25 distinct bare names
-        self.assertEqual(len(pa["byOperator"]), 25)
-        self.assertEqual(len(pa["byBareName"]), 25)
+        # bijective: 21 distinct operators and 21 distinct bare names
+        self.assertEqual(len(pa["byOperator"]), 21)
+        self.assertEqual(len(pa["byBareName"]), 21)
         self.assertIn("cbuffer", pa["scope"]["inScopeTypeFamilies"])
         self.assertEqual(pa["explicitBacking"],
                          {"nearestApproachDistance": ["nad"]})
-        # the 16 position operators, with their position, and no bare name
+        # the 20 operators named by class, with their stem, and no bare name
         self.assertEqual(pa["byPositionOperator"]["<<"], "left")
         self.assertEqual(pa["byPositionOperator"]["<<#"], "before")
-        self.assertEqual(len(pa["byPositionOperator"]), 16)
-        self.assertNotIn("<<", pa["byOperator"])
-        self.assertNotIn("left", pa["byBareName"])
+        self.assertEqual(pa["byPositionOperator"]["&&"], "overlaps")
+        self.assertEqual(pa["byPositionOperator"]["-|-"], "adjacent")
+        self.assertEqual(len(pa["byPositionOperator"]), 20)
+        for op, name in (("<<", "left"), ("&&", "overlaps"), ("@>", "contains")):
+            self.assertNotIn(op, pa["byOperator"])
+            self.assertNotIn(name, pa["byBareName"])
         self.assertEqual(set(pa["positionFamilies"]),
                          set(_EXPECTED_POSITION_SIZES))
 
@@ -170,9 +174,11 @@ class AttachTests(unittest.TestCase):
         self.assertNotIn("portableAliases", idl)
 
     def test_backing_sqlfn_classification(self):
-        # A bbox-topological function carries a shared `<op>_bbox` @sqlfn backing tag
-        # that is never deployed as a CREATE FUNCTION; its public name is the operator's
-        # bare alias. classify_backing_sqlfn must flag it and record publicSqlName.
+        # A function behind an operator with a bare name may carry a shared `<op>_bbox`
+        # @sqlfn backing tag that is never deployed as a CREATE FUNCTION; its public name
+        # is the operator's bare alias. classify_backing_sqlfn must flag it and record
+        # publicSqlName. A topological operator has names by class, so its tag is not a
+        # backing tag of a bare name.
         idl = attach_portable_aliases({"functions": [
             {"name": "Same_stbox_stbox",     "sqlfn": "same_bbox",     "sqlop": "~="},
             {"name": "Contains_tbox_tnumber", "sqlfn": "contains_bbox", "sqlop": "@>"},
@@ -181,11 +187,11 @@ class AttachTests(unittest.TestCase):
         ]}, MAP)
         idl = classify_backing_sqlfn(idl)
         by = {f["name"]: f for f in idl["functions"]}
-        # the two _bbox backing tags are flagged with the bare public name
+        # the _bbox backing tag of a bare name is flagged with that name
         self.assertTrue(by["Same_stbox_stbox"]["sqlfnBackingOnly"])
         self.assertEqual(by["Same_stbox_stbox"]["publicSqlName"], "same")
-        self.assertTrue(by["Contains_tbox_tnumber"]["sqlfnBackingOnly"])
-        self.assertEqual(by["Contains_tbox_tnumber"]["publicSqlName"], "contains")
+        # a topological operator has no bare name to stand for
+        self.assertNotIn("sqlfnBackingOnly", by["Contains_tbox_tnumber"])
         # a position op whose @sqlfn IS the deployed name (stboxLeft) is untouched
         self.assertNotIn("sqlfnBackingOnly", by["Left_stbox_stbox"])
         # a plain function with no operator is untouched
@@ -198,19 +204,25 @@ class AttachTests(unittest.TestCase):
         self.assertNotIn("sqlfnBackingOnly", idl["functions"][0])
 
     def test_position_names_by_class(self):
-        # Each position operator's names by class come from the @sqlfn of the
-        # functions whose @sqlop it is; the class is the name less the position.
+        # Each position or topological operator's names by class come from the
+        # @sqlfn of the functions whose @sqlop it is; the class is the name less
+        # the stem.
         fns = _stbox_position_functions() + [
             {"name": "left_set_set",         "sqlfn": "setLeft",  "sqlop": "<<"},
             {"name": "left_tnumber_tnumber", "sqlfn": "tboxLeft", "sqlop": "<<"},
             {"name": "left_tbox_tbox",       "sqlfn": "tboxLeft", "sqlop": "<<"},
+            {"name": "contains_set_value",   "sqlfn": "setContains", "sqlop": "@>"},
+            {"name": "overlaps_span_span",   "sqlfn": "spanOverlaps", "sqlop": "&&"},
             {"name": "same_stbox_stbox",     "sqlfn": "same_bbox", "sqlop": "~="},
         ]
         idl = attach_portable_aliases({"functions": fns}, MAP)
         pn = attach_position_names(idl)["portableAliases"]["positionNames"]
-        self.assertEqual(len(pn), 16)
+        self.assertEqual(len(pn), 20)
         self.assertEqual(pn["<<"], {"set": "setLeft", "stbox": "stboxLeft",
                                     "tbox": "tboxLeft"})
+        self.assertEqual(pn["&&"], {"span": "spanOverlaps", "stbox": "stboxOverlaps"})
+        self.assertEqual(pn["@>"], {"set": "setContains", "stbox": "stboxContains"})
+        self.assertEqual(pn["-|-"], {"stbox": "stboxAdjacent"})
         self.assertEqual(pn["<<#"], {"stbox": "stboxBefore"})
         self.assertEqual(pn["&</"], {"stbox": "stboxOverfront"})
         # an operator with a bare name is not a position operator
@@ -219,9 +231,10 @@ class AttachTests(unittest.TestCase):
     def test_position_name_without_its_class_raises(self):
         # @sqlop << over an @sqlfn that is not <class>Left: the tags and the
         # mapping disagree, which must fail loudly rather than reach a binding.
-        for sqlfn in ("temporal_left", "Left"):
+        for sqlfn, op in (("temporal_left", "<<"), ("Left", "<<"),
+                          ("contains_bbox", "@>"), ("overlaps", "&&")):
             fns = _stbox_position_functions() + [
-                {"name": "left_temporal_temporal", "sqlfn": sqlfn, "sqlop": "<<"}]
+                {"name": "x_temporal_temporal", "sqlfn": sqlfn, "sqlop": op}]
             idl = attach_portable_aliases({"functions": fns}, MAP)
             with self.assertRaises(ValueError):
                 attach_position_names(idl)

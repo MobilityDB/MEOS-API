@@ -5,7 +5,7 @@
 #     python tools/portable_parity.py     # -> output/meos-portable-parity.json
 #
 # For every canonical bare name it reports the catalog functions that back it: by the MEOS bare-name prefix convention
-# (`overlaps_*`, `same_*`, …), else by the functions whose @sqlfn IS the bare
+# (`same_*`, …), else by the functions whose @sqlfn IS the bare
 # name (`tEqual` on the `teq_*` family, `eEqual` on `ever_eq_*`: the SQL name
 # MobilityDB declares for them), else by a verified `explicitBacking` prefix.
 # A bare name none of them resolves is **not** asserted to be an API gap: it
@@ -13,10 +13,11 @@
 # explicit operator→C-family entry — an honest signal, never a fabricated
 # verdict.
 #
-# A position operator has no bare name: its SQL names are one per class
-# (`setLeft` … `stboxLeft`, the catalog's `positionNames`), and its MEOS C
-# functions share its position as their prefix (`left_*`, `before_*`), which is
-# what backs it. The report lists it under `byPosition`, keyed by operator.
+# A position or a topological operator has no bare name: its SQL names are one
+# per class (`setLeft` … `stboxLeft`, `setOverlaps` … `stboxOverlaps`, the
+# catalog's `positionNames`), and its MEOS C functions share its stem as their
+# prefix (`left_*`, `before_*`, `overlaps_*`), which is what backs it. The report
+# lists it under `byPosition`, keyed by operator.
 
 import json
 import sys

@@ -31,7 +31,7 @@ def _catalog(fns):
 class ParityLogicTests(unittest.TestCase):
     def test_backed_vs_needs_explicit(self):
         cat = _catalog([
-            "overlaps_span_span", "overlaps_tbox_tbox",   # backs `overlaps`
+            "overlaps_span_span", "overlaps_tbox_tbox",   # back `&&`
             {"name": "teq_temporal_temporal",              # backs `tEqual`
              "sqlfn": "tEqual"},                           # by its SQL name
             {"name": "ever_eq_temporal_temporal"},         # no SQL name: backs
@@ -44,9 +44,6 @@ class ParityLogicTests(unittest.TestCase):
         ])
         r = build_parity(cat)
         self.assertEqual(r["total"], 41)
-        self.assertEqual(r["byBareName"]["overlaps"]["status"], "backed")
-        self.assertEqual(r["byBareName"]["overlaps"]["via"], "prefix")
-        self.assertEqual(r["byBareName"]["overlaps"]["backedBy"], 2)
         self.assertEqual(r["byBareName"]["same"]["status"], "backed")
         # different C prefix -> resolved via the *verified* explicit map,
         # not a fake verdict and not a false gap
@@ -54,7 +51,6 @@ class ParityLogicTests(unittest.TestCase):
         self.assertEqual(nad["status"], "backed")
         self.assertEqual(nad["via"], "explicit")
         self.assertNotIn("nearestApproachDistance", r["unbacked"])
-        self.assertEqual(r["byBareName"]["overlaps"]["family"], "topology")
         self.assertEqual(r["byBareName"]["tEqual"]["operator"], "#=")
         # a C family whose prefix differs is backed by the functions carrying
         # the bare name as their @sqlfn, and only by those
@@ -73,6 +69,14 @@ class ParityLogicTests(unittest.TestCase):
         self.assertIn("<<#", r["unbackedPositions"])
         self.assertNotIn("<<", r["unbackedPositions"])
         self.assertNotIn("left", r["byBareName"])
+        # a topological operator is named by class too, and backed the same way
+        overlaps = r["byPosition"]["&&"]
+        self.assertEqual(overlaps["status"], "backed")
+        self.assertEqual(overlaps["via"], "prefix")
+        self.assertEqual(overlaps["backedBy"], 2)
+        self.assertEqual(overlaps["family"], "topology")
+        self.assertIn("@>", r["unbackedPositions"])
+        self.assertNotIn("overlaps", r["byBareName"])
 
     def test_position_sql_names_reported(self):
         # With the catalog's positionNames derived, each position operator
@@ -90,8 +94,8 @@ class ParityLogicTests(unittest.TestCase):
         self.assertEqual(r["total"], 41)
         self.assertEqual(r["backed"], 0)
         self.assertEqual(r["needsExplicitBacking"], 41)
-        self.assertEqual(len(r["unbacked"]), 25)  # all flagged, 0 dropped
-        self.assertEqual(len(r["unbackedPositions"]), 16)
+        self.assertEqual(len(r["unbacked"]), 21)  # all flagged, 0 dropped
+        self.assertEqual(len(r["unbackedPositions"]), 20)
         self.assertTrue(all(v["status"] in ("backed",
                                             "needs-explicit-backing")
                             for v in list(r["byBareName"].values())

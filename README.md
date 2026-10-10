@@ -229,8 +229,9 @@ bare-name mapping that MobilityDB now registers natively (PR #1075). The
 pipeline folds it into the catalog as `portableAliases` (with `byOperator`
 / `byBareName` lookups), so **every binding/engine generates the identical
 bare names** and a user learns one reference and assumes the rest. A
-position operator has one name per class instead (`setLeft` … `stboxLeft`),
-which the catalog derives from the `@sqlfn` tags as `positionNames`.
+position or a topological operator has one name per class instead
+(`setLeft` … `stboxLeft`, `setOverlaps` … `stboxOverlaps`), which the catalog
+derives from the `@sqlfn` tags as `positionNames`.
 
 It is curated canonical data, kept verbatim (only bijective lookups are
 derived — no C-symbol guessing; upstream aliases reuse each operator's own
