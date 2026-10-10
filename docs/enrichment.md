@@ -181,6 +181,13 @@ Otherwise `exposable` is `false` and `reason` lists the blockers
 > (element = the serialized `Elem`, `count_outparam` names the byref
 > length). Recovers `temporal_instants`/`segments`/`sequences`,
 > `tgeo_values`, `geo_pointarr`, … whose element type is encodable.
+> An array as long as an input array, `Elem **f(Elem **arr, int count, ..)`
+> (`shape.arrayReturn.lengthFrom` names the by-value `count`), becomes the
+> same `kind: "array"` result with `count_param` naming that length: the
+> response holds one element per element of the request's array
+> (`temparr_round`, `cbufferarr_round`, `posearr_round`). One counted by an
+> argument the request carries as one value is refused naming it
+> (`stboxarr_round`: `array-or-out-param:boxarr`).
 
 This is the precise, machine-checkable boundary of what a generator can emit
 today. Functions still blocked only by `array-or-out-param` (multi- or

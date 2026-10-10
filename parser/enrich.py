@@ -434,6 +434,41 @@ def _array_return(fn: dict, type_encodings: dict):
     return cnt[0]["name"], rb
 
 
+def _counted_array_return(fn: dict, type_encodings: dict, params: list, count_i):
+    """The array a function returns as long as an array argument, as
+    ``shape.arrayReturn`` states it when its ``lengthFrom`` is a by-value parameter
+    (``temparr_round(Temporal **temp, int count, int maxdd)`` returns ``count``
+    values). Returns ``(length_param, elem_base, refusal)``.
+
+    The response holds one encoded element per element of the request's array, so the
+    return is served as #_array_return serves one, an array of encodable element
+    pointers, when its length is the length #_array_param gives the request's array
+    (``params[count_i]``). An array whose length is that of an argument the request
+    does not carry as an array cannot be read back at its length, and is refused
+    naming that argument (``stboxarr_round`` reads ``boxarr`` as one box); an array of
+    elements that are not encodable pointers is refused naming the return. A function
+    with no such ``arrayReturn`` is ``(None, None, None)``, and #assess reads its
+    return as any other."""
+    ar = (fn.get("shape") or {}).get("arrayReturn") or {}
+    length = (ar.get("lengthFrom") or {}).get("name")
+    by_value = {p["name"] for p in fn.get("params", [])
+                if _ptr_depth(p["canonical"]) == 0}
+    if length not in by_value:
+        return None, None, None
+    ret = fn["returnType"]["canonical"]
+    if count_i is None or params[count_i]["name"] != length:
+        source = next((a["param"]
+                       for a in (fn.get("shape") or {}).get("inputArrays") or ()
+                       if a["lengthFrom"].get("name") == length), length)
+        return length, None, f"array-or-out-param:{source}"
+    te = type_encodings.get(_base(ret))
+    if _ptr_depth(ret) != 2:
+        return length, None, f"unsupported-return:{ret}"
+    if not (te and te.get("out")):
+        return length, None, f"no-encoder:{_base(ret)}"
+    return length, _base(ret), None
+
+
 def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
     """Return ``(network, wire)`` for one function.
 
@@ -452,6 +487,9 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
     ret_count_i = (next((i for i, p in enumerate(eff)
                          if p["name"] == ret_count_name), None)
                    if ret_elem is not None else None)
+    ret_length, counted_elem, counted_refusal = (
+        _counted_array_return(fn, type_encodings, eff, count_i)
+        if ret_elem is None and out_p is None else (None, None, None))
 
     for idx, p in enumerate(eff):
         if idx == count_i or idx == ret_count_i:
@@ -528,6 +566,23 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
             },
             "count_outparam": ret_count_name,
         }
+        scalar = "handled"
+    elif counted_elem is not None:
+        te = type_encodings[counted_elem]
+        wire_result = {
+            "kind": "array",
+            "element": {
+                "kind": "serialized",
+                "cType": " ".join(ret.replace("*", " ").split()) + " *",
+                "encode": te["out"], "encode_aux": te.get("out_aux", []),
+                "encodings": te["encodings"],
+            },
+            "count_param": ret_length,
+        }
+        scalar = "handled"
+    elif counted_refusal is not None:
+        reasons.append(counted_refusal)
+        wire_result = {"kind": "unsupported"}
         scalar = "handled"
     else:
         scalar = _scalar_wire(ret, enums)

@@ -11,7 +11,8 @@ from parser.covering import attach_temporal_covering
 from parser.typerecover import (recover_collapsed_types, normalize_canonical,
                                  postgres_scalar_names)
 from parser.header_types import reconcile
-from parser.shapeinfer import infer_shapes, attach_struct_input_arrays
+from parser.shapeinfer import (infer_shapes, attach_struct_input_arrays,
+                               attach_counted_array_returns)
 from parser.nullable import merge_nullable, extract_param_docs
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
@@ -164,6 +165,8 @@ def main():
     idl, nsa = attach_struct_input_arrays(idl, extract_param_docs(_doxy_root))
     print(f"      input arrays of structs from Doxygen `Array of`: {nsa}",
           file=sys.stderr)
+    idl, ncr = attach_counted_array_returns(idl)
+    print(f"      array returns as long as an input array: {ncr}", file=sys.stderr)
     idl, no, out_drift = merge_outparams(idl, _doxy_root)
     print(f"      out params from Doxygen `@param[out]`: {no}", file=sys.stderr)
     if out_drift:

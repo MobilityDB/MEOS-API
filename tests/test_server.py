@@ -97,6 +97,21 @@ CATALOG = {
                                          "encode": "tsequence_out",
                                          "encode_aux": [],
                                          "encodings": ["text"]}}}},
+        {"name": "temparr_round", "category": "transformation",
+         "network": {"exposable": True},
+         "wire": {"params": [
+             {"name": "temp", "kind": "array", "count_param": "count",
+              "element": {"kind": "serialized",
+                          "cType": "struct Temporal *",
+                          "decode": "temporal_in", "decode_aux": [],
+                          "encodings": ["text"]}},
+             {"name": "maxdd", "kind": "json", "json": "integer"}],
+                  "result": {"kind": "array", "count_param": "count",
+                             "element": {"kind": "serialized",
+                                         "cType": "struct Temporal *",
+                                         "encode": "temporal_out",
+                                         "encode_aux": [],
+                                         "encodings": ["text"]}}}},
     ],
     "enums": [{"name": "interpType",
                "values": [{"name": "STEP", "value": 0},
@@ -138,6 +153,10 @@ class FakeEngine(Engine):
             raise MeosError("boom", 7)
         return [101, 102]
 
+    def invoke_counted_array(self, fn, args, count):
+        self.calls.append(("invoke_counted_array", fn, args, count))
+        return list(range(201, 201 + count))
+
     present = True
 
 
@@ -167,13 +186,13 @@ class ServerTests(unittest.TestCase):
         routes = build_routes(CATALOG)
         self.assertIn("/temporal_eq", routes)
         self.assertNotIn("/tsequence_make", routes)
-        self.assertEqual(len(routes), 8)
+        self.assertEqual(len(routes), 9)
 
     def test_health(self):
         st, body = self.req("GET", "/healthz")
         self.assertEqual(st, 200)
         self.assertEqual(body["engine"], "fake")
-        self.assertEqual(body["operations"], 8)
+        self.assertEqual(body["operations"], 9)
 
     def test_unknown_route(self):
         self.assertEqual(self.req("POST", "/nope", {})[0], 404)
@@ -271,6 +290,21 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(ia[2], [("ptr", ("H", "temporal_in", "x"))])
         encs = [c for c in self.engine.calls if c[0] == "encode"]
         self.assertEqual([c[1] for c in encs], ["tsequence_out"] * 2)
+
+    def test_array_return_as_long_as_an_array_argument(self):
+        st, body = self.req("POST", "/temparr_round",
+                            {"temp": ["a", "b", "c"], "maxdd": 2})
+        self.assertEqual(st, 200)
+        # one encoded element per element of the request's array
+        self.assertEqual(body, {"result": ["ENC(temporal_out)"] * 3})
+        ic = next(c for c in self.engine.calls
+                  if c[0] == "invoke_counted_array")
+        self.assertEqual(ic[1], "temparr_round")
+        self.assertEqual([t for t, _ in ic[2]], ["ptrarray", "int", "int"])
+        self.assertEqual(ic[2][1], ("int", 3))          # the implicit count
+        self.assertEqual(ic[3], 3)                      # the length read back
+        encs = [c for c in self.engine.calls if c[0] == "encode"]
+        self.assertEqual([c[2] for c in encs], [201, 202, 203])
 
     # --- validation ---
     def test_missing_field(self):
