@@ -1292,5 +1292,106 @@ CREATE FUNCTION tfloatSeqSetGaps(tfloat[], maxt interval DEFAULT NULL,
         self.assertNotIn("nullDefaultBinds", idl["functions"][0]["sqlSignatures"][1])
 
 
+ARITY_BRANCH = r'''
+Datum
+Temporal_app_tinst_transfn(PG_FUNCTION_ARGS)
+{
+  Temporal *state = PG_ARGISNULL(0) ? NULL : PG_GETARG_TEMPORAL_P(0);
+  Temporal *inst = PG_GETARG_TEMPORAL_P(1);
+  interpType interp;
+  if (PG_NARGS() == 2 || PG_ARGISNULL(2))
+  {
+    MeosType temptype = oid_meostype(get_fn_expr_argtype(fcinfo->flinfo, 1));
+    interp = temptype_supports_linear(temptype) ? LINEAR : STEP;
+  }
+  else
+    interp = input_interp_string(fcinfo, 2);
+  double maxdist = -1.0;
+  Interval *maxt = NULL;
+  if (PG_NARGS() > 3)
+  {
+    if (PG_NARGS() == 4)
+    {
+      if (! PG_ARGISNULL(3))
+        maxt = PG_GETARG_INTERVAL_P(3);
+    }
+    else /* PG_NARGS() == 5 */
+    {
+      if (! PG_ARGISNULL(3))
+        maxdist = PG_GETARG_FLOAT8(3);
+      if (! PG_ARGISNULL(4))
+        maxt = PG_GETARG_INTERVAL_P(4);
+    }
+  }
+  state = temporal_app_tinst_transfn(state, (TInstant *) inst, interp, maxdist, maxt);
+  PG_RETURN_TEMPORAL_P(state);
+}
+'''
+
+
+class ArityBranchTests(unittest.TestCase):
+    """A wrapper choosing what it reads by a test of ``PG_NARGS()`` other than ``> k``, and
+    by the ``else`` of such a test, read as #GuardedDefaultTests and #NullDefaultBindTests
+    read one testing ``PG_NARGS() > k``: each signature binds what a call of its number of
+    arguments leaves to the literal a local starts from, and each NULL default is paired
+    with the parameter its argument feeds for that number."""
+
+    SQL = '''
+CREATE FUNCTION appendInstantTransition(tbool, tbool, interp text DEFAULT NULL,
+    maxt interval DEFAULT NULL)
+  RETURNS tbool
+  AS 'MODULE_PATHNAME', 'Temporal_app_tinst_transfn'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION appendInstantTransition(tint, tint, interp text DEFAULT NULL,
+    maxdist float DEFAULT NULL, maxt interval DEFAULT NULL)
+  RETURNS tint
+  AS 'MODULE_PATHNAME', 'Temporal_app_tinst_transfn'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+'''
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "src").mkdir()
+        (root / "src" / "temporal_aggfuncs.c").write_text(ARITY_BRANCH)
+        (root / "sql").mkdir()
+        (root / "sql" / "040_temporal_aggfuncs.in.sql").write_text(self.SQL)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _func(self):
+        return {"name": "temporal_app_tinst_transfn", "mdbC": "Temporal_app_tinst_transfn",
+                "sqlfn": "appendInstantTransition",
+                "params": [{"name": n} for n in
+                           ("state", "inst", "interp", "maxdist", "maxt")],
+                "sqlSignatures": [
+                    {"args": ["tbool", "tbool"], "ret": "tbool"},
+                    {"args": ["tbool", "tbool", "text"], "ret": "tbool"},
+                    {"args": ["tbool", "tbool", "text", "interval"], "ret": "tbool",
+                     "argDefaults": [None, None, "NULL", "NULL"]},
+                    {"args": ["tint", "tint", "text", "float", "interval"], "ret": "tint",
+                     "argDefaults": [None, None, "NULL", "NULL", "NULL"]}]}
+
+    def test_each_number_of_arguments_binds_what_it_leaves(self):
+        idl, _, _ = merge_boundargs({"functions": [self._func()]}, self.tmp.name)
+        self.assertEqual(
+            [s.get("boundArgs") for s in idl["functions"][0]["sqlSignatures"]],
+            [{"maxdist": "-1.0", "maxt": "NULL"}, {"maxdist": "-1.0", "maxt": "NULL"},
+             {"maxdist": "-1.0"}, None])
+
+    def test_a_null_default_feeds_the_parameter_its_number_reads(self):
+        idl = {"temporalTypes": {"tbool": {"linear": False}, "tint": {"linear": False}},
+               "functions": [self._func()]}
+        idl, _ = attach_null_default_binds(idl, Path(self.tmp.name) / "src",
+                                           Path(self.tmp.name) / "sql")
+        sigs = idl["functions"][0]["sqlSignatures"]
+        self.assertEqual(sigs[2]["nullDefaultBinds"],
+                         {"2": {"interp": "STEP"}, "3": {"maxt": "NULL"}})
+        self.assertEqual(sigs[3]["nullDefaultBinds"],
+                         {"2": {"interp": "STEP"}, "3": {"maxdist": "-1.0"},
+                          "4": {"maxt": "NULL"}})
+
+
 if __name__ == "__main__":
     unittest.main()
