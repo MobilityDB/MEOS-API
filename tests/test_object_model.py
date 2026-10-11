@@ -241,8 +241,22 @@ class AttachTests(unittest.TestCase):
         unregistered = {n for n, s in nodes.items()
                         if s["kind"] == "leaf" and s["temptype"] is None}
         self.assertEqual(unregistered,
-                         {"Pcschema", "RTree", "RTreeNNCursor", "SPTree",
+                         {"Pcschema", "Raster", "RTree", "RTreeNNCursor", "SPTree",
                           "SPNNCursor", "MeosArray"})
+
+    def test_a_raster_is_a_class_its_functions_are_methods_of(self):
+        # MEOS registers no MeosType for a raster, its tile Raquet being the type the
+        # temporal raster values carry, while every raster function takes one first.
+        om = attach_object_model({"functions": [
+            {"name": n, "api": "public",
+             "params": [{"name": "rast", "cType": "const Raster *"}]}
+            for n in ("raster_copy", "raster_mem_size", "raster_width")
+        ]}, MODEL, None)["objectModel"]
+        self.assertEqual(om["classes"]["Raster"]["cType"], "Raster")
+        names = {m["function"]: m["ooName"] for m in om["classes"]["Raster"]["methods"]}
+        self.assertEqual(names, {"raster_copy": "copy", "raster_mem_size": "memSize",
+                                 "raster_width": "width"})
+        self.assertEqual(om["summary"]["unclassified"], 0)
 
     def test_a_function_named_as_its_own_prefix_still_has_a_member_name(self):
         # `meos_pc_schema` IS its class's prefix, so dropping the prefix leaves

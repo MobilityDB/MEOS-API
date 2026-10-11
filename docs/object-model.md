@@ -125,7 +125,7 @@ that set from the two predicates and fails until each has a class, so a
 base type MEOS adds reaches the model with no edit to the file.
 `Nsegment`, `Raquet` and `JsonPath` are the MeosTypes no membership
 predicate admits; the model states them, and the same gate states that it
-does. `Pcschema`, `RTree`, `RTreeNNCursor`, `SPTree`, `SPNNCursor` and
+does. `Pcschema`, `Raster`, `RTree`, `RTreeNNCursor`, `SPTree`, `SPNNCursor` and
 `MeosArray` go further: MEOS
 registers them in no enum at all, and they say so with a null `temptype`
 rather than by leaving the field out. To a binding a pointer to a struct
