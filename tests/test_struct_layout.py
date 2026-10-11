@@ -79,6 +79,22 @@ class StructLayoutTests(unittest.TestCase):
                     fld["offset_bits"], 0,
                     f"{s['name']}.{fld['name']} has unresolved offset")
 
+    def test_a_fixed_size_value_states_the_bytes_clang_lays_it_in(self):
+        """The size beside the offsets #test_span_layout_resolved reads: the image of
+        these values is their structure, the trailing padding included (a TBox is two
+        24-byte spans and an int16, padded to 56)."""
+        sizes = {n: self.by_name[n].get("sizeBytes")
+                 for n in ("Span", "TBox", "STBox", "Npoint", "Nsegment")}
+        self.assertEqual(sizes, {"Span": 24, "TBox": 56, "STBox": 80,
+                                 "Npoint": 16, "Nsegment": 24})
+
+    def test_a_defined_structure_states_its_size_and_an_opaque_one_none(self):
+        """Over every structure, as #test_core_structs_have_real_offsets reads every
+        field: one with fields is defined and sized, one without only declared."""
+        bad = [s["name"] for s in self.by_name.values()
+               if ("sizeBytes" in s) != bool(s["fields"])]
+        self.assertEqual(bad, [])
+
     def test_a_structure_declared_first_is_read_from_its_definition(self):
         # `meos.h` declares MeosArray and SkipList before `meos_internal.h` defines
         # them, so their layout is read where they are defined
@@ -105,6 +121,10 @@ class ForwardDeclarationTests(unittest.TestCase):
             idl = parse_all_headers(root)
         structs = {s["name"]: [f["name"] for f in s["fields"]] for s in idl["structs"]}
         self.assertEqual(structs, {"S": ["x", "y"], "O": []})
+        # the definition states the bytes clang lays it in, its padding included; the
+        # opaque structure states no size
+        sizes = {s["name"]: s.get("sizeBytes") for s in idl["structs"]}
+        self.assertEqual(sizes, {"S": 16, "O": None})
 
 
 if __name__ == "__main__":
