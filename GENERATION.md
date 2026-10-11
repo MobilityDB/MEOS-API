@@ -45,7 +45,8 @@ different fidelity, and the choice matters:
 - the **installed** headers (`cmake --install` output) are self-contained — `meos.h` is the
   generated `meos_export.h`, with `postgres_ext_defs.in.h` spliced in place of the source
   tree's `#include <postgres.h>` — so libclang resolves every struct field to its real C type
-  and byte offset. FFI bindings need this.
+  and byte offset, and every defined struct to the bytes it is laid out in (`sizeBytes`). FFI
+  bindings need this.
 - the **source** tree headers (`<checkout>/meos/include`) parse without a build, but wrap the
   PostgreSQL types in stubs, so struct layouts are approximate.
 

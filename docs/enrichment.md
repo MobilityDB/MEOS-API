@@ -53,7 +53,12 @@ literals are in the catalog.
     "in": "set_from_hexwkb", "in_aux": [],
     "out": "set_as_hexwkb", "out_aux": [{"name": "variant", "kind": "integer", "default": 4}],
     "bytes": { "decoder": "set_from_wkb", "encoder": "set_as_wkb",
-               "encoderAux": [{"name": "variant", "kind": "integer", "default": 4}] }
+               "encoderAux": [{"name": "variant", "kind": "integer", "default": 4}] },
+    "image": { "copy": "set_copy", "size": "set_mem_size" }
+  },
+  "Span": {
+    "...": "...",
+    "image": { "copy": "span_copy", "sizeBytes": 24 }
   }
 }
 ```
@@ -98,6 +103,17 @@ literals are in the catalog.
 - **A type of its own** — a value whose slot carries a `typedef` (`H3Index`,
   `Quadbin`, `S2CellId`, each a `uint64_t`) is a class keyed by that name, read and
   written by its own functions.
+
+- **`image`** — the memory image of a value, which a binding holding values in
+  process carries instead of a wire form: `copy` is the public `T *f(const T *)` named
+  `*_copy` that duplicates a value from its image, and the image's length is either what
+  the public `int f(const T *)` named `*_mem_size` answers (`size`), or, for a type no
+  such function sizes, the bytes clang lays its structure in (`sizeBytes`, the
+  structure's own `structs[*].sizeBytes`). A class states exactly one of `size` and
+  `sizeBytes`. A structure ending in a flexible array member is variable-length, so a
+  class over one states no image without a `*_mem_size`; a class with no public copy
+  (`H3Index`, `TimestampTz`) states none either. Two copy or size functions for one
+  class stop the catalog.
 
 The class's `encodings`, `in` and `out` are folded onto each `structs[*]` entry as
 `serialization`.

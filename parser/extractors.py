@@ -259,11 +259,19 @@ def extract_function(node) -> dict:
 
 
 def extract_struct(node) -> dict:
+    """A structure, its fields at the offset clang lays each at and, when the unit
+    defines it, the bytes clang lays the whole record in (`sizeBytes`), the trailing
+    padding included: the image of a value whose type is the structure (a `Span`, an
+    `STBox`) is that many bytes. A structure only declared (`struct NumericData;`) has
+    no size and states none, as #extract_enum states a value's `doc` only where the
+    value carries one."""
+    size = node.type.get_size()
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
         "family": _family_of(node.location.file.name, node.location.line),
         "vendored": _is_vendored(node.location.file.name),
+        **({"sizeBytes": size} if size >= 0 else {}),
         "fields": [
             {
                 "name": f.spelling,

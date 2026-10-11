@@ -25,10 +25,15 @@ literals are attached:
   by name and refuses one the catalog does not fill.
 - A value whose slot carries a ``typedef`` (``H3Index``, ``Quadbin``, ``S2CellId``) is a
   class of its own, keyed by that name.
+- A class whose values MEOS copies states their memory image in ``image``: the copy
+  function and either the function answering an image's length (``size``) or, for a
+  fixed-size structure, the bytes it is laid out in (``sizeBytes``), so a binding holding
+  values in process reads both from the catalog (#_image).
 """
 import re
 
-from parser.enrich import _DECODERS, _ENCODERS, _STRING_PTR_BASES, _aux_specs, _base
+from parser.enrich import (_DECODERS, _ENCODERS, _INT_BASES, _STRING_PTR_BASES, _aux_specs,
+                           _base, _ptr_depth)
 
 _ORDER = ("text", "mfjson", "wkb")
 
@@ -181,6 +186,7 @@ def state_type_encodings(idl):
         return (cands[0] if len(cands) == 1 else None), {}
 
     every = {f["name"]: f for f in idl.get("functions", [])}
+    structs = {s["name"]: s for s in idl.get("structs", [])}
     for cls in sorted(set(encs) | {c for c in decoders if c in encs or _is_identity(c, fns)}):
         e = encs.setdefault(cls, {"encodings": [], "decoders": {}, "encoders": {}})
         prior_dec, prior_enc = dict(e.get("decoders") or {}), dict(e.get("encoders") or {})
@@ -230,6 +236,11 @@ def state_type_encodings(idl):
         if "bytes" in e:
             v = _variant(cls, fns, macros, errors)
             e["bytes"]["encoderAux"] = [{"name": "variant", "kind": "integer", "default": v}]
+        image = _image(cls, fns, structs, errors)
+        if image:
+            e["image"] = image
+        else:
+            e.pop("image", None)
 
     for struct in idl.get("structs", []):
         te = encs.get(struct["name"])
@@ -250,6 +261,45 @@ def _byte_codec(cls, fns):
            and len(f.get("params") or []) == 3]
     if len(dec) == 1 and len(enc) == 1:
         return {"decoder": dec[0], "encoder": enc[0]}
+    return None
+
+
+def _image(cls, fns, structs, errors):
+    """{copy, size} or {copy, sizeBytes}: the memory image of a value of ``cls``, which a
+    binding holding values in process carries instead of a wire form. ``copy`` is the
+    public ``T *f(const T *)`` named ``_copy`` that duplicates a value from its image;
+    the image's length is what the public ``int f(const T *)`` named ``_mem_size``
+    answers (``size``), or, for a type no such function sizes, the bytes clang lays its
+    structure in (``sizeBytes`` of #extract_struct of parser/extractors.py). A structure
+    ending in a flexible array member is variable-length, so its laid-out size is not
+    its image and the type states none without a ``_mem_size``. Found by shape and name
+    as #_byte_codec finds the byte codec."""
+    def one(names, what):
+        if len(names) > 1:
+            errors.append(f"{cls}: {what} by {', '.join(sorted(names))}")
+            return None
+        return names[0] if names else None
+
+    copy = one([f["name"] for f in fns if f["name"].endswith("_copy")
+                and len(f.get("params") or []) == 1
+                and _ptr_depth(f["returnType"].get("c") or "") == 1
+                and _cls(f["returnType"]) == cls
+                and _ptr_depth(f["params"][0].get("cType") or "") == 1
+                and _cls(f["params"][0]) == cls], "copied")
+    if not copy:
+        return None
+    size = one([f["name"] for f in fns if f["name"].endswith("_mem_size")
+                and len(f.get("params") or []) == 1
+                and _ptr_depth(f["returnType"].get("c") or "") == 0
+                and _base(f["returnType"].get("canonical") or "") in _INT_BASES
+                and _ptr_depth(f["params"][0].get("cType") or "") == 1
+                and _cls(f["params"][0]) == cls], "sized")
+    if size:
+        return {"copy": copy, "size": size}
+    struct = structs.get(cls) or {}
+    if "sizeBytes" in struct and not any(fld["cType"].endswith("[]")
+                                         for fld in struct.get("fields") or ()):
+        return {"copy": copy, "sizeBytes": struct["sizeBytes"]}
     return None
 
 

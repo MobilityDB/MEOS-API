@@ -177,6 +177,62 @@ class CodecTests(unittest.TestCase):
         self.assertEqual(errors, ["Set: intset read by intset_in and intsetx_in"])
 
 
+class ImageTests(unittest.TestCase):
+    """The memory image #_image of parser/codecs.py states for a class over the synthetic
+    catalog of #CodecTests, with the copy and size functions each case adds."""
+
+    SPAN = {"name": "Span", "sizeBytes": 24,
+            "fields": [{"name": "spantype", "cType": "uint8", "offset_bits": 0}]}
+    TEXT = {"name": "text", "sizeBytes": 4,
+            "fields": [{"name": "vl_len_", "cType": "char[4]", "offset_bits": 0},
+                       {"name": "vl_dat", "cType": "char[]", "offset_bits": 32}]}
+
+    def _image(self, extra, structs=(), classes=()):
+        idl = _idl(FUNCTIONS + extra)
+        idl["structs"] += [dict(s) for s in structs]
+        for cls in classes:
+            idl["typeEncodings"][cls] = {}
+        idl, errors = state_type_encodings(idl)
+        return idl["typeEncodings"], errors
+
+    def test_a_variable_length_value_states_its_copy_and_its_size_function(self):
+        te, errors = self._image([
+            fn("set_copy", "Set *", [(SET, "s")]),
+            fn("set_mem_size", "int", [(SET, "s")]),
+            fn("raster_copy", "Raster *", [(RAST, "rast")]),
+            fn("raster_mem_size", "int", [(RAST, "rast")])])
+        self.assertEqual(te["Set"]["image"], {"copy": "set_copy", "size": "set_mem_size"})
+        self.assertEqual(te["Raster"]["image"],
+                         {"copy": "raster_copy", "size": "raster_mem_size"})
+        self.assertEqual(errors, [])
+
+    def test_a_fixed_size_value_states_its_copy_and_its_structure_size(self):
+        te, errors = self._image([fn("span_copy", "Span *", [("const Span *", "s")])],
+                                 [self.SPAN], ["Span"])
+        self.assertEqual(te["Span"]["image"], {"copy": "span_copy", "sizeBytes": 24})
+        self.assertEqual(errors, [])
+
+    def test_a_flexible_array_structure_without_a_size_function_states_no_image(self):
+        te, _ = self._image([fn("text_copy", "text *", [("const text *", "txt")])],
+                            [self.TEXT], ["text"])
+        self.assertNotIn("image", te["text"])
+
+    def test_no_copy_no_image(self):
+        te, _ = self._image([fn("set_mem_size", "int", [(SET, "s")])])
+        self.assertNotIn("image", te["Set"])
+        self.assertNotIn("image", te["H3Index"])
+
+    def test_an_internal_copy_is_no_image(self):
+        te, _ = self._image([fn("set_copy", "Set *", [(SET, "s")], api="internal"),
+                             fn("set_mem_size", "int", [(SET, "s")])])
+        self.assertNotIn("image", te["Set"])
+
+    def test_two_copies_of_one_class_stop_the_catalog(self):
+        _, errors = self._image([fn("set_copy", "Set *", [(SET, "s")]),
+                                 fn("intset_copy", "Set *", [(SET, "s")])])
+        self.assertEqual(errors, ["Set: copied by intset_copy, set_copy"])
+
+
 class CodecContractTests(unittest.TestCase):
     """Over the generated catalog: every trailing input a codec states names a parameter
     of its function, carries the value a binding passes, and is never an out-parameter."""
@@ -221,6 +277,35 @@ class CodecContractTests(unittest.TestCase):
         self.assertEqual(te["GSERIALIZED"]["encoders"]["wkb"], "geo_as_hexewkb")
         for cell in ("H3Index", "Quadbin", "S2CellId"):
             self.assertIn(cell, te)
+
+    def test_the_images_a_binding_reads(self):
+        """The image of #ImageTests over the generated catalog: a value sized by a
+        function, and one whose image is its structure, at the size the structure
+        states."""
+        te = self.idl["typeEncodings"]
+        sizes = {s["name"]: s.get("sizeBytes") for s in self.idl["structs"]}
+        self.assertEqual(te["Temporal"]["image"],
+                         {"copy": "temporal_copy", "size": "temporal_mem_size"})
+        self.assertEqual(te["Raster"]["image"],
+                         {"copy": "raster_copy", "size": "raster_mem_size"})
+        for cls, copy in (("Span", "span_copy"), ("STBox", "stbox_copy"),
+                          ("Npoint", "npoint_copy"), ("Nsegment", "nsegment_copy")):
+            self.assertEqual(te[cls]["image"], {"copy": copy, "sizeBytes": sizes[cls]})
+
+    def test_every_image_names_public_functions_of_its_class(self):
+        bad = []
+        for cls, e in self.idl["typeEncodings"].items():
+            image = e.get("image")
+            if not image:
+                continue
+            for key in ("copy", "size"):
+                f = self.fns.get(image.get(key)) if key in image else None
+                if key in image and (f is None or f.get("api") != "public"
+                                     or len(f["params"]) != 1):
+                    bad.append((cls, key, image[key]))
+            if ("size" in image) == ("sizeBytes" in image):
+                bad.append((cls, "size xor sizeBytes", image))
+        self.assertEqual(bad, [])
 
 
 if __name__ == "__main__":
