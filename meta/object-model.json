@@ -381,7 +381,8 @@
       "posechain",
       "pcpoint",
       "pcpatch",
-      "raquet"
+      "raquet",
+      "raster"
     ]
   },
   "companions": {
@@ -706,6 +707,16 @@
           "temptype": "T_RAQUET",
           "conditional": "RASTER",
           "doc": "A raster tile. A MeosType no membership predicate admits, as Nsegment is."
+        },
+        "Raster": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "raster"
+          ],
+          "temptype": null,
+          "conditional": "RASTER",
+          "doc": "A georeferenced raster of one or more bands, the value every raster accessor, clip, warp and polygonization takes. MEOS registers it in no enum, so it names no temptype."
         },
         "Pcschema": {
           "kind": "leaf",
