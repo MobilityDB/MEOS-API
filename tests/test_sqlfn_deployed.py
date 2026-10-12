@@ -86,9 +86,17 @@ class DeployedNameCatalogTests(unittest.TestCase):
 
     def test_per_type_functions_carry_their_own_name(self):
         for name, sqlfn in (("floatset_in", "floatset_in"), ("tfloat_in", "tfloat_in"),
-                            ("tfloatinst_make", "tfloat"), ("tfloat_values", "valueSet"),
+                            ("tfloatinst_make", "tfloat"), ("tfloat_value_bins", "valueBins"),
                             ("contains_cbuffer_cbuffer", "cbufferContains")):
             self.assertEqual(self.fns[name]["sqlfn"], sqlfn, name)
+
+    def test_an_array_accessor_backs_no_set_valued_function(self):
+        """getValues and valueSet return a set, which temporal_valueset answers; the typed
+        accessors returning an array of the values and its count back neither. The negative
+        twin of #test_per_type_functions_carry_their_own_name."""
+        self.assertEqual(self.fns["temporal_valueset"]["sqlfn"], "getValues")
+        for name in ("tint_values", "tfloat_values", "ttext_values"):
+            self.assertNotIn("sqlfn", self.fns[name], name)
 
     def test_an_operator_function_carries_its_class_prefixed_name(self):
         f = self.fns["adjacent_tbox_tnumber"]
