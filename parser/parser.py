@@ -98,6 +98,24 @@ def merge_meta(idl: dict, meta_path: Path) -> dict:
     return idl
 
 
+#: The directories of MobilityDB's header tree holding a stand-in for the header of a
+#: library a build may lack. MobilityDB's build reads `geos-none/geos_c.h` only where GEOS
+#: is absent, and installs it then in place of GEOS's own `geos_c.h`
+#: (`meos/CMakeLists.txt`, under `if(NOT GEOS)`), so no installed header tree holds both.
+#: What a stand-in declares is that library's API rather than MEOS's, and read beside the
+#: library's own header, which `meos_internal_geo.h` includes, every type it declares is a
+#: redefinition clang drops: its enums would enter the catalog nameless and valueless.
+STAND_IN_DIRS = frozenset({"geos-none"})
+
+
+def meos_headers(headers_dir: Path) -> list[Path]:
+    """The headers of the tree the parse reads, in order: those an install of MEOS ships,
+    the tree's own less its stand-ins (#STAND_IN_DIRS) for a library's header. It is the one
+    list #build_entry_point includes and #parse_meos owns, so the two read the same tree."""
+    return sorted(h for h in headers_dir.glob("**/*.h")
+                  if not STAND_IN_DIRS & set(h.relative_to(headers_dir).parts[:-1]))
+
+
 def parse_meos(entry: Path, include_dir: Path,
                extra_headers: tuple[Path, ...] = ()) -> dict:
     index = clang.cindex.Index.create()
@@ -129,7 +147,7 @@ def parse_meos(entry: Path, include_dir: Path,
         options=clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
 
     # Collect all .h files belonging to the project
-    own_files = {str(p.resolve()) for p in include_dir.glob("**/*.h")}
+    own_files = {str(p.resolve()) for p in meos_headers(include_dir)}
     own_files.update(str(h.resolve()) for h in extra_headers)
 
     # First pass: build a mapping "anonymous struct location -> typedef name", and
@@ -226,7 +244,7 @@ def parse_meos(entry: Path, include_dir: Path,
 def build_entry_point(headers_dir: Path,
                       extra_headers: tuple[Path, ...] = ()) -> str:
     lines = []
-    for h in sorted(headers_dir.glob("**/*.h")):
+    for h in meos_headers(headers_dir):
         lines.append(f'#include "{h.resolve()}"')
     for h in extra_headers:
         lines.append(f'#include "{h.resolve()}"')
