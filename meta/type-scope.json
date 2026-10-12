@@ -26,6 +26,10 @@
       "types": "*",
       "note": "Generic over Temporal *: accessor on any temporal type."
     },
+    "temporal_valueset": {
+      "types": "*",
+      "note": "Generic over Temporal *: the value set of every temporal type whose values have a set type, every overload of Temporal_valueset. The T_TBOOL literal in its body is the type it refuses, a temporal Boolean having no set, so the scope cannot be read from the body."
+    },
     "temporal_instants": {
       "types": "*",
       "note": "Generic over Temporal *: the distinct instants of any temporal type, the call behind instants."
