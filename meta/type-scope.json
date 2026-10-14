@@ -6,6 +6,18 @@
       "types": "*",
       "note": "Generic over Temporal *: appends to any temporal type."
     },
+    "temporal_append_tsequence": {
+      "types": "*",
+      "note": "Generic over Temporal *: appends to any temporal type. Its bool expand parameter is no scope."
+    },
+    "temporal_merge": {
+      "types": "*",
+      "note": "Generic over Temporal *: merges any two temporal values of one type. Its trgeometry branch is no scope."
+    },
+    "temporal_merge_array": {
+      "types": "*",
+      "note": "Generic over Temporal *: merges an array of temporal values of one type. Its trgeometry branch is no scope."
+    },
     "temporal_at_values": {
       "types": "*",
       "note": "Generic over Temporal *: restricts any temporal type to a value set."
