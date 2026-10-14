@@ -180,6 +180,16 @@ class DeclaredScopeContractTests(unittest.TestCase):
             self.assertTrue({'tint', 'tfloat', 'ttext', 'tgeompoint', 'tgeogpoint'} <= first,
                             f'{name} serves {sorted(first)}')
 
+    def test_append_and_merge_serve_every_temporal_type(self):
+        # as #test_the_array_accessors_serve_every_temporal_type: the bool expand parameter of
+        # temporal_append_tsequence and the trgeometry branch of temporal_merge read as scopes,
+        # keeping tbool and trgeometry alone
+        for name in ('temporal_append_tsequence', 'temporal_merge', 'temporal_merge_array'):
+            first = {s['args'][0].rstrip('[]')
+                     for s in self.fns[name].get('sqlSignatures') or ()}
+            self.assertTrue({'tbool', 'tint', 'tfloat', 'ttext', 'tgeompoint', 'tgeogpoint',
+                             'trgeometry'} <= first, f'{name} serves {sorted(first)}')
+
 
 if __name__ == '__main__':
     unittest.main()
