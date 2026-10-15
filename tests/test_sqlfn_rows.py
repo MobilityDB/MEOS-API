@@ -139,6 +139,9 @@ CATALOG = {
                                      {"name": "j", "cType": "int"}]},
         {"name": "TBox", "fields": [{"name": "period", "cType": "Span"},
                                     {"name": "span", "cType": "Span"}]},
+        {"name": "ValueCount", "fields": [{"name": "value", "cType": "double"},
+                                          {"name": "count", "cType": "uint32_t"},
+                                          {"name": "percent", "cType": "double"}]},
     ],
 }
 
@@ -215,6 +218,18 @@ def _pairs(with_periods):
 
 
 PAIRS_OFFSET = {"i": {"offset": 1}, "j": {"offset": 1}}
+
+
+def _value_count(sqlfn, column):
+    """A row of `sqlfn` reading the value of a `ValueCount` and one more field, built
+    as #_pairs builds the rows of a pair."""
+    return {"name": "raster_value_count", "sqlfn": sqlfn,
+            "params": [{"name": "rast", "cType": "const Raster *"}, _count()],
+            "returnType": {"c": "ValueCount *"},
+            "shape": {"arrayReturn": {"element": {"c": "ValueCount"}},
+                      "outParams": ["count"]},
+            "sqlSignatures": [{"args": ["raster"], "ret": "record", "retSet": True,
+                               "columns": _cols(("value", "float"), column)}]}
 
 
 class RowSourceTests(unittest.TestCase):
@@ -350,6 +365,29 @@ class UnfedRowTests(unittest.TestCase):
                                              "value": {"from": "values"}}})
         self.assertEqual(cols, [{"name": "key", "type": "text", "from": "return"},
                                 {"name": "value", "type": "text", "from": "values"}])
+
+    def test_a_struct_field_no_column_reads_stops_the_catalog(self):
+        """As #test_a_c_value_feeding_no_column_stops_the_catalog, for a field."""
+        with self.assertRaises(ValueError):
+            _attach(_value_count("valueCount", ("count", "integer")))
+
+    def test_a_row_naming_fields_reads_those_only(self):
+        """The rows of valueCount and valuePercent read two of the three fields of
+        a `ValueCount`, the second field the one each names."""
+        for sqlfn, column in (("valueCount", ("count", "integer")),
+                              ("valuePercent", ("percent", "float"))):
+            name = column[0]
+            cols, _ = _attach(_value_count(sqlfn, column),
+                              {sqlfn: {"value": {"field": "value"},
+                                       name: {"field": name}}})
+            self.assertEqual([(c["name"], c["from"], c["field"]) for c in cols],
+                             [("value", "return", "value"), (name, "return", name)])
+
+    def test_a_stated_field_naming_no_field_stops_the_catalog(self):
+        with self.assertRaises(ValueError):
+            _attach(_value_count("valueCount", ("count", "integer")),
+                    {"valueCount": {"value": {"field": "value"},
+                                    "count": {"field": "total"}}})
 
 
 class DeclaredColumnsTests(unittest.TestCase):

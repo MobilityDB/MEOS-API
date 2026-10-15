@@ -36,6 +36,11 @@
                   "type": "string",
                   "pattern": "^(ordinal|return|[a-z_][a-z0-9_]*)$"
                 },
+                "field": {
+                  "description": "The field of the struct an array return holds feeding the column. A row naming fields reads those only.",
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]*$"
+                },
                 "offset": {
                   "description": "A constant the wrapper adds to the C value feeding the column.",
                   "type": "integer"
