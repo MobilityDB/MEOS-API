@@ -621,21 +621,29 @@ def _column_sources(func, sig, sqlc, declared, struct):
     where two C values of the column's type fit it (`"from": "return"` or the name
     of an out-parameter, the key and the value of `jsonbEachText`); the column
     takes that value, and a statement naming no C value of the function stops the
-    catalog as a column nothing feeds does."""
+    catalog as a column nothing feeds does. A statement naming the `field` of a
+    returned struct feeds its column from that field, and a row naming fields reads
+    those only: the rows of `valueCount` read the `value` and `count` of a
+    `ValueCount`, the rows of `valuePercent` its `value` and `percent`."""
     stated = declared.get(sig["ret"]) or declared.get(sig.get("sqlName") or func.get("sqlfn")) or {}
     cols = sig["columns"]
     fed = [c for c in cols if stated.get(c["name"], {}).get("from") != "ordinal"]
     classes = {c for cs in sqlc.values() for c in cs}
     slots = _row_slots(func, sig.get("retSet", False), len(fed), struct, classes)
+    fields = {s["field"] for s in stated.values() if "field" in s}
+    if fields:
+        slots = [x for x in slots if x[0].get("field") in fields | {None}]
     used, out = set(), {}
     # A column stated with the C value feeding it takes that value: two C values of
     # one type leave the source of their columns to the statement, never to order.
     for c in fed:
         src = stated.get(c["name"], {}).get("from")
-        if src is None:
+        field = stated.get(c["name"], {}).get("field")
+        if src is None and field is None:
             continue
         named = [k for k, (slot, _, _) in enumerate(slots)
-                 if slot["from"] == src and k not in used]
+                 if src in (None, slot["from"]) and field in (None, slot.get("field"))
+                 and k not in used]
         if len(named) != 1:
             return None
         used.add(named[0])

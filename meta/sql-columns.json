@@ -61,6 +61,14 @@
     "jsonbEachText": {
       "note": "The key and the value are both text: the key is the array jsonb_each_text returns, the value its out-parameter values.",
       "columns": {"key": {"from": "return"}, "value": {"from": "values"}}
+    },
+    "valueCount": {
+      "note": "A ValueCount holds the count and the percent of a value; the rows of valueCount read its value and its count, as PostGIS's ST_ValueCount does.",
+      "columns": {"value": {"field": "value"}, "count": {"field": "count"}}
+    },
+    "valuePercent": {
+      "note": "A ValueCount holds the count and the percent of a value; the rows of valuePercent read its value and its percent, as PostGIS's ST_ValuePercent does.",
+      "columns": {"value": {"field": "value"}, "percent": {"field": "percent"}}
     }
   }
 }
