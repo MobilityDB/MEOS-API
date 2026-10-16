@@ -21,7 +21,7 @@ from parser.boundargs import (attach_call_literals, attach_null_default_binds,
                               merge_sql_arg_params,
                               resolve_bound_names, strip_call_literals)
 from parser.aggregates import attach_aggregates
-from parser.altsqlfn import attach_alt_sql_names
+from parser.altsqlfn import attach_aggregate_alt_sql_names, attach_alt_sql_names
 from parser.compositions import attach_compositions, attach_wrapper_compositions
 from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
@@ -446,6 +446,16 @@ def main():
     if SQL_SRC.exists():
         idl, nagg_sql = attach_aggregates(idl, SQL_SRC)
         print(f"      SQL aggregates: {nagg_sql}", file=sys.stderr)
+        # The name DuckDB, Spark and Flink call an aggregate by where a function holds its
+        # PostgreSQL name, stated by @altsqlfn on its transition wrapper; a wrapper whose
+        # @altsqlfn does not pair with its @sqlaggfn stops the catalog.
+        if MDB_SRC.exists():
+            idl, nagg_alt, agg_alt_errors = attach_aggregate_alt_sql_names(idl, MDB_SRC)
+            if agg_alt_errors:
+                raise ValueError("SQL aggregates whose @altsqlfn does not resolve to one name:\n  "
+                                 + "\n  ".join(agg_alt_errors))
+            print(f"      SQL aggregates stating their alternative name: {nagg_alt}",
+                  file=sys.stderr)
 
     # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
     # a consumer proves it is current by comparing sourceCommit to live upstream master, never by

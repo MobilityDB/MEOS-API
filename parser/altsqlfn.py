@@ -31,6 +31,18 @@ name a signature takes follows from three cases:
 Every signature resolves to exactly one name or the catalog stops: an alternative name that
 no signature's base type selects, or that several select, would hand a binding a wrong or
 ambiguous name.
+
+An aggregate whose name a function also holds is named the same way. DuckDB, Spark and Flink
+hold one function per name, so they call ``tAnd`` the aggregate ``tAndAgg``; the transition
+wrapper of the aggregate states it beside its ``@sqlaggfn``, a transition serving one aggregate:
+
+    @sqlfn tAndTransition()
+    @sqlaggfn tAnd()
+    @altsqlfn tAndAgg()
+
+There ``@altsqlfn`` pairs with the ``@sqlaggfn`` names by position and names the aggregate,
+never the transition, and the catalog states it on every entry of its ``aggregates`` section
+(#attach_aggregate_alt_sql_names).
 """
 from __future__ import annotations
 
@@ -60,14 +72,51 @@ def _tag_names(block: str, tag: str) -> list[str]:
 
 
 def wrapper_names(mdb_src: str | Path) -> dict[str, tuple[list[str], list[str]]]:
-    """``{wrapper: (@sqlfn names, @altsqlfn names)}`` for every wrapper stating ``@altsqlfn``."""
+    """``{wrapper: (@sqlfn names, @altsqlfn names)}`` for every wrapper stating ``@altsqlfn``
+    and no ``@sqlaggfn``: on a wrapper stating ``@sqlaggfn`` the tag names the aggregate
+    (#aggregate_alt_names)."""
     out = {}
     for cf in sorted(Path(mdb_src).rglob("*.c")):
         for m in _WRAPPER_BLOCK.finditer(cf.read_text(errors="ignore")):
             alts = _tag_names(m.group(1), "altsqlfn")
-            if alts:
+            if alts and not _tag_names(m.group(1), "sqlaggfn"):
                 out[m.group(2)] = (_tag_names(m.group(1), "sqlfn"), alts)
     return out
+
+
+def aggregate_alt_names(mdb_src: str | Path) -> tuple[dict[str, str], list[str]]:
+    """(``{aggregate: alternative name}``, errors): the ``@altsqlfn`` of every wrapper stating
+    ``@sqlaggfn``, paired with its ``@sqlaggfn`` names by position, as #attach_alt_sql_names
+    pairs several ``@sqlfn`` names. A wrapper whose two lists differ in length, or an aggregate
+    two wrappers name differently, is an error."""
+    out, errors = {}, []
+    for cf in sorted(Path(mdb_src).rglob("*.c")):
+        for m in _WRAPPER_BLOCK.finditer(cf.read_text(errors="ignore")):
+            alts = _tag_names(m.group(1), "altsqlfn")
+            aggs = _tag_names(m.group(1), "sqlaggfn")
+            if not (alts and aggs):
+                continue
+            if len(alts) != len(aggs):
+                errors.append(f"{m.group(2)}: @sqlaggfn {aggs} does not pair with @altsqlfn {alts}")
+                continue
+            for agg, alt in zip(aggs, alts):
+                if out.setdefault(agg, alt) != alt:
+                    errors.append(f"{m.group(2)}: aggregate {agg} named {alt} and {out[agg]}")
+    return out, errors
+
+
+def attach_aggregate_alt_sql_names(idl: dict, mdb_src: str | Path) -> tuple[dict, int, list[str]]:
+    """(idl, entries stated, errors): set ``altSqlName`` on every entry of the ``aggregates``
+    section (#attach_aggregates of parser/aggregates.py) whose aggregate a wrapper's
+    ``@altsqlfn`` names (#aggregate_alt_names)."""
+    names, errors = aggregate_alt_names(mdb_src)
+    n = 0
+    for a in idl.get("aggregates") or ():
+        alt = names.get(a["sqlName"])
+        if alt:
+            a["altSqlName"] = alt
+            n += 1
+    return idl, n, errors
 
 
 def _meos_name(sqltype: str) -> str:
