@@ -14,7 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from parser.altsqlfn import _tag_names, attach_alt_sql_names, wrapper_names
+from parser.altsqlfn import (_tag_names, aggregate_alt_names, attach_aggregate_alt_sql_names,
+                             attach_alt_sql_names, wrapper_names)
 from parser.typescope import TypeFacts
 
 IDL = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
@@ -61,6 +62,17 @@ Set_hash(PG_FUNCTION_ARGS)
 }
 
 /**
+ * @brief Transition function for temporal and aggregation of temporal booleans
+ * @sqlfn tAndTransition()
+ * @sqlaggfn tAnd()
+ * @altsqlfn tAndAgg()
+ */
+Datum
+Tbool_tand_transfn(PG_FUNCTION_ARGS)
+{
+}
+
+/**
  * @brief Return the start value
  * @sqlfn startValue()
  */
@@ -82,6 +94,7 @@ CREATE FUNCTION abs(tint) RETURNS tint AS 'MODULE_PATHNAME', 'Tnumber_abs' LANGU
 CREATE FUNCTION abs(tfloat) RETURNS tfloat AS 'MODULE_PATHNAME', 'Tnumber_abs' LANGUAGE C;
 CREATE FUNCTION hash(intset) RETURNS integer AS 'MODULE_PATHNAME', 'Set_hash' LANGUAGE C;
 CREATE FUNCTION hash(floatset) RETURNS integer AS 'MODULE_PATHNAME', 'Set_hash' LANGUAGE C;
+CREATE FUNCTION tAndTransition(internal, tbool) RETURNS internal AS 'MODULE_PATHNAME', 'Tbool_tand_transfn' LANGUAGE C;
 """
 
 MEOS = """
@@ -106,6 +119,14 @@ tgeo_rotate_z(const Temporal *temp, double angle)
  */
 Temporal *
 tnumber_abs(const Temporal *temp)
+{
+}
+
+/**
+ * @csqlfn #Tbool_tand_transfn()
+ */
+SkipList *
+tbool_tand_transfn(SkipList *state, const Temporal *temp)
 {
 }
 
@@ -159,6 +180,8 @@ def catalog():
                 sig(["tint"], "tint"), sig(["tfloat"], "tfloat")]},
             {"name": "set_hash", "sqlfn": "hash", "sqlSignatures": [
                 sig(["intset"], "integer"), sig(["floatset"], "integer")]},
+            {"name": "tbool_tand_transfn", "sqlfn": "tAndTransition", "sqlSignatures": [
+                sig(["internal", "tbool"], "internal")]},
             {"name": "temporal_start_value", "sqlfn": "startValue", "sqlSignatures": [
                 sig(["tint"], "integer"), sig(["tfloat"], "float"),
                 sig(["tgeompoint"], "geometry(Point)"), sig(["tpose"], "pose"),
@@ -221,6 +244,61 @@ class AltSqlNameTests(unittest.TestCase):
 
     def test_a_wrapper_with_no_alternative_name_states_none(self):
         self.assertFalse(any("altSqlName" in s for s in self.fns["temporal_start_value"]))
+
+    def test_the_tag_beside_sqlaggfn_names_the_aggregate_never_the_transition(self):
+        self.assertNotIn("Tbool_tand_transfn", wrapper_names(Path(self.tmp.name) / "mdb"))
+        self.assertFalse(any("altSqlName" in s for s in self.fns["tbool_tand_transfn"]))
+        idl = {"aggregates": [{"sqlName": "tAnd", "args": ["tbool"]},
+                              {"sqlName": "tCount", "args": ["tbool"]}]}
+        idl, n, errors = attach_aggregate_alt_sql_names(idl, Path(self.tmp.name) / "mdb")
+        self.assertEqual((n, errors), (1, []))
+        self.assertEqual(idl["aggregates"][0]["altSqlName"], "tAndAgg")
+        self.assertNotIn("altSqlName", idl["aggregates"][1])
+
+
+class AggregateAltNameTests(unittest.TestCase):
+    """A wrapper whose @altsqlfn does not pair with its @sqlaggfn, or an aggregate two wrappers
+    name differently, is an error."""
+
+    def test_unpaired_and_conflicting_names_are_errors(self):
+        text = """
+/**
+ * @sqlfn spanUnionFinal()
+ * @sqlaggfn spanUnion(), spansetUnion()
+ * @altsqlfn spanUnionAgg()
+ */
+Datum
+Span_union_finalfn(PG_FUNCTION_ARGS)
+{
+}
+
+/**
+ * @sqlfn tMinTransition()
+ * @sqlaggfn tMin()
+ * @altsqlfn tMinAgg()
+ */
+Datum
+Tint_tmin_transfn(PG_FUNCTION_ARGS)
+{
+}
+
+/**
+ * @sqlfn tMinTransition()
+ * @sqlaggfn tMin()
+ * @altsqlfn tMinimumAgg()
+ */
+Datum
+Tfloat_tmin_transfn(PG_FUNCTION_ARGS)
+{
+}
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "w.c").write_text(text)
+            names, errors = aggregate_alt_names(tmp)
+        self.assertEqual(names, {"tMin": "tMinAgg"})
+        self.assertEqual(len(errors), 2)
+        self.assertIn("Span_union_finalfn", errors[0])
+        self.assertIn("Tfloat_tmin_transfn", errors[1])
 
 
 class AltSqlNameContractTests(unittest.TestCase):
