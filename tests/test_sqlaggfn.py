@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.sqlfn import _mdb_to_agg, attach_sqlaggfn_map, attach_sqlfn_map
+from parser.sqlfn import _mdb_to_agg, _mdb_to_sql, attach_sqlaggfn_map, attach_sqlfn_map
 
 MEOS_C = """
 /**
@@ -100,6 +100,53 @@ class SqlAggfnTests(unittest.TestCase):
         f = idl["functions"][0]
         self.assertEqual(f["sqlfn"], "tcount_transfn")
         self.assertEqual(f["sqlAgg"], ["tCount"])
+
+    def test_a_member_shared_by_several_aggregates_names_each(self):
+        """A final serving several aggregates lists them on one tag line, and
+        every name reaches the catalog, not the first alone. The shape of
+        #test_wrapper_map_reads_only_tagged_wrappers over a listing tag."""
+        src = """
+/**
+ * @ingroup mobilitydb_temporal_agg
+ * @brief Generic final function for temporal aggregation
+ * @sqlfn mergeFinal(), tCountFinal(), tMinFinal()
+ * @sqlaggfn merge(), tCount(), tMin()
+ */
+Datum
+Temporal_tagg_finalfn(PG_FUNCTION_ARGS)
+{
+}
+"""
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "y.c").write_text(src)
+            d2a = _mdb_to_agg(d)
+            d2s = _mdb_to_sql(d)
+        self.assertEqual(d2a.get("Temporal_tagg_finalfn"), ["merge", "tCount", "tMin"])
+        self.assertEqual([s for s, _ in d2s.get("Temporal_tagg_finalfn")],
+                         ["mergeFinal", "tCountFinal", "tMinFinal"])
+
+    def test_listed_names_take_their_operators_in_order(self):
+        """`@sqlop @p ->, @p ->>` beside `@sqlfn a(), b()`: the i-th name takes the
+        i-th operator. The wrapper-side twin of
+        #test_multi_op_tag_keeps_the_operator_without_its_comma of
+        test_sqlfn_direct.py, over the same tjsonb block."""
+        src = """
+/**
+ * @ingroup mobilitydb_json_json
+ * @brief Extract a field from a temporal JSONB value
+ * @sqlfn tjsonbObjectField(), tjsonbObjectFieldText()
+ * @sqlop @p ->, @p ->>
+ */
+Datum
+Tjsonb_object_field(PG_FUNCTION_ARGS)
+{
+}
+"""
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "j.c").write_text(src)
+            d2s = _mdb_to_sql(d)
+        self.assertEqual(d2s.get("Tjsonb_object_field"),
+                         [("tjsonbObjectField", "->"), ("tjsonbObjectFieldText", "->>")])
 
 
 if __name__ == "__main__":

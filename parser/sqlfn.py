@@ -66,6 +66,19 @@ _SQLAGGFN = re.compile(r"@sqlaggfn\s+(\w+)\s*\(\)")
 # contains a comma. `(\S+)` ran past it and published the comma as part of the operator.
 _SQLOP = re.compile(r"@sqlop\s+@p\s+([^\s,]+)")
 _DATUM = re.compile(r"Datum\s+(\w+)\s*\(\s*PG_FUNCTION_ARGS")
+# Every value of a tag that lists several, on the tag's own line: the names of
+# `@sqlfn a(), b()` and `@sqlaggfn a(), b()`, and the operators of `@sqlop @p ->, @p ->>`.
+# `_SQLFN`, `_SQLAGGFN` and `_SQLOP` find the tag, and its first value, as before.
+_TAG_NAME = re.compile(r"(\w+)\s*\(\)")
+_TAG_OP = re.compile(r"@p\s+([^\s,]+)")
+
+
+def _tag_list(text, start, value):
+    """The values `value` matches on the line of the tag starting at `start`."""
+    end = text.find("\n", start)
+    line = text[start:end if end != -1 else len(text)]
+    return value.findall(line[line.index(" "):]) if " " in line else []
+
 # `CREATE [OR REPLACE] FUNCTION name(` — the SQL-facing signature; the wrapper it
 # binds is in the trailing `AS 'MODULE_PATHNAME', '<Wrapper>'`.
 _CREATE_FN = re.compile(r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(\w+)\s*\(", re.I)
@@ -416,17 +429,21 @@ def _mdb_to_sql(mdb_src):
     for cf in Path(mdb_src).rglob("*.c"):
         text = cf.read_text(errors="ignore")
         for m in _SQLFN.finditer(text):
-            sqlfn = m.group(1)
             # @sqlop lives in the SAME doxygen block (before the closing */).
             close = text.find("*/", m.end())
             block = text[m.start():close] if close != -1 else text[m.start():m.start() + 800]
             op = _SQLOP.search(block)
+            # A block naming several SQL functions lists their operators in the same
+            # order, `@sqlop @p ->, @p ->>` beside `@sqlfn a(), b()`: the i-th name
+            # takes the i-th operator.
+            ops = _tag_list(block, op.start(), _TAG_OP) if op else []
             dm = _DATUM.search(text, close if close != -1 else m.end())
             if dm:
-                entry = (sqlfn, op.group(1) if op else None)
                 lst = out.setdefault(dm.group(1), [])
-                if entry not in lst:
-                    lst.append(entry)
+                for i, sqlfn in enumerate(_tag_list(text, m.start(), _TAG_NAME)):
+                    entry = (sqlfn, ops[i] if i < len(ops) else None)
+                    if entry not in lst:
+                        lst.append(entry)
     return out
 
 
@@ -445,8 +462,9 @@ def _mdb_to_agg(mdb_src):
             dm = _DATUM.search(text, close if close != -1 else m.end())
             if dm:
                 lst = out.setdefault(dm.group(1), [])
-                if m.group(1) not in lst:
-                    lst.append(m.group(1))
+                for name in _tag_list(text, m.start(), _TAG_NAME):
+                    if name not in lst:
+                        lst.append(name)
     return out
 
 
