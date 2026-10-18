@@ -300,6 +300,36 @@ Tfloat_tmin_transfn(PG_FUNCTION_ARGS)
         self.assertIn("Span_union_finalfn", errors[0])
         self.assertIn("Tfloat_tmin_transfn", errors[1])
 
+    def test_a_wrapper_declared_inline_states_its_names(self):
+        # The wrappers of #WRAPPERS, declared `inline` and `static inline` as MobilityDB
+        # declares many of its wrappers
+        text = """
+/**
+ * @sqlfn wAvgTransition()
+ * @sqlaggfn wAvg()
+ * @altsqlfn wAvgAgg()
+ */
+inline Datum
+Tnumber_wavg_transfn(PG_FUNCTION_ARGS)
+{
+}
+
+/**
+ * @sqlfn abs()
+ * @altsqlfn intAbs(), floatAbs()
+ */
+static inline Datum
+Tnumber_abs(PG_FUNCTION_ARGS)
+{
+}
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "w.c").write_text(text)
+            names, errors = aggregate_alt_names(tmp)
+            wrappers = wrapper_names(tmp)
+        self.assertEqual((names, errors), ({"wAvg": "wAvgAgg"}, []))
+        self.assertEqual(wrappers, {"Tnumber_abs": (["abs"], ["intAbs", "floatAbs"])})
+
 
 class AltSqlNameContractTests(unittest.TestCase):
     """Over the generated catalog."""
