@@ -52,9 +52,10 @@ from pathlib import Path
 from parser.sqlfn import _CSQLFN_END, _meos_to_mdb, _wrapper_sql_sigs
 from parser.typescope import SQL_ALIASES, TypeFacts
 
-# A doxygen block closing right before the wrapper's `Datum Name(PG_FUNCTION_ARGS)`.
-_WRAPPER_BLOCK = re.compile(r"/\*\*((?:(?!\*/).)*)\*/\s*Datum\s+(\w+)\s*\(\s*PG_FUNCTION_ARGS",
-                            re.S)
+# A doxygen block closing right before the wrapper's `Datum Name(PG_FUNCTION_ARGS)`, which the
+# wrapper may declare `inline` or `static`, as #_DATUM of parser/sqlfn.py reads it.
+_WRAPPER_BLOCK = re.compile(r"/\*\*((?:(?!\*/).)*)\*/\s*(?:(?:static|inline)\s+)*Datum\s+(\w+)"
+                            r"\s*\(\s*PG_FUNCTION_ARGS", re.S)
 _NAME = re.compile(r"(\w+)\s*\(\)")
 # The MEOS spelling of a type PostgreSQL spells otherwise (`integer` is `int4`).
 _MEOS_SPELLING = {sql: meos for meos, sql in SQL_ALIASES.items()}
