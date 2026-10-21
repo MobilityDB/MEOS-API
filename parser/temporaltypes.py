@@ -172,11 +172,14 @@ def attach_temporal_types(idl: dict, src_root: Path | None) -> dict:
     if catalog_path is None or type_out_path is None:
         return idl
 
-    catalog = strip_comments(catalog_path.read_text(errors="ignore"))
+    raw_catalog = catalog_path.read_text(errors="ignore")
+    catalog = strip_comments(raw_catalog)
     type_out = strip_comments(type_out_path.read_text(errors="ignore"))
 
     names = type_names(catalog)
-    rows = dict(catalog_rows(catalog, "MEOS_RELTYPE_CATALOG"))
+    # read as #attach_type_relations reads them: a release line's pair table names its
+    # relation in its header comment
+    rows = dict(catalog_rows(re.sub(r"//.*", "", raw_catalog), "MEOS_RELTYPE_CATALOG"))
     universe = predicate_types(catalog, UNIVERSE)
     classes = {role: predicate_types(catalog, fn) for role, fn in CLASSES.items()}
     tokens = mfjson_tokens(type_out)

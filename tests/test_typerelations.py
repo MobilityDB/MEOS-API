@@ -50,6 +50,36 @@ static const reltype_catalog_struct MEOS_RELTYPE_CATALOG[] =
 };
 """
 
+# _FIXTURE as a release line older than MEOS_RELTYPE_CATALOG states it (stable-1.3): a table
+# of {outer, inner} pairs per relation, headed by the relation's two names. The temporal
+# table lists tgeometry before tgeompoint, against MeosType order.
+_PAIR_FIXTURE = _FIXTURE[:_FIXTURE.index("static const reltype_catalog_struct")] + """
+static const settype_catalog_struct MEOS_SETTYPE_CATALOG[] =
+{
+  /* settype        basetype */
+  {T_TEXTSET,       T_TEXT},
+  {T_FLOATSET,      T_FLOAT8},
+};
+static const spantype_catalog_struct MEOS_SPANTYPE_CATALOG[] =
+{
+  /* spantype       basetype */
+  {T_FLOATSPAN,     T_FLOAT8},
+};
+static const spansettype_catalog_struct MEOS_SPANSETTYPE_CATALOG[] =
+{
+  /* spansettype    spantype */
+  {T_FLOATSPANSET,  T_FLOATSPAN},
+};
+static const temptype_catalog_struct MEOS_TEMPTYPE_CATALOG[] =
+{
+  /* temptype    basetype */
+  {T_TTEXT,      T_TEXT},
+  {T_TGEOMETRY,  T_GEOMETRY},
+  {T_TGEOMPOINT, T_GEOMETRY},
+  {T_TFLOAT,     T_FLOAT8},
+};
+"""
+
 
 class TypeRelationsParseTest(unittest.TestCase):
 
@@ -79,6 +109,14 @@ class TypeRelationsParseTest(unittest.TestCase):
         # surface missing a type MEOS has.
         by_base = self._attach(_FIXTURE)
         self.assertEqual(by_base["geometry"]["temporal"], ["tgeompoint", "tgeometry"])
+
+    def test_pair_tables_resolve_as_the_relation_array_does(self):
+        # #test_full_numeric_base_resolves_all_four_templates over the pair tables of a
+        # release line older than the relation array: the same registry, the temporal role
+        # still in MeosType order although the table lists tgeometry first.
+        self.assertEqual(self._attach(_PAIR_FIXTURE), self._attach(_FIXTURE))
+        self.assertEqual(self._attach(_PAIR_FIXTURE)["geometry"]["temporal"],
+                         ["tgeompoint", "tgeometry"])
 
     def test_catalog_without_the_relation_array_raises(self):
         # A located catalog the parse reads no relation out of is a lost array, not a

@@ -28,6 +28,16 @@ from pathlib import Path
 _NAME_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*"([^"]+)"')
 _ROW_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*\{(.*?)\}', re.S)
 _FIELD_RE = re.compile(r'\.\s*(\w+)\s*=\s*(T_\w+)')
+# A release line older than the type-indexed catalog (stable-1.3) states each relation as
+# its own table of {outer, inner} pairs headed by the relation's two names,
+# `/* settype   basetype */`, which together are the field the type-indexed entry names.
+_PAIR_TABLE_RE = re.compile(r'_CATALOG\s*\[\]\s*=\s*\{\s*/\*\s*(\w+)\s+(\w+)\s*\*/(.*?)\n\};',
+                            re.S)
+_PAIR_RE = re.compile(r'\{\s*(T_\w+)\s*,\s*(T_\w+)\s*\}')
+
+#: The spelling of the parameter type of a membership predicate, `temporal_type(MeosType
+#: type)`: `meosType` on a release line older than the rename (stable-1.3).
+MEOSTYPE_PARAM = r'(?:MeosType|meosType)'
 
 #: The relation field of ``reltype_catalog_struct`` naming each role, and the field naming
 #: its inverse. The catalog records both directions — a relation and its inverse are read
@@ -50,12 +60,23 @@ def catalog_rows(text: str, array: str) -> list:
     """The ``[T_X] = { .field = T_Y, ... }`` entries of the type-indexed catalog array.
 
     Returned in file order, which is ``MeosType`` order, the ordering the catalog enforces.
+    A release line without the type-indexed ``MEOS_RELTYPE_CATALOG`` states the same
+    relations as pair tables, which yield the same entries, ordered by ``MEOS_TYPE_NAMES``,
+    the array that lists every type in ``MeosType`` order there. A pair table names its
+    relation in its header comment, so ``text`` keeps its block comments.
     """
     m = re.search(re.escape(array) + r'\s*\[\]\s*=\s*\{(.*?)\};', text, re.S)
-    if not m:
+    if m:
+        return [(t, dict((f, v) for f, v in _FIELD_RE.findall(body)))
+                for t, body in _ROW_RE.findall(m.group(1))]
+    if array != "MEOS_RELTYPE_CATALOG":
         return []
-    return [(t, dict((f, v) for f, v in _FIELD_RE.findall(body)))
-            for t, body in _ROW_RE.findall(m.group(1))]
+    rows = {}
+    for outer_role, inner_role, pairs in _PAIR_TABLE_RE.findall(text):
+        for outer, inner in _PAIR_RE.findall(pairs):
+            rows.setdefault(outer, {})["%s_%s" % (outer_role, inner_role)] = inner
+    order = {t: i for i, t in enumerate(type_names(text))}
+    return sorted(rows.items(), key=lambda row: order.get(row[0], len(order)))
 
 
 def temptype_basetypes(cat_src: str) -> dict:

@@ -17,8 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from parser.object_model import find_mobilitydb_src
-from parser.temporaltypes import (attach_temporal_types, function_body,
-                                  mfjson_tokens, strip_comments)
+from parser.temporaltypes import attach_temporal_types, function_body, strip_comments
 from parser.typerelations import locate_temporal_source
 
 _CATALOG = """
@@ -146,6 +145,23 @@ class TemporalTypesParseTest(unittest.TestCase):
         without = _CATALOG.replace("tspatial_type(MeosType type)", "tspatial_kind(MeosType type)")
         with self.assertRaises(ValueError):
             self._attach(catalog=without)
+
+    def test_pair_tables_give_each_type_its_base(self):
+        # #test_every_temporal_type_carries_its_base_box_and_classes on a release line that
+        # states the base of each temporal type in a pair table headed by a comment
+        # (stable-1.3), and no bounding box: the same bases, and no bbox key.
+        start = _CATALOG.index("static const reltype_catalog_struct")
+        end = _CATALOG.index("/* A comment naming")
+        pairs = _CATALOG[:start] + (
+            "static const temptype_catalog_struct MEOS_TEMPTYPE_CATALOG[] =\n{\n"
+            "  /* temptype    basetype */\n"
+            "  {T_TDOUBLE2,   T_DOUBLE2},\n  {T_TFLOAT,     T_FLOAT8},\n"
+            "  {T_TGEOMPOINT, T_GEOMETRY},\n  {T_TGEOMETRY,  T_GEOMETRY},\n};\n"
+        ) + _CATALOG[end:]
+        types = self._attach(catalog=pairs)
+        expected = {name: {k: v for k, v in record.items() if k != "bbox"}
+                    for name, record in self._attach().items()}
+        self.assertEqual(types, expected)
 
     def test_a_lost_mfjson_switch_raises(self):
         with self.assertRaises(ValueError):

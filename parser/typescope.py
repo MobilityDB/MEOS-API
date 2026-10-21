@@ -33,6 +33,8 @@ import json
 import re
 from pathlib import Path
 
+from parser.typerelations import MEOSTYPE_PARAM, catalog_rows
+
 # A declared scope of "*" means the function serves every overload its wrapper
 # declares — the legitimate generic case, stated rather than guessed.
 EVERY_OVERLOAD = '*'
@@ -40,7 +42,7 @@ EVERY_OVERLOAD = '*'
 _META = Path(__file__).resolve().parent.parent / 'meta' / 'type-scope.json'
 
 _TYPE_NAME = re.compile(r'\[(T_[A-Z0-9_]+)\]\s*=\s*"([a-z0-9_]+)"')
-_PREDICATE = re.compile(r'^(\w+)\(MeosType type\)\n\{\n(.*?)\n\}', re.S | re.M)
+_PREDICATE = re.compile(r'^(\w+)\(' + MEOSTYPE_PARAM + r' type\)\n\{\n(.*?)\n\}', re.S | re.M)
 _MEOS_TYPE = re.compile(r'\bT_[A-Z0-9_]+\b')
 _VALIDATE = re.compile(r'\bVALIDATE_[A-Z0-9_]+\b')
 _C_PARAM = re.compile(r'\b(?:const\s+)?(\w+)\s*\*?\s*\w+\s*[,)]')
@@ -91,9 +93,9 @@ class TypeFacts:
             if members:
                 self.klass[m.group(1)] = members
         self.container = {}
-        for field in _RELATIONS:
-            pat = rf'\[(T_[A-Z0-9_]+)\]\s*=\s*\{{[^}}]*\.{field}\s*=\s*(T_[A-Z0-9_]+)'
-            for outer, inner in re.findall(pat, src):
+        for outer, fields in catalog_rows(src, 'MEOS_RELTYPE_CATALOG'):
+            for field in _RELATIONS:
+                inner = fields.get(field)
                 if outer in self.name and inner in self.name:
                     self.container.setdefault(self.name[inner], set()).add(self.name[outer])
         self.validate = self._read_validate_macros(Path(meos_src) / 'include')
