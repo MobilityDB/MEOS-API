@@ -72,9 +72,12 @@ def attach_position_names(idl: dict) -> dict:
     the name less its stem. Adds ``portableAliases.positionNames``: operator -> class
     -> SQL name.
 
-    A name that does not end with its operator's stem, or an operator that no
-    function carries, raises: either means the @sqlfn/@sqlop tags and the mapping
-    disagree, which a binding would otherwise inherit silently.
+    A release line spells the names one way throughout: master's ``<class><Stem>``
+    (spanLeft), or the ``<class>_<stem>`` of a release before the class names
+    (span_left, temporal_left on stable-1.3). The spelling of the catalog is the one
+    its names take; a name in neither form, or in the other one, raises, as does an
+    operator that no function carries: each means the @sqlfn/@sqlop tags and the
+    mapping disagree, which a binding would otherwise inherit silently.
 
     MUST run AFTER ``attach_sqlfn_map`` (sqlfn/sqlop) AND ``attach_portable_aliases``
     (byPositionOperator).
@@ -84,17 +87,28 @@ def attach_position_names(idl: dict) -> dict:
         return idl
     by_position_operator = pa["byPositionOperator"]
     names = {op: {} for op in by_position_operator}
+    spelled = {}                      # spelling -> the first function taking it
     for f in idl.get("functions", []):
         op = (f.get("sqlop") or "").replace("\\", "")
         sqlfn = f.get("sqlfn") or ""
         if op not in by_position_operator or not sqlfn:
             continue
         pos = by_position_operator[op]
-        suffix = pos[0].upper() + pos[1:]
-        cls = sqlfn[:-len(suffix)] if sqlfn.endswith(suffix) else ""
+        cls = ""
+        for spelling, suffix in (("<class><Stem>", pos[0].upper() + pos[1:]),
+                                 ("<class>_<stem>", "_" + pos)):
+            if sqlfn.endswith(suffix) and len(sqlfn) > len(suffix):
+                cls = sqlfn[:-len(suffix)]
+                break
         if not cls:
             raise ValueError(f"portable-aliases: {f['name']} has @sqlop {op} and "
-                             f"@sqlfn {sqlfn}, which is not <class>{suffix}")
+                             f"@sqlfn {sqlfn}, which is not "
+                             f"<class>{pos[0].upper() + pos[1:]} or <class>_{pos}")
+        spelled.setdefault(spelling, f["name"])
+        if len(spelled) > 1:
+            other = next(s for s in spelled if s != spelling)
+            raise ValueError(f"portable-aliases: {f['name']} spells @sqlfn {sqlfn} as "
+                             f"{spelling}, {spelled[other]} as {other}")
         names[op][cls] = sqlfn
     missing = sorted(op for op, by_class in names.items() if not by_class)
     if missing:
