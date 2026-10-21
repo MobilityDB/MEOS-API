@@ -239,6 +239,34 @@ class AttachTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 attach_position_names(idl)
 
+    def test_position_names_of_a_release_before_the_class_names(self):
+        # #test_position_names_by_class on stable-1.3, which spells every name
+        # <class>_<stem>, a temporal operand taking the class temporal; the class
+        # is the name less _<stem>.
+        fns = [dict(f, sqlfn=f["sqlfn"].replace("stbox", "stbox_", 1).lower())
+               for f in _stbox_position_functions()] + [
+            {"name": "left_temporal_temporal", "sqlfn": "temporal_left", "sqlop": "<<"},
+            {"name": "left_span_span",         "sqlfn": "span_left",     "sqlop": "<<"},
+        ]
+        idl = attach_portable_aliases({"functions": fns}, MAP)
+        pn = attach_position_names(idl)["portableAliases"]["positionNames"]
+        self.assertEqual(pn["<<"], {"span": "span_left", "stbox": "stbox_left",
+                                    "temporal": "temporal_left"})
+        self.assertEqual(pn["&</"], {"stbox": "stbox_overfront"})
+
+    def test_position_names_in_two_spellings_raise(self):
+        # #test_position_name_without_its_class_raises across spellings: one catalog
+        # spells its names one way, so a <class>_<stem> name among <class><Stem>
+        # ones, or the reverse, is a tag the release line does not state.
+        for fns in (_stbox_position_functions() + [
+                        {"name": "left_span_span", "sqlfn": "span_left", "sqlop": "<<"}],
+                    [dict(f, sqlfn=f["sqlfn"].replace("stbox", "stbox_", 1).lower())
+                     for f in _stbox_position_functions()] + [
+                        {"name": "left_span_span", "sqlfn": "spanLeft", "sqlop": "<<"}]):
+            idl = attach_portable_aliases({"functions": fns}, MAP)
+            with self.assertRaisesRegex(ValueError, "spells"):
+                attach_position_names(idl)
+
     def test_position_operator_without_function_raises(self):
         idl = attach_portable_aliases(
             {"functions": _stbox_position_functions(skip=("/&>",))}, MAP)
