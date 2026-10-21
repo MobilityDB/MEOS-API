@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 
 from parser.typerelations import bbox_types, temptype_basetypes
 from parser.object_model import (MembershipUnavailable, byreference_basetypes,
-                                  derive_membership, predicate_temptypes)
+                                  derive_membership, predicate_temptypes,
+                                  release_nodes)
 from parser.object_model import (
     _scan_errors, attach_object_model, find_mobilitydb_src)
 
@@ -511,6 +512,30 @@ class MembershipDerivationTest(unittest.TestCase):
         with self.assertRaises(MembershipUnavailable):
             derive_membership(nodes, _SYNTHETIC_CATALOG,
                               temptype_basetypes(_SYNTHETIC_CATALOG))
+
+    def test_a_leaf_of_a_type_the_release_line_lacks_is_not_a_class_of_it(self):
+        # #test_a_leaf_whose_type_the_catalog_does_not_relate_raises on a release line
+        # whose MEOS_TYPE_NAMES does not list the type at all (stable-1.3 has no tjsonb):
+        # the leaf is dropped, while one the line lists but does not relate still raises.
+        names = ('static const char *MEOS_TYPE_NAMES[] =\n{\n'
+                 '  [T_TBOOL] = "tbool",\n  [T_TGHOST] = "tghost",\n};\n')
+        nodes = {
+            "Demo": {"kind": "root", "predicate": "demo_type"},
+            "TBool": {"kind": "leaf", "predicate": None, "temptypes": ["T_TBOOL"]},
+            "TJsonb": {"kind": "leaf", "predicate": None, "temptypes": ["T_TJSONB"]},
+        }
+        kept = release_nodes(nodes, names + _SYNTHETIC_CATALOG)
+        self.assertEqual(sorted(kept), ["Demo", "TBool"])
+        ghost = {"TGhost": {"kind": "leaf", "predicate": None, "temptypes": ["T_TGHOST"]}}
+        kept = release_nodes(ghost, names + _SYNTHETIC_CATALOG)
+        with self.assertRaises(MembershipUnavailable):
+            derive_membership(kept, _SYNTHETIC_CATALOG, temptype_basetypes(_SYNTHETIC_CATALOG))
+
+    def test_a_catalog_whose_type_names_do_not_parse_keeps_every_node(self):
+        # No MEOS_TYPE_NAMES read is a lost parse, not a release line without types:
+        # every node stays, and the derivation reports the leaf it cannot relate.
+        nodes = {"TJsonb": {"kind": "leaf", "predicate": None, "temptypes": ["T_TJSONB"]}}
+        self.assertEqual(release_nodes(nodes, _SYNTHETIC_CATALOG), nodes)
 
     def test_attaching_without_the_source_says_so_rather_than_emptying(self):
         # A class naming no type would read the same as one MEOS has no type
