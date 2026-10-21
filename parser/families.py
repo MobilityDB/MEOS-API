@@ -38,16 +38,35 @@ class FamiliesUnavailable(RuntimeError):
     """
 
 
+# A family stated as its own option, as a MobilityDB release line before the
+# `ALL` list states each one: `option(CBUFFER` on a line of its own, or
+# `CMAKE_DEPENDENT_OPTION(RGEO` for a family that needs another one.
+_OPTION_RE = re.compile(r"^(?:option|CMAKE_DEPENDENT_OPTION)\(\s*([A-Z][A-Z0-9_]*)\b", re.M)
+
+
 def read_all_families(cmakelists: Path) -> tuple[str, ...]:
-    """The family tokens named by ``cmakelists``'s ``if(ALL) foreach`` list."""
+    """The family tokens of ``cmakelists``: its ``if(ALL) foreach`` list, or, in a
+    tree that has none, each ``option(<FAMILY>)`` whose ``meos/src/<family>``
+    directory holds the family's sources.
+
+    A MobilityDB release line older than the ``ALL`` list (stable-1.3) states
+    every family as an option of its own. Its options also name what is no
+    family -- ``MEOS``, ``GEOS`` -- and the source directory a family lives in,
+    spelled from the token as #subdir_family spells it, tells the two apart,
+    read from the tree rather than listed here."""
     text = Path(cmakelists).read_text(errors="ignore")
     m = _ALL_BLOCK_RE.search(text)
-    if not m:
+    if m:
+        return tuple(sorted(re.findall(r"[A-Z][A-Z0-9_]*", m.group(1))))
+    src = Path(cmakelists).parent / "meos" / "src"
+    stated = [t for t in _OPTION_RE.findall(text) if (src / t.lower()).is_dir()]
+    if not stated:
         raise FamiliesUnavailable(
-            f"{cmakelists} carries no `if(ALL) foreach(_family ...)` list — "
-            "the family source of truth moved; update parser/families.py to "
-            "read it where it now lives")
-    return tuple(sorted(re.findall(r"[A-Z][A-Z0-9_]*", m.group(1))))
+            f"{cmakelists} carries no `if(ALL) foreach(_family ...)` list and no "
+            "`option(<FAMILY>)` with a meos/src/<family> directory — the family "
+            "source of truth moved; update parser/families.py to read it where "
+            "it now lives")
+    return tuple(sorted(set(stated)))
 
 
 _headers_dir: Path | None = None
