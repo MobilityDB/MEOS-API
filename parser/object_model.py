@@ -27,7 +27,7 @@ import os
 import re
 from pathlib import Path
 
-from parser.typerelations import locate_catalog, temptype_basetypes
+from parser.typerelations import MEOSTYPE_PARAM, locate_catalog, temptype_basetypes
 
 
 def find_mobilitydb_src(headers_dir: Path | None = None) -> Path | None:
@@ -373,7 +373,7 @@ _INTERNAL_BASETYPES = frozenset({"T_DOUBLE2", "T_DOUBLE3", "T_DOUBLE4"})
 
 def _predicate_body(cat_src: str, name: str) -> str:
     """The body of the ``name(MeosType ...)`` membership predicate."""
-    m = re.search(r"\n" + re.escape(name) + r"\(MeosType \w+\)\s*", cat_src)
+    m = re.search(r"\n" + re.escape(name) + r"\(" + MEOSTYPE_PARAM + r" \w+\)\s*", cat_src)
     if not m:
         raise MembershipUnavailable(
             f"meos_catalog.c declares no `{name}` predicate — the lattice names "

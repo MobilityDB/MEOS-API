@@ -1,5 +1,6 @@
 """A function keeps only the signatures of the types it serves."""
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -100,6 +101,59 @@ class CParamScopeTests(unittest.TestCase):
         # the C typedef is not the type name lowercased: S2CellId spells s2cell
         self.assertEqual(self.scope('union_s2cell_set', 'S2CellId'),
                          ({'s2cell', 's2cellset'}, 'cparam'))
+
+
+_TYPE_NAMES = ('  [T_INT4] = "int4",\n  [T_INTSET] = "intset",\n'
+               '  [T_INTSPAN] = "intspan",\n  [T_INTSPANSET] = "intspanset",\n')
+
+# The catalog as master states it: a designated initializer per type, predicates
+# over `MeosType`.
+_CATALOG_DESIGNATED = (_TYPE_NAMES +
+    'static const reltype_catalog_struct MEOS_RELTYPE_CATALOG[] =\n{\n'
+    '  [T_INTSET] = { .settype_basetype = T_INT4 },\n'
+    '  [T_INTSPAN] = { .spantype_basetype = T_INT4 },\n'
+    '  [T_INTSPANSET] = { .spansettype_spantype = T_INTSPAN },\n'
+    '};\n'
+    'bool\nset_type(MeosType type)\n{\n  if (type == T_INTSET)\n    return true;\n}\n')
+
+# The catalog as a release line older than the rename states it (stable-1.3): a table
+# of {outer, inner} pairs headed by the relation's names, predicates over `meosType`.
+_CATALOG_PAIRS = (_TYPE_NAMES +
+    'static const settype_catalog_struct MEOS_SETTYPE_CATALOG[] =\n{\n'
+    '  /* settype        basetype */\n  {T_INTSET,        T_INT4},\n};\n'
+    'static const spantype_catalog_struct MEOS_SPANTYPE_CATALOG[] =\n{\n'
+    '  /* spantype       basetype */\n  {T_INTSPAN,       T_INT4},\n};\n'
+    'static const spansettype_catalog_struct MEOS_SPANSETTYPE_CATALOG[] =\n{\n'
+    '  /* spansettype    spantype */\n  {T_INTSPANSET,    T_INTSPAN},\n};\n'
+    'bool\nset_type(meosType type)\n{\n  if (type == T_INTSET)\n    return true;\n}\n')
+
+
+def facts_from(catalog_text):
+    """#TypeFacts read from a meos/ tree holding only the given meos_catalog.c."""
+    root = Path(tempfile.mkdtemp())
+    (root / 'src' / 'temporal').mkdir(parents=True)
+    (root / 'include').mkdir()
+    (root / 'src' / 'temporal' / 'meos_catalog.c').write_text(catalog_text)
+    return TypeFacts(root)
+
+
+class CatalogShapeTests(unittest.TestCase):
+    """#TypeFacts reads the container relations and the class predicates of either shape of
+    meos_catalog.c, over synthetic inputs as #CParamScopeTests is built."""
+
+    def test_both_shapes_read_the_same_containers(self):
+        expected = {'int4': {'intset', 'intspan'}, 'intspan': {'intspanset'}}
+        self.assertEqual(facts_from(_CATALOG_DESIGNATED).container, expected)
+        self.assertEqual(facts_from(_CATALOG_PAIRS).container, expected)
+
+    def test_both_shapes_read_the_class_predicates(self):
+        self.assertEqual(facts_from(_CATALOG_DESIGNATED).klass, {'set_type': {'intset'}})
+        self.assertEqual(facts_from(_CATALOG_PAIRS).klass, {'set_type': {'intset'}})
+
+    def test_a_pair_table_of_no_known_relation_is_not_read(self):
+        other = _TYPE_NAMES + ('static const x MEOS_OTHER_CATALOG[] =\n{\n'
+                               '  /* outer   unrelated */\n  {T_INTSET, T_INT4},\n};\n')
+        self.assertEqual(facts_from(other).container, {})
 
 
 # `Tsequence_from_base_tstzset` is the body behind tint(integer, tstzset),
