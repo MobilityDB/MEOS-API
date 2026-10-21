@@ -49,6 +49,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from parser.families import built_files
 from parser.sqlfn import _CSQLFN_END, _meos_to_mdb, _wrapper_sql_sigs
 from parser.typescope import SQL_ALIASES, TypeFacts
 
@@ -77,7 +78,7 @@ def wrapper_names(mdb_src: str | Path) -> dict[str, tuple[list[str], list[str]]]
     and no ``@sqlaggfn``: on a wrapper stating ``@sqlaggfn`` the tag names the aggregate
     (#aggregate_alt_names)."""
     out = {}
-    for cf in sorted(Path(mdb_src).rglob("*.c")):
+    for cf in sorted(built_files(mdb_src, "*.c")):
         for m in _WRAPPER_BLOCK.finditer(cf.read_text(errors="ignore")):
             alts = _tag_names(m.group(1), "altsqlfn")
             if alts and not _tag_names(m.group(1), "sqlaggfn"):
@@ -91,7 +92,7 @@ def aggregate_alt_names(mdb_src: str | Path) -> tuple[dict[str, str], list[str]]
     pairs several ``@sqlfn`` names. A wrapper whose two lists differ in length, or an aggregate
     two wrappers name differently, is an error."""
     out, errors = {}, []
-    for cf in sorted(Path(mdb_src).rglob("*.c")):
+    for cf in sorted(built_files(mdb_src, "*.c")):
         for m in _WRAPPER_BLOCK.finditer(cf.read_text(errors="ignore")):
             alts = _tag_names(m.group(1), "altsqlfn")
             aggs = _tag_names(m.group(1), "sqlaggfn")

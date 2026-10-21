@@ -129,6 +129,52 @@ class RootResolutionTests(unittest.TestCase):
         self.assertNotEqual(find_mobilitydb_root(), staged.parent.parent)
 
 
+class BuiltFamiliesTests(RootResolutionTests):
+    """#unbuilt_families and #built_files over a checkout whose families front a header
+    each, as #test_the_root_is_found_two_levels_above_the_headers builds one."""
+
+    def _checkout(self):
+        root = Path(tempfile.mkdtemp())
+        (root / "CMakeLists.txt").write_text(_CMAKE)
+        (root / "meos" / "include").mkdir(parents=True)
+        for family in ("cbuffer", "pose"):
+            (root / "meos" / "include" / f"meos_{family}.h").write_text("")
+        for d in ("sql/temporal", "sql/cbuffer", "sql/pose"):
+            (root / "mobilitydb" / d).mkdir(parents=True)
+            (root / "mobilitydb" / d / "x.sql").write_text("")
+        os.environ["MDB_SRC_ROOT"] = str(root)
+        return root
+
+    def _built(self, root):
+        sql = root / "mobilitydb" / "sql"
+        return sorted(str(p.relative_to(sql)) for p in families.built_files(sql, "*.sql"))
+
+    def test_a_build_without_a_family_leaves_out_its_sql(self):
+        # The installed headers of a build with pose and without cbuffer.
+        root = self._checkout()
+        prefix = Path(tempfile.mkdtemp()) / "include"
+        prefix.mkdir()
+        (prefix / "meos_pose.h").write_text("")
+        use_headers_dir(prefix)
+        self.assertEqual(families.unbuilt_families(), {"CBUFFER"})
+        self.assertEqual(self._built(root), ["pose/x.sql", "temporal/x.sql"])
+
+    def test_the_source_headers_leave_out_no_family(self):
+        root = self._checkout()
+        use_headers_dir(root / "meos" / "include")
+        self.assertEqual(families.unbuilt_families(), frozenset())
+        self.assertEqual(self._built(root), ["cbuffer/x.sql", "pose/x.sql", "temporal/x.sql"])
+
+    def test_a_family_with_no_header_of_its_own_is_never_left_out(self):
+        # RGEO, RASTER and S2CELL front no header in this checkout, so a prefix lacking
+        # theirs says nothing about whether they were built.
+        self._checkout()
+        prefix = Path(tempfile.mkdtemp()) / "include"
+        prefix.mkdir()
+        use_headers_dir(prefix)
+        self.assertEqual(families.unbuilt_families(), {"CBUFFER", "POSE"})
+
+
 class DerivedMapTests(unittest.TestCase):
     @unittest.skipUnless(find_mobilitydb_root(), "MobilityDB checkout not reachable")
     def test_subdir_and_header_are_spelled_from_the_token(self):

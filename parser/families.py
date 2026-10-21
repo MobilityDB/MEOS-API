@@ -136,3 +136,33 @@ def subdir_family() -> dict:
 def header_family() -> dict:
     """Top-level public header name -> family token."""
     return {f"meos_{f.lower()}.h": f for f in all_families()}
+
+
+def unbuilt_families() -> frozenset:
+    """The families the header tree being parsed was built without.
+
+    A libmeos built without a family installs no public header of it: the stable-1.3
+    default build installs ``meos_npoint.h`` but not ``meos_cbuffer.h``. A family is
+    unbuilt when the checkout has its header, by #header_family, and the parsed tree
+    does not, so the source tree itself and a build of every family leave none out, and
+    a family fronted by no header of its own is never left out.
+    """
+    root = find_mobilitydb_root()
+    if root is None or _headers_dir is None:
+        return frozenset()
+    source = root / "meos" / "include"
+    if source.resolve() == _headers_dir.resolve():
+        return frozenset()
+    return frozenset(f for h, f in header_family().items()
+                     if (source / h).exists() and not (_headers_dir / h).exists())
+
+
+def built_files(root, pattern: str):
+    """The files under ``root`` matching ``pattern``, in ``rglob`` order, less those
+    inside the directory of an #unbuilt_families family (``mobilitydb/sql/cbuffer``,
+    ``mobilitydb/src/cbuffer``): the SQL and the wrappers of a family the parsed headers
+    do not carry state signatures no catalog function has."""
+    root = Path(root)
+    skip = {f.lower() for f in unbuilt_families()}
+    return [p for p in root.rglob(pattern)
+            if not skip & set(p.relative_to(root).parts[:-1])]

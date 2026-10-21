@@ -66,6 +66,8 @@ import functools
 import re
 from pathlib import Path
 
+from parser.families import built_files
+
 # `Datum <Name>(PG_FUNCTION_ARGS) {` opens a PG wrapper.
 _WRAP = re.compile(r"Datum\s+(?P<name>\w+)\s*\(\s*PG_FUNCTION_ARGS\s*\)\s*\{")
 # Any local the wrapper ASSIGNS (`var = ...`, excluding `==`): every value the
@@ -150,7 +152,7 @@ def _call_args(body: str, fn: str) -> list[str] | None:
 def extract_wrappers(mdb_src: str | Path) -> dict[str, str]:
     """Return ``{wrapper_name: body_text}`` for every PG wrapper under ``mdb_src``."""
     out: dict[str, str] = {}
-    for cf in Path(mdb_src).rglob("*.c"):
+    for cf in built_files(mdb_src, "*.c"):
         text = cf.read_text(errors="ignore")
         for m in _WRAP.finditer(text):
             out[m.group("name")] = _body(text, m.end() - 1)
@@ -161,7 +163,7 @@ def extract_helpers(mdb_src: str | Path) -> dict[str, tuple[str, list[str]]]:
     """``{helper_name: (body_text, [param names after the call info])}`` for every shared
     wrapper helper under ``mdb_src``."""
     out: dict[str, tuple[str, list[str]]] = {}
-    for cf in Path(mdb_src).rglob("*.c"):
+    for cf in built_files(mdb_src, "*.c"):
         text = cf.read_text(errors="ignore")
         for m in _HELPER.finditer(text):
             rest = (m.group("rest") or "").strip()
