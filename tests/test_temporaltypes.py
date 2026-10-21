@@ -146,6 +146,17 @@ class TemporalTypesParseTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._attach(catalog=without)
 
+    def test_the_linear_predicate_under_its_release_line_name_decides_the_class(self):
+        # #test_a_renamed_predicate_raises, for a name a release line gives the predicate:
+        # stable-1.3 names the linear one temptype_continuous, which decides the same class,
+        # while a name no release line gives it still raises.
+        older = _CATALOG.replace("temptype_supports_linear(MeosType type)",
+                                 "temptype_continuous(MeosType type)")
+        self.assertEqual(self._attach(catalog=older), self._attach())
+        with self.assertRaises(ValueError):
+            self._attach(catalog=_CATALOG.replace("temptype_supports_linear(MeosType type)",
+                                                  "temptype_linear_kind(MeosType type)"))
+
     def test_pair_tables_give_each_type_its_base(self):
         # #test_every_temporal_type_carries_its_base_box_and_classes on a release line that
         # states the base of each temporal type in a pair table headed by a comment

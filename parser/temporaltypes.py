@@ -38,12 +38,14 @@ from parser.typerelations import (catalog_rows, locate_temporal_source,
 #: registry covers, so a type absent from it is absent from the registry.
 UNIVERSE = "temporal_type"
 
-#: The class of each temporal type, one boolean per predicate that decides it.
-#: A renamed predicate raises rather than silently emitting every type as false.
+#: The class of each temporal type, one boolean per predicate that decides it, under
+#: each name a release line gives the predicate, the current one first: stable-1.3
+#: names the linear one `temptype_continuous`. A predicate defined under none of its
+#: names raises rather than silently emitting every type as false.
 CLASSES = {
-    "number": "tnumber_type",
-    "spatial": "tspatial_type",
-    "linear": "temptype_supports_linear",
+    "number": ("tnumber_type",),
+    "spatial": ("tspatial_type",),
+    "linear": ("temptype_supports_linear", "temptype_continuous"),
 }
 
 _ENUM_RE = re.compile(r"\bT_[A-Z0-9_]+\b")
@@ -126,6 +128,15 @@ def function_body(text: str, name: str) -> str:
     raise ValueError(f"{name}() has an unterminated body")
 
 
+def defined_name(text: str, names: tuple) -> str:
+    """The first of a predicate's ``names`` that ``text`` defines, as #function_body
+    anchors a definition, else the current name, so the refusal names that one."""
+    for name in names:
+        if re.search(r"(?m)^" + re.escape(name) + r"\s*\(", text):
+            return name
+    return names[0]
+
+
 def predicate_types(text: str, name: str) -> set:
     """The type enumerators the named boolean predicate answers true for."""
     found = set(_ENUM_RE.findall(function_body(text, name)))
@@ -181,7 +192,8 @@ def attach_temporal_types(idl: dict, src_root: Path | None) -> dict:
     # relation in its header comment
     rows = dict(catalog_rows(re.sub(r"//.*", "", raw_catalog), "MEOS_RELTYPE_CATALOG"))
     universe = predicate_types(catalog, UNIVERSE)
-    classes = {role: predicate_types(catalog, fn) for role, fn in CLASSES.items()}
+    classes = {role: predicate_types(catalog, defined_name(catalog, fns))
+               for role, fns in CLASSES.items()}
     tokens = mfjson_tokens(type_out)
 
     registry = {}
