@@ -43,6 +43,7 @@ are, and a program of several steps (a set difference, a CASE, a subquery)."""
 import re
 from itertools import permutations
 
+from parser.families import built_files
 from parser.sqlfn import _c_base, _fits, _sql_ctypes, sql_signature, sql_statements
 from parser.typescope import SQL_ALIASES
 
@@ -462,10 +463,9 @@ def _text_casts(sql_src):
     """{(source type, target type): cast function SQL name} of every `CREATE CAST ...
     WITH FUNCTION f(source)` under `sql_src`; a cast whose function takes more than the
     source (a typmod) is left out."""
-    from pathlib import Path
     from parser.sqlfn import _strip_sql_comments
     out = {}
-    for sf in sorted(Path(sql_src).rglob("*.sql")):
+    for sf in sorted(built_files(sql_src, "*.sql")):
         text = _SCHEMA.sub("", _strip_sql_comments(sf.read_text(errors="ignore")))
         for src, dst, fn, fargs in _CAST.findall(text):
             if len([a for a in fargs.split(",") if a.strip()]) == 1:

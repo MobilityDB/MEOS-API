@@ -30,6 +30,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from parser.families import built_files
 from parser.sqlfn import _strip_sql_comments
 
 # `CREATE OPERATOR <symbol> (` opens an operator declaration; its clauses run to the `)` the
@@ -54,7 +55,7 @@ def operator_decls(sql_src: str | Path) -> dict[tuple[str, str, str], list[tuple
     sql_src = Path(sql_src)
     if not sql_src.exists():
         return decls
-    for sf in sorted(sql_src.rglob("*.sql")):
+    for sf in sorted(built_files(sql_src, "*.sql")):
         text = _strip_sql_comments(sf.read_text(errors="ignore"))
         for m in _CREATE_OP.finditer(text):
             end = text.find(";", m.end())

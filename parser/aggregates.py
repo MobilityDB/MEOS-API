@@ -30,6 +30,7 @@ arguments under `FINALFUNC_EXTRA`), the serialize function over the state and th
 deserialize function over `bytea` and the state."""
 import re
 
+from parser.families import built_files
 from parser.compositions import _type
 from parser.sqlfn import _split_top_commas, _strip_sql_comments, sql_signature, sql_statements
 
@@ -67,7 +68,7 @@ def _create_agg_stmts(text):
 def _agg_statements(sql_src):
     """Every CREATE AGGREGATE under `sql_src`, as #_create_agg_stmts yields it."""
     out = []
-    for sf in sorted(sql_src.rglob("*.sql")):
+    for sf in sorted(built_files(sql_src, "*.sql")):
         out.extend(_create_agg_stmts(_strip_sql_comments(sf.read_text(errors="ignore"))))
     return out
 

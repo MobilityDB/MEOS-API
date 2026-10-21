@@ -18,6 +18,7 @@ import json
 import re
 from pathlib import Path
 
+from parser.families import built_files
 from parser.shapeinfer import _out_count_param
 from itertools import permutations
 
@@ -304,7 +305,7 @@ def _wrapper_sql_strict(sql_src):
     sql_src = Path(sql_src)
     if not sql_src.exists():
         return out
-    for sf in sorted(sql_src.rglob("*.sql")):
+    for sf in sorted(built_files(sql_src, "*.sql")):
         text = _strip_sql_comments(sf.read_text(errors="ignore"))
         for sqlname, argdecls, ret, wrapper, retset, strict in _create_fn_stmts(text,
                                                                                 strict=True):
@@ -325,7 +326,7 @@ def sql_statements(sql_src):
     sql_src = Path(sql_src)
     if not sql_src.exists():
         return stmts, vocab, composites
-    for sf in sorted(sql_src.rglob("*.sql")):
+    for sf in sorted(built_files(sql_src, "*.sql")):
         text = _strip_sql_comments(sf.read_text(errors="ignore"))
         composites.update(_composite_types(text))
         for stmt in _create_fn_stmts(text, bodies=True):
@@ -426,7 +427,7 @@ def _mdb_to_sql(mdb_src):
     than the first — otherwise the mapped SQL name is order-dependent.
     """
     out = {}
-    for cf in Path(mdb_src).rglob("*.c"):
+    for cf in built_files(mdb_src, "*.c"):
         text = cf.read_text(errors="ignore")
         for m in _SQLFN.finditer(text):
             # @sqlop lives in the SAME doxygen block (before the closing */).
@@ -455,7 +456,7 @@ def _mdb_to_agg(mdb_src):
     wrapper resolves to both without either name displacing the other. A member
     shared by several aggregates lists them, and duplicates collapse."""
     out = {}
-    for cf in Path(mdb_src).rglob("*.c"):
+    for cf in built_files(mdb_src, "*.c"):
         text = cf.read_text(errors="ignore")
         for m in _SQLAGGFN.finditer(text):
             close = text.find("*/", m.end())
