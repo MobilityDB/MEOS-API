@@ -27,7 +27,8 @@ import os
 import re
 from pathlib import Path
 
-from parser.typerelations import MEOSTYPE_PARAM, locate_catalog, temptype_basetypes
+from parser.typerelations import (MEOSTYPE_PARAM, locate_catalog, temptype_basetypes,
+                                  type_names)
 
 
 def find_mobilitydb_src(headers_dir: Path | None = None) -> Path | None:
@@ -428,6 +429,22 @@ def predicate_temptypes(cat_src: str, name: str) -> list:
     return out
 
 
+def release_nodes(nodes: dict, cat_src: str) -> dict:
+    """The nodes of the model the release line of ``cat_src`` has.
+
+    The model names every type MEOS has on master; a release line older than a type
+    (stable-1.3 has no tjsonb or tbigint) does not list it in ``MEOS_TYPE_NAMES``, so the
+    leaf modelling it is not a class of that line. A leaf whose type the line lists but
+    does not relate is a disagreement, which #derive_membership raises; a catalog whose
+    type names do not parse keeps every node, so that the derivation reports it.
+    """
+    named = type_names(cat_src)
+    if not named:
+        return nodes
+    return {k: v for k, v in nodes.items()
+            if v.get("kind") != "leaf" or all(t in named for t in v.get("temptypes") or ())}
+
+
 def derive_membership(nodes: dict, cat_src: str, basetypes: dict) -> None:
     """Fill each node's membership from the catalog, in place.
 
@@ -531,6 +548,7 @@ def attach_object_model(idl: dict, path: Path,
     if catalog is not None:
         cat_src = catalog.read_text(errors="ignore")
         basetypes = temptype_basetypes(cat_src)
+        lattice_nodes = release_nodes(lattice_nodes, cat_src)
         derive_membership(lattice_nodes, cat_src, basetypes)
         derive_membership(trait_nodes, cat_src, basetypes)
         membership = {"status": "derived", "source": str(catalog)}
