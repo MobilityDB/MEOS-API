@@ -292,6 +292,68 @@ class CompositionTests(unittest.TestCase):
             self.assertNotIn(key, entries)
         self.assertEqual(len(entries), 10)
 
+    def test_a_call_of_a_body_that_is_no_composition_is_none(self):
+        # #test_bodies_that_convert_nothing_are_no_composition, one call away: stable-1.3's
+        # rotate is a program over cos and -sin, so rotateZ calling it composes nothing,
+        # as a call of a PostGIS forward composes nothing.
+        idl, _ = self._attach(CASTS + """
+CREATE FUNCTION rotate(tgeompoint, float)
+  RETURNS tgeompoint
+  AS 'SELECT @extschema@.affine($1, cos($2), -sin($2))'
+  LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION rotateZ(tpose, float)
+  RETURNS tgeompoint
+  AS 'SELECT @extschema@.rotate($1::@extschema@.tgeompoint, $2)'
+  LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION asText(tpose, integer)
+  RETURNS text
+  AS 'SELECT @extschema@.asEWKT($1::@extschema@.tgeompoint, $2)'
+  LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION asEWKT(tgeompoint, integer)
+  RETURNS text
+  AS 'SELECT @extschema@.ST_AsEWKT($1, $2)'
+  LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
+""")
+        self.assertEqual(idl["compositions"], [])
+
+    def test_a_call_of_a_plain_forward_composes_through_it(self):
+        # #test_a_forward_to_a_composition_takes_its_steps, for a forward to a C-backed
+        # signature: stops(tgeompoint, interval) binds maxdist, and a body calling it
+        # reaches temporal_stops with that literal.
+        idl, _ = self._attach(COMPOSED + """
+CREATE FUNCTION stops(tpose, interval)
+  RETURNS tgeompoint
+  AS 'SELECT @extschema@.stops($1::@extschema@.tgeompoint, $2)'
+  LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
+""")
+        e = {(e["sqlName"], tuple(e["args"])): e
+             for e in idl["compositions"]}[("stops", ("tpose", "interval"))]
+        self.assertEqual(e["call"], "temporal_stops")
+        self.assertEqual(e["operands"], [
+            {"arg": 0, "casts": ["tpose_to_tpoint"], "param": "temp"},
+            {"value": "0.0", "param": "maxdist"}, {"arg": 1, "param": "minduration"}])
+
+    def test_a_call_of_a_forward_stating_no_c_call_is_none(self):
+        # stable-1.3's translate(t, x, y, z) forwards to affine, whose wrapper packs
+        # twelve floats into the one AFFINE argument tgeo_affine takes: no call of the C
+        # function, so translate(t, x, y) calling it composes nothing either.
+        idl = _idl()
+        idl["functions"].append(_fn("tgeo_affine", "affine", [("temp", T), ("a", "const AFFINE *")],
+                                    [{"args": ["tgeompoint", "float", "float", "float"],
+                                      "ret": "tgeompoint"}]))
+        (self.sql / "composed.in.sql").write_text(CASTS + """
+CREATE FUNCTION translate(tgeompoint, float, float, float)
+  RETURNS tgeompoint
+  AS 'SELECT @extschema@.affine($1, $2, $3, $4)'
+  LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION translate(tpose, float, float)
+  RETURNS tgeompoint
+  AS 'SELECT @extschema@.translate($1::@extschema@.tgeompoint, $2, $3, 0)'
+  LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE;
+""")
+        idl, _ = attach_compositions(idl, self.sql)
+        self.assertEqual(idl["compositions"], [])
+
     def test_a_step_no_public_function_takes_stops_the_catalog(self):
         with self.assertRaises(ValueError) as cm:
             self._attach(CASTS + """

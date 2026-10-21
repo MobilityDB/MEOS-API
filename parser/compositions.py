@@ -68,6 +68,11 @@ class _Misfit(Exception):
     """A body outside the form of a composition."""
 
 
+class _Unformed(Exception):
+    """A call reaching a body that is no composition: one composed over functions
+    MobilityDB does not declare, or a program outside the form a composition takes."""
+
+
 class _Parser:
     """The expressions of a composition body: `$k`, a literal, `f(e, ...)`, `e::T` and a
     row column `r.c`, in a `SELECT e, ... [FROM f(...) AS r]`."""
@@ -167,6 +172,13 @@ class _Resolver:
         # whose signatures the catalog carries, read from the same statements.
         self.declared = {stmt[0].lower() for stmt in stmts} | set(self.by_sig)
         self.done, self.active = {}, set()
+        # The signatures whose bodies are no composition, directly (stable-1.3's `rotate`,
+        # a program over `cos` and `-sin`) or through a call of such a body (`rotateZ`).
+        self.unformed = set()
+        # The entry of each plain forward: no composition of its own, but a body calling it
+        # composes through it (stable-1.3's `translate(t, x, y)` through `translate(t, x,
+        # y, 0)`, a forward to `affine` binding nine of its arguments).
+        self.forwards = {}
 
     def foreign(self, node):
         """Whether expression `node` calls a function MobilityDB does not declare (a
@@ -265,6 +277,9 @@ class _Resolver:
         self.active.add(key)
         try:
             entry = self._compose(sig, body)
+        except _Unformed:
+            self.unformed.add(key)
+            entry = None
         finally:
             self.active.discard(key)
         self.done[key] = entry
@@ -317,6 +332,12 @@ class _Resolver:
                     csig.get("columns"), None)
         inner = self.composition(name, types)
         if inner is None:
+            fits = [sig for sig, _ in self.bodies.get(name.lower(), ()) if self._fits(sig, types)]
+            key = (fits[0]["sqlName"].lower(), tuple(fits[0]["args"])) if len(fits) == 1 else None
+            if key in self.unformed:
+                raise _Unformed
+            inner = self.forwards.get(key)
+        if inner is None:
             raise _Misfit(f"{name}({', '.join(t or '?' for t in types)}) resolves to "
                           f"neither a C-backed signature nor a composition")
         merged = []
@@ -342,12 +363,15 @@ class _Resolver:
         return merged, inner.get("call"), inner["ret"], inner.get("columns"), restore
 
     def _compose(self, sig, body):
+        # A body that is no composition raises #_Unformed, which #compose records, so that
+        # a body calling it is no composition either.
         try:
             items, source, alias = _Parser(body).statement()
         except _Misfit:
-            return None                                         # a program, not a form
+            raise _Unformed                                     # a program, not a form
         if any(self.foreign(n) for n in items + ([source] if source else [])):
-            return None                                         # composed over PostGIS
+            raise _Unformed                                     # composed over PostGIS
+        key = (sig["sqlName"].lower(), tuple(sig["args"]))
         restore = None
         if source is not None:
             # SELECT r.a, [r.b, ...] at($k, time(r.c)) FROM f(...) AS r
@@ -383,9 +407,13 @@ class _Resolver:
                     try:
                         if self.function(top[1], [self.operand(a, sig)["type"]
                                                   for a in top[2]]) is not None:
+                            ops, fn, _, _, restore = self.call(top, sig)
+                            self.forwards[key] = self._entry(sig, ops, fn, restore)
                             return None
                     except _Misfit:
-                        return None
+                        # a forward stating no call of a C function (`affine`, whose
+                        # wrapper packs twelve floats into one AFFINE argument)
+                        raise _Unformed
                 ops, fn, cret, _, restore = self.call(top, sig)
             elif top[0] in ("arg", "cast"):
                 ops, fn = [self.operand(top, sig)], None
@@ -396,12 +424,19 @@ class _Resolver:
                 return None
         # A call reaching a composition takes its casts, so it converts as well.
         if not (any(o.get("casts") for o in ops) or restore):
+            self.forwards[key] = self._entry(sig, ops, fn, restore)
             return None                                         # a plain forward
         used = {o["arg"] for o in ops if "arg" in o} | ({restore["of"]} if restore else set())
         if used != set(range(len(sig["args"]))):
             raise _Misfit(f"arguments {sorted(set(range(len(sig['args']))) - used)} unused")
         if restore is None and _type(cret or "") != _type(sig["ret"] or ""):
             raise _Misfit(f"answers {cret} where the function returns {sig['ret']}")
+        return self._entry(sig, ops, fn, restore)
+
+    @staticmethod
+    def _entry(sig, ops, fn, restore):
+        """The composition entry of `sig` calling `fn` over `ops`, as #_compose returns
+        it and keeps it for a plain forward."""
         entry = {k: sig[k] for k in ("sqlName", "args", "required", "argDefaults", "ret")}
         if sig.get("retSet"):
             entry["retSet"] = True
