@@ -65,6 +65,28 @@ class ReadAllFamiliesTests(unittest.TestCase):
         with self.assertRaises(FamiliesUnavailable):
             read_all_families(_write("project(mobilitydb)\n"))
 
+    def test_a_release_line_without_the_block_reads_its_family_options(self):
+        # As #test_reads_the_foreach_of_the_if_all_block, for a stable-1.3 shape:
+        # each family is an option of its own, and the options with a
+        # meos/src/<family> directory are the families, MEOS and GEOS not. A
+        # family needing another one is a CMAKE_DEPENDENT_OPTION, as RGEO is.
+        cmake = _write("option(MEOS\n  \"the MEOS library\"\n  OFF\n)\n"
+                       "option(CBUFFER\n  \"circular buffers\"\n  OFF\n)\n"
+                       "option(NPOINT\n  \"network points\"\n  ON\n)\n"
+                       "option(POSE\n  \"geoposes\"\n  OFF\n)\n"
+                       "CMAKE_DEPENDENT_OPTION(RGEO\n  \"rigid geometries\"\n  ON \"POSE\"\n"
+                       "  OFF\n  )\n"
+                       "option(GEOS \"GEOS\" ON)\n")
+        for family in ("cbuffer", "npoint", "pose", "rgeo"):
+            (cmake.parent / "meos" / "src" / family).mkdir(parents=True)
+        self.assertEqual(read_all_families(cmake), ("CBUFFER", "NPOINT", "POSE", "RGEO"))
+
+    def test_options_without_their_source_directories_raise(self):
+        # As #test_a_file_without_the_block_raises_rather_than_defaulting: an
+        # option naming no family source is no family, so nothing is read.
+        with self.assertRaises(FamiliesUnavailable):
+            read_all_families(_write("option(MEOS\n  \"MEOS\"\n  OFF\n)\n"))
+
 
 class RootResolutionTests(unittest.TestCase):
     """A caller that names only a header tree still locates the checkout.
