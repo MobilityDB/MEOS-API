@@ -1077,6 +1077,22 @@ KERNEL_PUBLIC = """
   return (int) distance_set_value(s, (long) i);
 """
 DISTANCE_SET_INT = {"name": "distance_set_int", "params": [{"name": "s"}, {"name": "i"}]}
+# NAD_tbox_tnumber and nad_tint_tbox open a condition before the kernel call, in the shape of
+# #KERNEL_WRAPPER and #KERNEL_PUBLIC
+GUARDED_WRAPPER = """
+  TBox *box = PG_GETARG_TBOX_P(0);
+  Temporal *temp = PG_GETARG_TEMPORAL_P(1);
+  Datum result = nad_tnumber_tbox(temp, box);
+  if (datum_eq(result, 0, T_INT4))
+    PG_RETURN_NULL();
+  PG_RETURN_DATUM(result);
+"""
+GUARDED_PUBLIC = """
+  if (! ensure_valid_tnumber_tbox(temp, box))
+    return INT_MAX;
+  return (int) nad_tnumber_tbox(temp, box);
+"""
+NAD_TINT_TBOX = {"name": "nad_tint_tbox", "params": [{"name": "temp"}, {"name": "box"}]}
 
 
 class SqlArgParamsTests(unittest.TestCase):
@@ -1098,6 +1114,12 @@ class SqlArgParamsTests(unittest.TestCase):
         """#test_a_commuted_wrapper_reads_the_second_parameter_first, through a kernel."""
         self.assertEqual(_sql_arg_params(KERNEL_WRAPPER, DISTANCE_SET_INT, KERNEL_PUBLIC),
                          ["i", "s"])
+
+    def test_a_condition_is_not_the_kernel(self):
+        """#test_a_shared_kernel_states_the_order where both bodies open an `if` before the
+        kernel call: the condition is no call, so the kernel is nad_tnumber_tbox."""
+        self.assertEqual(_sql_arg_params(GUARDED_WRAPPER, NAD_TINT_TBOX, GUARDED_PUBLIC),
+                         ["box", "temp"])
 
     def test_a_shared_kernel_in_the_c_order_is_not_stated(self):
         """#test_the_c_order_is_not_stated, through a kernel."""
