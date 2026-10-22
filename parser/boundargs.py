@@ -204,8 +204,12 @@ def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
     return None, {}, {}
 
 
-# A call to a lowercase C function, the form every MEOS function takes.
-_CALLEE = re.compile(r"\b(?P<name>[a-z][a-z0-9_]*)\s*\(")
+# A call to a lowercase C function, the form every MEOS function takes. A keyword
+# followed by a parenthesis (`if (`, `while (`, `return (`, `sizeof (`) opens no call:
+# read as one, the condition of `nad_tint_tbox`'s first `if` paired with the wrapper's
+# `if (datum_eq(...))` as the kernel both of them call.
+_CALLEE = re.compile(r"\b(?!(?:if|else|for|while|do|switch|case|return|sizeof)\b)"
+                     r"(?P<name>[a-z][a-z0-9_]*)\s*\(")
 
 
 def _param_name(decl: str) -> str | None:
