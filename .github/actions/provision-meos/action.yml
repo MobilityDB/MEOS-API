@@ -60,14 +60,43 @@ runs:
     # types like size_t / json_object * / GSERIALIZED * resolve to their real
     # names instead of degrading to int / int *. Same install set as the
     # pytest / OpenAPI-validate regenerate paths so every path agrees.
+    # Every path installs them, so their .deb files are kept as the build path keeps its
+    # own (see "Key the provision caches"): a run that restores them installs without
+    # downloading, and a stalled mirror costs it only the index update.
+    - name: Key the libclang sysroot package cache
+      id: sysroot-keys
+      shell: bash
+      env:
+        PACKAGES: >-
+          clang libclang-dev libjson-c-dev libgsl-dev libproj-dev libgeos-dev
+          postgresql-server-dev-16
+      run: |
+        image="${ImageOS:-unknown}-${ImageVersion:-unknown}"
+        pkg_hash="$(echo "$PACKAGES" | tr -s ' \n' '\n\n' | sort | sha256sum | cut -c1-16)"
+        {
+          echo "packages=$PACKAGES"
+          echo "deb-prefix=provision-meos-sysroot-debs-${ImageOS:-unknown}-"
+          echo "deb-key=provision-meos-sysroot-debs-$image-$pkg_hash"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore the downloaded libclang sysroot packages
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/apt-sysroot-archives
+        key: ${{ steps.sysroot-keys.outputs.deb-key }}
+        restore-keys: ${{ steps.sysroot-keys.outputs.deb-prefix }}
+
     - name: Install dev headers for the libclang sysroot
       shell: bash
+      env:
+        APT_ARCHIVES: ${{ runner.temp }}/apt-sysroot-archives
       run: |
         bash "$GITHUB_ACTION_PATH/apt-get.sh" update -qq
         bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y --no-install-recommends \
-          clang libclang-dev \
-          libjson-c-dev libgsl-dev libproj-dev libgeos-dev \
-          postgresql-server-dev-16
+          ${{ steps.sysroot-keys.outputs.packages }}
+        # The cache step saves the directory as the runner user; apt wrote it as root.
+        sudo chmod -R a+rX "$APT_ARCHIVES"
+        sudo rm -f "$APT_ARCHIVES/lock"
 
     # run.py + parser/ + meta/ + requirements.txt + tools/provision-meos.sh all
     # live at the MEOS-API repo root. When this action is consumed cross-repo
