@@ -69,12 +69,13 @@ runs:
       env:
         PACKAGES: >-
           clang libclang-dev libjson-c-dev libgsl-dev libproj-dev libgeos-dev
-          postgresql-server-dev-16
       run: |
+        # The PostgreSQL server headers are those of the PostgreSQL the image ships.
+        packages="$PACKAGES $(bash "$GITHUB_ACTION_PATH/server-dev-package.sh")"
         image="${ImageOS:-unknown}-${ImageVersion:-unknown}"
-        pkg_hash="$(echo "$PACKAGES" | tr -s ' \n' '\n\n' | sort | sha256sum | cut -c1-16)"
+        pkg_hash="$(echo "$packages" | tr -s ' \n' '\n\n' | sort | sha256sum | cut -c1-16)"
         {
-          echo "packages=$PACKAGES"
+          echo "packages=$packages"
           echo "deb-prefix=provision-meos-sysroot-debs-${ImageOS:-unknown}-"
           echo "deb-key=provision-meos-sysroot-debs-$image-$pkg_hash"
         } >> "$GITHUB_OUTPUT"
