@@ -39,6 +39,7 @@ jobs:
       # two regenerate paths produce byte-identical catalogs.
       - name: Install dev headers for libclang sysroot
         run: |
+          bash .github/actions/provision-meos/pgdg-source.sh
           bash .github/actions/provision-meos/apt-get.sh update -qq
           bash .github/actions/provision-meos/apt-get.sh install -y --no-install-recommends \
             clang libclang-dev \
