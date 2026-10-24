@@ -92,6 +92,8 @@ runs:
       env:
         APT_ARCHIVES: ${{ runner.temp }}/apt-sysroot-archives
       run: |
+        # The server headers come from PGDG, where the image's PostgreSQL comes from.
+        bash "$GITHUB_ACTION_PATH/pgdg-source.sh"
         bash "$GITHUB_ACTION_PATH/apt-get.sh" update -qq
         bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y --no-install-recommends \
           ${{ steps.sysroot-keys.outputs.packages }}
@@ -126,8 +128,8 @@ runs:
 
     # Optional: build and install libmeos with all families. Mirrors the green
     # all-families recipe used by the JVM bindings: purge the runner's
-    # preinstalled PostgreSQL and use apt.postgresql.org PG17 so the vendored
-    # pgPointCloud PGXS build finds clang-19.
+    # preinstalled PostgreSQL and use apt.postgresql.org PG17 (the PGDG source the sysroot step
+    # added) so the vendored pgPointCloud PGXS build finds clang-19.
     - name: Remove preinstalled PostgreSQL [prefer apt.postgresql.org]
       if: inputs.build-libmeos == 'true'
       shell: bash
@@ -135,16 +137,6 @@ runs:
         sudo service postgresql stop || true
         bash "$GITHUB_ACTION_PATH/apt-get.sh" --purge remove postgresql* -y || true
         sudo rm -rf /var/lib/postgresql/ /etc/postgresql/ /var/log/postgresql/ || true
-
-    - name: Add PostgreSQL APT repository (PGDG)
-      if: inputs.build-libmeos == 'true'
-      shell: bash
-      run: |
-        bash "$GITHUB_ACTION_PATH/apt-get.sh" install -y --no-install-recommends \
-          curl ca-certificates gnupg
-        curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ \
-          $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 
     # The two caches of the build path. The packages: libgdal-dev depends on the -dev
     # packages of its drivers (mariadb, poppler, spatialite, xerces) and postgresql-server-dev-17
