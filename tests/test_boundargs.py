@@ -1415,5 +1415,92 @@ CREATE FUNCTION appendInstantTransition(tint, tint, interp text DEFAULT NULL,
                           "4": {"maxt": "NULL"}})
 
 
+PRESENCE_FLAG = r'''
+Datum
+Raster_reclass(PG_FUNCTION_ARGS)
+{
+  Raster *rast = (Raster *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+  int band = PG_GETARG_INT32(1);
+  char *expr = text_to_cstring(PG_GETARG_TEXT_P(2));
+  char *pixeltype = text_to_cstring(PG_GETARG_TEXT_P(3));
+  bool has_nodata = ! PG_ARGISNULL(4);
+  double nodataval = has_nodata ? PG_GETARG_FLOAT8(4) : 0.0;
+  Raster *result = raster_reclass(rast, band, expr, pixeltype, has_nodata,
+    nodataval);
+  PG_RETURN_POINTER(result);
+}
+
+Datum
+Raster_absent(PG_FUNCTION_ARGS)
+{
+  Raster *rast = (Raster *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+  bool no_value = PG_ARGISNULL(1);
+  double value = no_value ? -1.0 : PG_GETARG_FLOAT8(1);
+  Raster *result = raster_absent(rast, value, no_value);
+  PG_RETURN_POINTER(result);
+}
+'''
+
+
+class PresenceFlagTests(unittest.TestCase):
+    """#attach_null_default_binds reads a local stating whether a NULL default argument is
+    given (#_presence_flag) as a parameter the argument feeds: ``nullDefaultBinds`` states
+    what it and the value take when the argument is NULL, ``presentBinds`` what the flag
+    takes when it is given, whichever way the flag is written."""
+
+    SQL = '''
+CREATE FUNCTION reclass(rast raster, nband integer, reclassexpr text,
+    pixeltype text, nodataval float DEFAULT NULL)
+  RETURNS raster
+  AS 'MODULE_PATHNAME', 'Raster_reclass'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION absent(rast raster, value float DEFAULT NULL)
+  RETURNS raster
+  AS 'MODULE_PATHNAME', 'Raster_absent'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+'''
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "src").mkdir()
+        (root / "src" / "temporal_raster.c").write_text(PRESENCE_FLAG)
+        (root / "sql").mkdir()
+        (root / "sql" / "500_raster.in.sql").write_text(self.SQL)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _idl(self):
+        return {"functions": [
+            {"name": "raster_reclass", "mdbC": "Raster_reclass", "sqlfn": "reclass",
+             "params": [{"name": n} for n in
+                        ("rast", "band", "expr", "pixeltype", "has_nodata", "nodataval")],
+             "sqlSignatures": [{"args": ["raster", "integer", "text", "text", "float"],
+                                "ret": "raster",
+                                "argDefaults": [None, None, None, None, "NULL"]}]},
+            {"name": "raster_absent", "mdbC": "Raster_absent", "sqlfn": "absent",
+             "params": [{"name": n} for n in ("rast", "value", "no_value")],
+             "sqlSignatures": [{"args": ["raster", "float"], "ret": "raster",
+                                "argDefaults": [None, "NULL"]}]}]}
+
+    def test_a_flag_and_its_value_take_what_the_wrapper_passes(self):
+        idl, n = attach_null_default_binds(self._idl(), Path(self.tmp.name) / "src",
+                                           Path(self.tmp.name) / "sql")
+        sig = idl["functions"][0]["sqlSignatures"][0]
+        self.assertEqual(sig["nullDefaultBinds"],
+                         {"4": {"has_nodata": "false", "nodataval": "0.0"}})
+        self.assertEqual(sig["presentBinds"], {"4": {"has_nodata": "true"}})
+
+    def test_a_flag_stating_the_argument_is_absent_is_read_the_other_way(self):
+        idl, n = attach_null_default_binds(self._idl(), Path(self.tmp.name) / "src",
+                                           Path(self.tmp.name) / "sql")
+        sig = idl["functions"][1]["sqlSignatures"][0]
+        self.assertEqual(sig["nullDefaultBinds"],
+                         {"1": {"value": "-1.0", "no_value": "true"}})
+        self.assertEqual(sig["presentBinds"], {"1": {"no_value": "false"}})
+        self.assertEqual(n, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

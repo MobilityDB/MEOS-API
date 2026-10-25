@@ -716,6 +716,26 @@ def attach_type_derived_args(idl: dict, mdb_src: str | Path,
 # A local a wrapper takes from argument k unless it is NULL:
 # `quadbin = PG_ARGISNULL(1) ? 0 : PG_GETARG_QUADBIN(1)`.
 _ISNULL_CHOICE = r"(?<![\w.>]){var}\s*=(?!=)\s*PG_ARGISNULL\s*\(\s*(\d+)\s*\)\s*\?\s*([^:;]+?)\s*:"
+# A local stating whether argument k is given: `has_nodata = ! PG_ARGISNULL(4)`.
+_PRESENCE = re.compile(r"^(!\s*)?PG_ARGISNULL\s*\(\s*(\d+)\s*\)$")
+# A local a wrapper takes from a presence flag:
+# `nodataval = has_nodata ? PG_GETARG_FLOAT8(4) : 0.0`.
+_FLAG_CHOICE = r"(?<![\w.>]){var}\s*=(?!=)\s*(\w+)\s*\?\s*([^:;]+?)\s*:\s*([^;]+?)\s*;"
+
+
+def _presence_flag(body: str, var: str) -> tuple[int, str] | None:
+    """(k, value) when the local ``var`` of wrapper ``body`` states whether SQL argument ``k``
+    is given, every assignment of it reading ``! PG_ARGISNULL(k)`` (value ``true``) or
+    ``PG_ARGISNULL(k)`` (value ``false``), the value being the one it holds when the argument
+    is given; None otherwise. ``Raster_reclass`` passes ``has_nodata = ! PG_ARGISNULL(4)``
+    beside the value of argument 4, so one SQL argument feeds two C parameters."""
+    rhs = [m.group(1).strip() for m in
+           re.finditer(r"(?<![\w.>])" + re.escape(var) + r"\s*=(?!=)\s*([^;]+);", body)]
+    found = {(int(m.group(2)), "true" if m.group(1) else "false")
+             for m in (_PRESENCE.match(r) for r in rhs) if m}
+    if len(found) == 1 and len(rhs) == 1:
+        return found.pop()
+    return None
 
 
 def _null_value(body: str, var: str, k: int, sig: dict, linear: dict) -> str | None:
@@ -723,8 +743,18 @@ def _null_value(body: str, var: str, k: int, sig: dict, linear: dict) -> str | N
     or None when the wrapper states none: the literal it starts from where every assignment
     replacing it for the number of arguments of ``sig`` reads argument ``k``
     (#_guarded_default), the interpolation of the signature's temporal type it takes when
-    the call carries no ``k`` (#_type_choice), or the literal of
-    ``var = PG_ARGISNULL(k) ? literal : ...``."""
+    the call carries no ``k`` (#_type_choice), the literal of
+    ``var = PG_ARGISNULL(k) ? literal : ...``, the value of a presence flag of ``k``
+    (#_presence_flag) when the argument is not given, or the literal of the branch
+    ``var = flag ? ... : ...`` takes when that flag states it is not given."""
+    flag = _presence_flag(body, var)
+    if flag is not None:
+        return ("false" if flag[1] == "true" else "true") if flag[0] == k else None
+    m = re.search(_FLAG_CHOICE.format(var=re.escape(var)), body)
+    if m:
+        f = _presence_flag(body, m.group(1))
+        if f is not None and f[0] == k:
+            return _literal((m.group(3) if f[1] == "true" else m.group(2)).strip())
     g = _guarded_default(body, var)
     if g is not None:
         nargs = len(sig.get("args") or ())
@@ -756,7 +786,11 @@ def attach_null_default_binds(idl: dict, mdb_src: str | Path, sql_src: str | Pat
     of a signature whose CREATE FUNCTION is not STRICT (a STRICT one answers NULL without
     calling the wrapper), ``nullDefaultBinds[k]`` maps every C parameter argument ``k``
     feeds (#_caller_index) to that value, stated only when the wrapper gives every one of
-    them a value. Runs once the temporal types are attached; the wrappers are traced as
+    them a value. A parameter stating whether the argument is given (#_presence_flag) is
+    one the argument feeds too, and ``presentBinds[k]`` states the value it takes when the
+    argument is given: ``reclass(..., nodataval float DEFAULT NULL)`` passes ``nodataval``
+    0.0 and ``has_nodata`` false when it is NULL, the argument and ``has_nodata`` true
+    otherwise. Runs once the temporal types are attached; the wrappers are traced as
     #merge_boundargs traces them."""
     from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs, _wrapper_sql_strict
     wrappers = extract_wrappers(mdb_src)
@@ -785,20 +819,29 @@ def attach_null_default_binds(idl: dict, mdb_src: str | Path, sql_src: str | Pat
             args = _call_args(body, func["name"]) or _call_args(body, "pg_" + func["name"])
             if not args:
                 continue
-            fed = {}
+            fed, flags = {}, {}
             for pos, a in enumerate(args):
                 if pos < len(params) and _IDENT.match(a):
                     k = _caller_index(body, a, nargs=len(sig.get("args") or ()))
+                    if k is None:
+                        flag = _presence_flag(body, a)
+                        if flag is not None:
+                            k = flag[0]
+                            flags.setdefault(k, {})[params[pos]] = flag[1]
                     if k is not None:
                         fed.setdefault(k, []).append((params[pos], a))
-            binds = {}
+            binds, present = {}, {}
             for k in nulls:
                 vals = {p: _null_value(body, a, k, sig, linear) for p, a in fed.get(k, ())}
                 if vals and all(v is not None for v in vals.values()):
                     binds[str(k)] = vals
+                    if k in flags:
+                        present[str(k)] = flags[k]
             if binds:
                 sig["nullDefaultBinds"] = binds
                 n += len(binds)
+            if present:
+                sig["presentBinds"] = present
     return idl, n
 
 
