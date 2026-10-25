@@ -541,6 +541,55 @@ def declared_composites(path=_COLUMNS_META):
             for key, entry in (doc.get("composites") or {}).items()}
 
 
+def declared_arrays(path=_COLUMNS_META):
+    """The layout a wrapper gives the SQL array a function returns beyond the C array,
+    stated in `meta/sql-columns.json` beside the rows #declared_columns reads, keyed by
+    SQL name: {sqlName: {"nulls": ..., "rowLength": {"call": ..., "args": [...]}}}."""
+    doc = json.loads(Path(path).read_text())
+    return {key: {k: v for k, v in entry.items() if k != "note"}
+            for key, entry in (doc.get("arrays") or {}).items()}
+
+
+def attach_array_shapes(idl, declared=None):
+    """(idl, number of signatures stating their array's layout) once each SQL signature
+    returning an array whose layout only its wrapper gives states it as `arrayShape`:
+    `nulls`, the output array whose true elements are NULL elements of the SQL array, and
+    `rowLength`, the public function and the parameters of the function answering the
+    length of each row of a two-dimensional SQL array, its rows laid out one after the
+    other in the C array. `dumpValues(raster, integer, boolean)` answers the values of a
+    band as a height by width array, NULL where `nodata` is true, each row `raster_width`
+    of the raster long, as #declared_columns states what a wrapper computes of a row.
+
+    A statement naming no output array of its function, a call the catalog does not
+    hold or parameters the function does not take, or a statement no signature takes,
+    stops the catalog: a binding reading it would lay out an array PostgreSQL does not
+    return."""
+    declared = declared_arrays() if declared is None else declared
+    names = {f["name"] for f in idl["functions"]}
+    bad, used, n = [], set(), 0
+    for f in idl["functions"]:
+        outs = {a["param"] for a in (f.get("shape") or {}).get("outputArrays") or ()}
+        params = {p["name"] for p in f.get("params") or ()}
+        for s in f.get("sqlSignatures") or ():
+            key = s.get("sqlName") or f.get("sqlfn")
+            st = declared.get(key)
+            if not st or not str(s.get("ret") or "").endswith("[]"):
+                continue
+            used.add(key)
+            rl = st.get("rowLength")
+            if ("nulls" in st and st["nulls"] not in outs) or \
+                    (rl and (rl["call"] not in names or not set(rl["args"]) <= params)):
+                bad.append(f"{f['name']}: {key}({', '.join(s['args'])})")
+                continue
+            s["arrayShape"] = dict(st)
+            n += 1
+    bad += [f"{key}: no SQL signature returning an array" for key in declared if key not in used]
+    if bad:
+        raise ValueError("SQL array layouts meta/sql-columns.json states that no function "
+                         "takes:\n  " + "\n  ".join(sorted(set(bad))))
+    return idl, n
+
+
 def _c_base(ctype):
     """A C type without `const`, `struct` and its pointer levels, with the
     `<stdint.h>` spellings read as MEOS's own (`int64_t` is `int64`), and the number of

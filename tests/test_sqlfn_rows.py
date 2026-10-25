@@ -23,7 +23,8 @@ import unittest
 from pathlib import Path
 
 from parser.sqlfn import (_wrapper_sql_sigs, attach_row_sources, attach_sqlfn_map,
-                          declared_columns, declared_composites)
+                          attach_array_shapes, declared_arrays, declared_columns,
+                          declared_composites)
 
 ROOT = Path(__file__).resolve().parents[1]
 COLUMNS = ROOT / "meta" / "sql-columns.json"
@@ -496,6 +497,66 @@ class DeclaredColumnsTests(unittest.TestCase):
         doc["composites"]["geomval"]["columns"][0] = ["geom"]
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(doc, json.loads(SCHEMA.read_text()))
+
+    def test_the_array_layouts_are_read_by_sql_name(self):
+        """As #test_the_declarations_are_read_by_row reads the rows."""
+        self.assertEqual(declared_arrays(COLUMNS)["dumpValues"],
+                         {"nulls": "nodata",
+                          "rowLength": {"call": "raster_width", "args": ["rast"]}})
+
+    def test_a_row_length_without_its_call_is_refused(self):
+        """As #test_an_unknown_source_is_refused refuses a row's column."""
+        import jsonschema
+        doc = json.loads(COLUMNS.read_text())
+        del doc["arrays"]["dumpValues"]["rowLength"]["call"]
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(doc, json.loads(SCHEMA.read_text()))
+
+
+DUMP_VALUES_LAYOUT = {"dumpValues": {"nulls": "nodata",
+                                     "rowLength": {"call": "raster_width", "args": ["rast"]}}}
+
+
+def _array_idl(layout=None):
+    """raster_dump_values over its one-band signature returning double precision[], and
+    raster_width, through #attach_array_shapes with the statement `layout`."""
+    func = _dump_values(["raster", "integer[]", "boolean"])
+    func["sqlSignatures"] = func["sqlSignatures"][1:]
+    width = {"name": "raster_width", "sqlfn": "width",
+             "params": [{"name": "rast", "cType": "const Raster *"}],
+             "returnType": {"c": "int"}}
+    idl, n = attach_array_shapes({"functions": [func, width]},
+                                 DUMP_VALUES_LAYOUT if layout is None else layout)
+    return idl["functions"][0]["sqlSignatures"][0], n
+
+
+class ArrayShapeTests(unittest.TestCase):
+
+    def test_an_array_states_its_null_mask_and_the_length_of_its_rows(self):
+        """As #test_a_stated_source_feeds_its_column feeds a row's column from its statement."""
+        sig, n = _array_idl()
+        self.assertEqual(n, 1)
+        self.assertEqual(sig["arrayShape"], DUMP_VALUES_LAYOUT["dumpValues"])
+
+    def test_a_null_mask_naming_no_output_array_stops_the_catalog(self):
+        """As #test_a_stated_source_naming_no_c_value_stops_the_catalog."""
+        layout = {"dumpValues": dict(DUMP_VALUES_LAYOUT["dumpValues"], nulls="values")}
+        with self.assertRaisesRegex(ValueError, "dumpValues"):
+            _array_idl(layout)
+
+    def test_a_row_length_calling_no_catalog_function_stops_the_catalog(self):
+        """As #test_a_stated_source_naming_no_c_value_stops_the_catalog."""
+        layout = {"dumpValues": dict(DUMP_VALUES_LAYOUT["dumpValues"],
+                                     rowLength={"call": "raster_cols", "args": ["rast"]})}
+        with self.assertRaisesRegex(ValueError, "dumpValues"):
+            _array_idl(layout)
+
+    def test_a_layout_no_signature_takes_stops_the_catalog(self):
+        """As #test_a_stated_source_naming_no_c_value_stops_the_catalog, for a statement
+        whose SQL name returns no array."""
+        layout = dict(DUMP_VALUES_LAYOUT, pixelValues={"nulls": "nodata"})
+        with self.assertRaisesRegex(ValueError, "pixelValues"):
+            _array_idl(layout)
 
 
 if __name__ == "__main__":
