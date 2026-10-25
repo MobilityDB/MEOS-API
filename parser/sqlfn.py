@@ -333,7 +333,10 @@ def sql_statements(sql_src):
         for stmt in _create_fn_stmts(text, bodies=True):
             stmts.append(stmt)
             argdecls, ret = stmt[1], stmt[2]
-            if ret:
+            table = _table_columns(ret)
+            if table:
+                vocab.update(t for _, t in table)               # each column of RETURNS TABLE is a type
+            elif ret:
                 vocab.add(ret)                                  # a RETURNS clause is always a type
             for a in argdecls:
                 bt = _bare_type(a)
@@ -342,13 +345,25 @@ def sql_statements(sql_src):
     return stmts, vocab, composites
 
 
+def _table_columns(ret):
+    """The `(name, type)` columns of a `RETURNS TABLE (...)` clause, or None for any other
+    return type."""
+    m = re.match(r"TABLE\s*\((.*)\)$", ret or "", re.I | re.S)
+    return [_column(c) for c in _split_top_commas(m.group(1)) if c.strip()] if m else None
+
+
 def sql_signature(sqlname, argdecls, ret, retset, vocab, composites):
     """The SQL signature {sqlName, args, required, argDefaults, ret, retSet, columns} a
-    CREATE FUNCTION states, as #_wrapper_sql_sigs lists it."""
+    CREATE FUNCTION states, as #_wrapper_sql_sigs lists it. `RETURNS TABLE (...)` is
+    PostgreSQL's set of rows whose columns are its OUT arguments: a set of `record`, or of
+    the type of its one column, as `pixelAsPoints` returns its rows `(geom, val, x, y)`."""
+    table = _table_columns(ret)
+    if table:
+        ret, retset = ("record" if len(table) > 1 else table[0][1]), True
     indecls = [a for a in argdecls if _is_in_arg(a)]
     outcols = [_column(_OUTMODE.sub("", a.strip())) for a in argdecls
                if _OUTMODE.match(a.strip())]
-    columns = outcols or composites.get(ret)
+    columns = table or outcols or composites.get(ret)
     return {"sqlName": sqlname, "args": [_arg_type(a, vocab) for a in indecls],
             "required": sum(1 for a in indecls if not re.search(r"\bDEFAULT\b", a, re.I)),
             "argDefaults": [_arg_default(a) for a in indecls],
@@ -705,7 +720,12 @@ def attach_row_sources(idl, declared=None):
     Runs once the object model and the type relations are attached, since a column
     is matched to a C value by type. A row whose columns no C value and no
     declaration feeds stops the catalog: guessing a column's source would hand a
-    binding a row PostgreSQL does not return."""
+    binding a row PostgreSQL does not return. Such a row of a signature passing a SQL
+    array where the function takes one element of it (#_loops_over_an_array) is the
+    wrapper's loop of calls, not a projection of the function, and the function gives the
+    signature up, as #attach_claims_fit gives up an unfit shared signature:
+    `dumpValues(raster, integer[], boolean)` calls `raster_dump_values` once per band of
+    its array, and each row's `nband` is a band of the argument."""
     declared = declared_columns() if declared is None else declared
     sqlc = _sql_ctypes(idl)
     structs = {s["name"]: s for s in idl.get("structs") or ()}
@@ -713,16 +733,21 @@ def attach_row_sources(idl, declared=None):
     for f in idl["functions"]:
         ar = (f.get("shape") or {}).get("arrayReturn")
         struct = structs.get(_c_base(ar["element"]["c"])[0]) if ar else None
+        unfit = []
         for s in f.get("sqlSignatures") or ():
             if not s.get("columns"):
                 continue
             columns = _column_sources(f, s, sqlc, declared, struct)
-            if columns is None:
+            if columns is None and _loops_over_an_array(f, s, sqlc):
+                unfit.append(s)
+            elif columns is None:
                 unfed.append(f"{f['name']}: {s.get('sqlName', f.get('sqlfn'))}"
                              f"({', '.join(s['args'])}) RETURNS {s['ret']}")
             else:
                 s["columns"] = columns
                 n += 1
+        if unfit:
+            f["sqlSignatures"] = [s for s in f["sqlSignatures"] if s not in unfit]
     if unfed:
         raise ValueError(
             "SQL rows with a column MEOS states no source for; state it in "
@@ -737,6 +762,19 @@ def _signature_fits(func, sig, sqlc):
     two counts differ (an argument left to its default). The parameters `sig` binds, the
     out-parameters and the length of each input array take no argument: a SQL array is
     the C array together with its count (`shape.inputArrays`)."""
+    got = _signature_inputs(func, sig)
+    if got is None:
+        return None
+    inputs, types = got
+
+    def fit(order):
+        return all(_fits(t, *_c_base(p.get("cType")), sqlc) for t, p in zip(types, order))
+    return fit(inputs) or any(fit(o) for o in permutations(inputs))
+
+
+def _signature_inputs(func, sig):
+    """(the C input parameters of `func`, the SQL types of the arguments of `sig`) as
+    #_signature_fits matches them, or None when the two counts differ."""
     shape = func.get("shape") or {}
     bound = sig.get("boundArgs") or shape.get("boundArgs") or {}
     out = set(shape.get("outParams") or ())
@@ -750,10 +788,20 @@ def _signature_fits(func, sig, sqlc):
     for a in sig["args"]:
         t = re.sub(r"\s*\(.*\)$", "", a.strip().lower())
         types.append(SQL_ALIASES.get(t, t))
+    return inputs, types
 
-    def fit(order):
-        return all(_fits(t, *_c_base(p.get("cType")), sqlc) for t, p in zip(types, order))
-    return fit(inputs) or any(fit(o) for o in permutations(inputs))
+
+def _loops_over_an_array(func, sig, sqlc):
+    """Whether `sig` passes a SQL array where `func` takes one element of it, an argument
+    `X[]` at a C parameter of the type of an `X` (#_signature_inputs): the wrapper calls
+    the function once per element, as `dumpValues(raster, integer[], boolean)` calls
+    `raster_dump_values` once per band."""
+    got = _signature_inputs(func, sig)
+    if got is None:
+        return False
+    inputs, types = got
+    return any(t.endswith("[]") and _fits(t[:-2], *_c_base(p.get("cType")), sqlc)
+               and not _fits(t, *_c_base(p.get("cType")), sqlc) for t, p in zip(types, inputs))
 
 
 def attach_claims_fit(idl):

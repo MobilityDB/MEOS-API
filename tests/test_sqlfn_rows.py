@@ -75,6 +75,15 @@ CREATE FUNCTION unnest(intset)
   RETURNS SETOF integer
   AS 'MODULE_PATHNAME', 'Set_unnest'
   LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION pixelAsPoints(rast raster, band integer DEFAULT 1,
+    exclude_nodata_value boolean DEFAULT true)
+  RETURNS TABLE(geom geometry, val double precision, x integer, y integer)
+  AS 'MODULE_PATHNAME', 'Raster_pixel_as_points'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION bandNumbers(raster)
+  RETURNS TABLE (nband integer)
+  AS 'MODULE_PATHNAME', 'Raster_band_numbers'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 CREATE FUNCTION dumpAsPolygons(rast raster, band integer DEFAULT 1,
     exclude_nodata_value boolean DEFAULT true)
   RETURNS SETOF geomval
@@ -116,6 +125,20 @@ class ColumnDeclarationTests(unittest.TestCase):
         s = _sigs()["Raster_dump_as_polygons"][0]
         self.assertEqual((s["ret"], s["retSet"]), ("geomval", True))
         self.assertEqual(s["columns"], [("geom", "geometry"), ("val", "double precision")])
+
+    def test_returns_table_is_a_set_of_records_of_its_columns(self):
+        """As #test_out_arguments_are_columns_not_args: RETURNS TABLE is PostgreSQL's
+        set of rows whose columns are OUT arguments."""
+        s = _sigs()["Raster_pixel_as_points"][0]
+        self.assertEqual((s["ret"], s["retSet"]), ("record", True))
+        self.assertEqual(s["args"], ["raster", "integer", "boolean"])
+        self.assertEqual(s["columns"], [("geom", "geometry"), ("val", "double precision"),
+                                        ("x", "integer"), ("y", "integer")])
+
+    def test_returns_table_of_one_column_is_a_set_of_its_type(self):
+        """As #test_one_value_has_no_columns, for the one column of a RETURNS TABLE."""
+        s = _sigs()["Raster_band_numbers"][0]
+        self.assertEqual((s["ret"], s["retSet"], s["columns"]), ("integer", True, None))
 
     def test_one_value_has_no_columns(self):
         self.assertIsNone(_sigs()["Set_unnest"][0]["columns"])
@@ -331,7 +354,47 @@ class RowSourceTests(unittest.TestCase):
         self.assertEqual(n, 0)
 
 
+def _dump_values(args):
+    """raster_dump_values over the SQL signature `args` returning the rows (nband,
+    valarray) a wrapper loop over bands answers, and its one-band signature."""
+    return {
+        "name": "raster_dump_values",
+        "sqlfn": "dumpValues",
+        "params": [{"name": "rast", "cType": "const Raster *"},
+                   {"name": "band", "cType": "int"},
+                   {"name": "exclude_nodata", "cType": "bool"},
+                   {"name": "nodata", "cType": "bool **"}, _count()],
+        "returnType": {"c": "double *"},
+        "shape": {"arrayReturn": {"lengthFrom": {"kind": "param", "name": "count"},
+                                  "element": {"c": "double"}},
+                  "outputArrays": [{"param": "nodata"}], "outParams": ["nodata", "count"]},
+        "sqlSignatures": [
+            {"args": args, "ret": "record", "retSet": True,
+             "columns": _cols(("nband", "integer"), ("valarray", "double precision[]"))},
+            {"args": ["raster", "integer", "boolean"], "ret": "double precision[]"}]}
+
+
+def _attach_raster(func):
+    idl = copy.deepcopy(CATALOG)
+    idl["objectModel"]["classes"]["Raster"] = {"cType": "Raster"}
+    idl["functions"] = [func]
+    idl, _ = attach_row_sources(idl, {})
+    return idl["functions"][0]["sqlSignatures"]
+
+
 class UnfedRowTests(unittest.TestCase):
+
+    def test_an_unfed_row_of_an_unfit_signature_is_given_up(self):
+        """As #attach_claims_fit gives up an unfit shared signature: dumpValues(raster,
+        integer[], boolean) loops over the bands of its array, so no C value feeds nband
+        and its arguments do not fit the one band the C function takes."""
+        sigs = _attach_raster(_dump_values(["raster", "integer[]", "boolean"]))
+        self.assertEqual([s["args"] for s in sigs], [["raster", "integer", "boolean"]])
+
+    def test_an_unfed_row_of_a_fitting_signature_still_stops_the_catalog(self):
+        """As #test_a_column_no_c_value_fits_stops_the_catalog, for a signature that fits."""
+        with self.assertRaisesRegex(ValueError, "dumpValues"):
+            _attach_raster(_dump_values(["raster", "integer", "boolean"]))
 
     def test_a_column_no_c_value_fits_stops_the_catalog(self):
         func = copy.deepcopy(VALUE_TIME_SPLIT)

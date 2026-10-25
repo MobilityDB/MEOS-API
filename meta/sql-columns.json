@@ -79,6 +79,14 @@
     "valuePercent": {
       "note": "A ValueCount holds the count and the percent of a value; the rows of valuePercent read its value and its percent, as PostGIS's ST_ValuePercent does.",
       "columns": {"value": {"field": "value"}, "percent": {"field": "percent"}}
+    },
+    "pixelAsPoints": {
+      "note": "A Pixel holds its column, its row, whether it is nodata, its value and its point; the rows of pixelAsPoints read its point, its value, its column and its row, as PostGIS's ST_PixelAsPoints does.",
+      "columns": {"geom": {"field": "geom"}, "val": {"field": "value"}, "x": {"field": "x"}, "y": {"field": "y"}}
+    },
+    "geoPoseFrames": {
+      "note": "A GeoPoseFrame holds the fields of one row of the geopose_frames table, each read by the column of its name.",
+      "columns": {"frame_id": {"field": "frame_id"}, "authority": {"field": "authority"}, "code": {"field": "code"}, "name": {"field": "name"}, "srid": {"field": "srid"}, "is_geographic": {"field": "is_geographic"}, "description": {"field": "description"}}
     }
   }
 }
