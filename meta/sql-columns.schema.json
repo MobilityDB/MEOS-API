@@ -9,6 +9,33 @@
   "properties": {
     "$schema": { "type": "string" },
     "description": { "type": "string" },
+    "composites": {
+      "type": "object",
+      "description": "The composite types of another extension a SQL function returns, which the SQL the catalog reads does not create, keyed by type name.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["note", "columns"],
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "The extension creating the type, and the functions returning it.",
+            "minLength": 1
+          },
+          "columns": {
+            "type": "array",
+            "description": "The (name, SQL type) of each member, in order.",
+            "minItems": 1,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
     "rows": {
       "type": "object",
       "description": "Keyed by the composite type a function returns, or by its SQL name when it returns record.",

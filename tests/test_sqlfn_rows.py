@@ -23,7 +23,7 @@ import unittest
 from pathlib import Path
 
 from parser.sqlfn import (_wrapper_sql_sigs, attach_row_sources, attach_sqlfn_map,
-                          declared_columns)
+                          declared_columns, declared_composites)
 
 ROOT = Path(__file__).resolve().parents[1]
 COLUMNS = ROOT / "meta" / "sql-columns.json"
@@ -75,6 +75,11 @@ CREATE FUNCTION unnest(intset)
   RETURNS SETOF integer
   AS 'MODULE_PATHNAME', 'Set_unnest'
   LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION dumpAsPolygons(rast raster, band integer DEFAULT 1,
+    exclude_nodata_value boolean DEFAULT true)
+  RETURNS SETOF geomval
+  AS 'MODULE_PATHNAME', 'Raster_dump_as_polygons'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 """
 
 
@@ -104,6 +109,13 @@ class ColumnDeclarationTests(unittest.TestCase):
         self.assertEqual(s["ret"], "index_tbox")
         self.assertEqual(s["columns"], [("index", "integer"), ("tile", "tbox")])
         self.assertEqual(s["argDefaults"], [None, None, "'2000-01-03'"])
+
+    def test_a_composite_of_another_extension_gives_its_declared_members(self):
+        """As #test_a_composite_return_type_gives_its_members, for a type the SQL does
+        not create: geomval's members are those meta/sql-columns.json states for it."""
+        s = _sigs()["Raster_dump_as_polygons"][0]
+        self.assertEqual((s["ret"], s["retSet"]), ("geomval", True))
+        self.assertEqual(s["columns"], [("geom", "geometry"), ("val", "double precision")])
 
     def test_one_value_has_no_columns(self):
         self.assertIsNone(_sigs()["Set_unnest"][0]["columns"])
@@ -408,6 +420,19 @@ class DeclaredColumnsTests(unittest.TestCase):
         declared = declared_columns(COLUMNS)
         self.assertEqual(declared["index_tbox"], {"index": {"from": "ordinal"}})
         self.assertEqual(declared["tDisjointPairs"], PAIRS_OFFSET)
+
+    def test_the_composites_are_read_by_type(self):
+        """As #test_the_declarations_are_read_by_row reads the rows."""
+        self.assertEqual(declared_composites(COLUMNS)["geomval"],
+                         [("geom", "geometry"), ("val", "double precision")])
+
+    def test_a_composite_member_without_a_type_is_refused(self):
+        """As #test_an_unknown_source_is_refused refuses a row's column."""
+        import jsonschema
+        doc = json.loads(COLUMNS.read_text())
+        doc["composites"]["geomval"]["columns"][0] = ["geom"]
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(doc, json.loads(SCHEMA.read_text()))
 
 
 if __name__ == "__main__":
