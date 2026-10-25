@@ -36,6 +36,42 @@
         }
       }
     },
+    "arrays": {
+      "type": "object",
+      "description": "The layout a wrapper gives the SQL array a function returns beyond the C array, keyed by SQL name.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["note"],
+        "minProperties": 2,
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "What the wrapper lays out, and why MEOS does not state it.",
+            "minLength": 1
+          },
+          "nulls": {
+            "description": "The output array whose true elements are NULL elements of the SQL array.",
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$"
+          },
+          "rowLength": {
+            "description": "The public function, and the parameters of the function it takes, answering the length of each row of a two-dimensional SQL array whose rows the C array lays out one after the other.",
+            "type": "object",
+            "required": ["call", "args"],
+            "additionalProperties": false,
+            "properties": {
+              "call": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
+              "args": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"}
+              }
+            }
+          }
+        }
+      }
+    },
     "rows": {
       "type": "object",
       "description": "Keyed by the composite type a function returns, or by its SQL name when it returns record.",

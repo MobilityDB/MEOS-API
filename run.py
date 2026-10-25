@@ -27,7 +27,7 @@ from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
-                          attach_claims_fit,
+                          attach_array_shapes, attach_claims_fit,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
                           lint_ea_sqlfn, lint_positional_sqlfn,
                           lint_sqlfn_case_collisions, state_deployed_sqlfn)
@@ -423,6 +423,12 @@ def main():
     # type; a row with a column nothing feeds stops the catalog.
     idl, nrows = attach_row_sources(idl)
     print(f"      SQL rows with every column's C source: {nrows}", file=sys.stderr)
+    # State the layout a wrapper gives a returned SQL array beyond the C array, its NULL
+    # elements and the length of its rows, read against the SQL signatures; a statement no
+    # function takes stops the catalog.
+    if SQL_SRC.exists():
+        idl, narrays = attach_array_shapes(idl)
+        print(f"      SQL arrays stating their layout: {narrays}", file=sys.stderr)
 
     # State each SQL function composed over the functions of another type, its casts,
     # call and restore named by MEOS function, read from the deployed SQL bodies and

@@ -7,6 +7,13 @@
       "columns": [["geom", "geometry"], ["val", "double precision"]]
     }
   },
+  "arrays": {
+    "dumpValues": {
+      "note": "raster_dump_values answers the values of a band row by row and, in nodata, true for a nodata pixel; its wrapper answers them as a height by width array, NULL for a nodata pixel, as PostGIS's ST_DumpValues does, each row raster_width of the raster long.",
+      "nulls": "nodata",
+      "rowLength": {"call": "raster_width", "args": ["rast"]}
+    }
+  },
   "rows": {
     "geomval": {
       "note": "A GeomVal holds a polygon and the value of the pixels it covers; the rows of geomval read its geom and its val, as PostGIS's ST_DumpAsPolygons does.",
