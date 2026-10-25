@@ -321,8 +321,9 @@ def sql_statements(sql_src):
     """(statements, type vocabulary, composite types) of the CREATE FUNCTION statements
     under `sql_src`, each statement as #_create_fn_stmts yields it with its body. The
     vocabulary holds every RETURNS type and every single-token argument type, so an
-    argument's type is read against it (#_arg_type)."""
-    stmts, vocab, composites = [], set(), {}
+    argument's type is read against it (#_arg_type). The composite types are those the
+    SQL creates and those of another extension a function returns (#declared_composites)."""
+    stmts, vocab, composites = [], set(), dict(declared_composites())
     sql_src = Path(sql_src)
     if not sql_src.exists():
         return stmts, vocab, composites
@@ -512,6 +513,17 @@ def declared_columns(path=_COLUMNS_META):
     type a function returns, or by its SQL name when it returns `record`."""
     doc = json.loads(Path(path).read_text())
     return {key: entry["columns"] for key, entry in doc["rows"].items()}
+
+
+def declared_composites(path=_COLUMNS_META):
+    """The composite types of another extension a SQL function returns, stated in
+    `meta/sql-columns.json` beside the rows #declared_columns reads, since the SQL the
+    catalog reads creates none of them; {typeName: [(column, type), ...]} as
+    #_composite_types yields the ones it creates: PostGIS's `geomval`, the rows of
+    `dumpAsPolygons`."""
+    doc = json.loads(Path(path).read_text())
+    return {key: [tuple(c) for c in entry["columns"]]
+            for key, entry in (doc.get("composites") or {}).items()}
 
 
 def _c_base(ctype):

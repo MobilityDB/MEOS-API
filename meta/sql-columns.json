@@ -1,7 +1,17 @@
 {
   "$schema": "./sql-columns.schema.json",
   "description": "The columns of rows a SQL function returns whose value MEOS does not state. parser/sqlfn.py feeds every column of a returned row from the C value of its type: the value or array the function returns, or an out-parameter. A column its wrapper computes rather than reads is declared here, keyed by the composite type the function returns, or by its SQL name when it returns record; a row with a column neither fed nor declared stops the catalog.",
+  "composites": {
+    "geomval": {
+      "note": "PostGIS's composite of a geometry and a value, created by postgis_raster, which MobilityDB requires when built with RASTER; dumpAsPolygons returns a set of them.",
+      "columns": [["geom", "geometry"], ["val", "double precision"]]
+    }
+  },
   "rows": {
+    "geomval": {
+      "note": "A GeomVal holds a polygon and the value of the pixels it covers; the rows of geomval read its geom and its val, as PostGIS's ST_DumpAsPolygons does.",
+      "columns": {"geom": {"field": "geom"}, "val": {"field": "val"}}
+    },
     "index_tbox": {
       "note": "The tiles of a temporal box: index numbers them from 1 in the order the MEOS array returns them.",
       "columns": {"index": {"from": "ordinal"}}
