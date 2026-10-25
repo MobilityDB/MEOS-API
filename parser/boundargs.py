@@ -910,6 +910,24 @@ def _kernel_args(body: str, func: dict, meos_body: str | None) -> list[str | Non
     return None
 
 
+def _expr_caller_index(body: str, expr: str) -> int | None:
+    """The SQL argument an expression handed to the kernel carries, the one argument the
+    locals it reads carry (#_caller_index): ``Raster_make`` passes
+    ``(const uint8_t *) VARDATA_ANY(pixels)``, which carries argument 0 through
+    ``pixels = PG_GETARG_BYTEA_PP(0)``. None for a bare local, which #_caller_index reads,
+    and where the locals carry no argument or several."""
+    expr = _CAST.sub("", expr.strip())
+    if _IDENT.match(expr):
+        return None
+    found = set()
+    for ident in set(re.findall(r"\b[a-z_]\w*\b", expr)):
+        if re.search(r"(?<![\w.>])" + re.escape(ident) + r"\s*=(?!=)", body):
+            k = _caller_index(body, ident)
+            if k is not None:
+                found.add(k)
+    return found.pop() if len(found) == 1 else None
+
+
 def _sql_arg_params(body: str, func: dict, meos_body: str | None = None) -> list[str] | None:
     """The C parameters of ``func`` in the order of the SQL arguments the wrapper ``body``
     reads for them, or None when that is their C order or cannot be read: the call
@@ -920,11 +938,17 @@ def _sql_arg_params(body: str, func: dict, meos_body: str | None = None) -> list
     if not args:
         return None
     params = func.get("params", [])
+    # The length of an input array travels with it, so it carries no argument of its own
+    lengths = {(a.get("lengthFrom") or {}).get("name")
+               for a in (func.get("shape") or {}).get("inputArrays") or []}
     by_k: dict[int, str] = {}
     for a, p in zip(args, params):
-        if a is None or a.strip().startswith("&") or _literal(a.strip()) is not None:
+        if a is None or a.strip().startswith("&") or _literal(a.strip()) is not None \
+                or p["name"] in lengths:
             continue
         k = _caller_index(body, a)
+        if k is None:
+            k = _expr_caller_index(body, a)
         if k is not None:
             if k in by_k:
                 return None

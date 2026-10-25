@@ -1093,6 +1093,18 @@ GUARDED_PUBLIC = """
   return (int) nad_tnumber_tbox(temp, box);
 """
 NAD_TINT_TBOX = {"name": "nad_tint_tbox", "params": [{"name": "temp"}, {"name": "box"}]}
+# A wrapper reading a bytea first and passing it last, as an expression over its local.
+BYTES_LAST = """
+  bytea *pixels = PG_GETARG_BYTEA_PP(0);
+  int width = PG_GETARG_INT32(1);
+  char *pixeltype = text_to_cstring(PG_GETARG_TEXT_PP(3));
+  Raster *result = raster_make(width, PG_GETARG_INT32(2), pixeltype,
+    (const uint8_t *) VARDATA_ANY(pixels), (size_t) VARSIZE_ANY_EXHDR(pixels));
+"""
+RASTER_MAKE = {"name": "raster_make", "params": [
+    {"name": n} for n in ("width", "height", "pixeltype", "pixels", "size")],
+    "shape": {"inputArrays": [{"param": "pixels",
+                               "lengthFrom": {"kind": "param", "name": "size"}}]}}
 
 
 class SqlArgParamsTests(unittest.TestCase):
@@ -1130,6 +1142,18 @@ class SqlArgParamsTests(unittest.TestCase):
     def test_without_the_public_body_nothing_is_stated(self):
         """#test_a_shared_kernel_states_the_order without the body of the public function."""
         self.assertIsNone(_sql_arg_params(KERNEL_WRAPPER, DISTANCE_SET_INT))
+
+    def test_an_expression_argument_carries_what_its_local_carries(self):
+        """A bytea read first and passed last, as an expression over its local, with its
+        length beside it: the length travels with its array and carries no argument."""
+        self.assertEqual(_sql_arg_params(BYTES_LAST, RASTER_MAKE),
+                         ["pixels", "width", "height", "pixeltype"])
+
+    def test_an_expression_reading_two_arguments_carries_none(self):
+        """#test_an_expression_argument_carries_what_its_local_carries where the expression
+        reads two locals carrying different arguments, so the order cannot be read."""
+        body = BYTES_LAST.replace("VARDATA_ANY(pixels)", "VARDATA_ANY(pixels) + width")
+        self.assertIsNone(_sql_arg_params(body, RASTER_MAKE))
 
 
 IDL = Path(__file__).resolve().parent.parent / "output" / "meos-idl.json"
