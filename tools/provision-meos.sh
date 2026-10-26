@@ -35,6 +35,10 @@
 #   --catalog-out <path>   Copy the catalog here in addition to <meos-api>/output/meos-idl.json.
 #   -h, --help
 #
+# Environment:
+#   CMAKE_BUILD_PARALLEL_LEVEL  The number of jobs the libmeos build runs, as CMake reads it.
+#                               Default: the processors this process may run on (nproc).
+#
 # Outputs (printed as KEY=value, and appended to $GITHUB_OUTPUT when set):
 #   catalog-path=<abs path to meos-idl.json>
 #   libmeos-prefix=<abs runtime prefix, or empty when --build-libmeos is not given>
@@ -103,7 +107,7 @@ if [ "$BUILD_LIBMEOS" = 1 ]; then
   [ -x "${PG_CONFIG:=/usr/lib/postgresql/17/bin/pg_config}" ] && cfg+=(-DPOSTGRESQL_PG_CONFIG="$PG_CONFIG")
 
   cmake -S "$MDB_SRC" -B "$MDB_SRC/build" "${cfg[@]}"
-  cmake --build "$MDB_SRC/build" -j "$(nproc)"
+  cmake --build "$MDB_SRC/build" -j "${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
 
   # The parse prefix holds a clean MEOS-only include/; install there first (writable), then
   # into the runtime prefix if it is a different location (e.g. the shared /usr/local).

@@ -59,7 +59,7 @@ export CATALOG="$MEOSAPI/output/meos-idl.json"
 # each family pulls its own dependency (RASTER -> GDAL, H3 -> libh3, POINTCLOUD -> pgpointcloud).
 cmake -S "$PINWT" -B "$PINWT/build-allfam" -DMEOS=ON -DALL=ON \
   -DH3_INCLUDE_DIR=/usr/include/h3 -DH3_LIBRARY=/usr/lib/x86_64-linux-gnu/libh3.so >/dev/null
-cmake --build "$PINWT/build-allfam" --target meos -j"$(nproc)"
+cmake --build "$PINWT/build-allfam" --target meos -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
 export LIBMEOS="$PINWT/build-allfam/libmeos.so"
 
 # ── PHASE 1 — JMEOS jar + the non-JVM bindings (all consume the catalog) ──
