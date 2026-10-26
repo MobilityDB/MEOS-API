@@ -1,8 +1,9 @@
 """Regression tests for parser/nullable.py.
 
-Nullability is read from the C Doxygen `@param ... may be NULL` notes (the
-source of truth) and folded into each function's ``shape.nullable`` for the
-params that actually exist on the IDL function.
+Nullability is read from the C Doxygen (the source of truth), the `@nullable` tag
+inside a `@param` entry or the `@param ... may be NULL` note, and folded into each
+function's ``shape.nullable`` for the params that actually exist on the IDL
+function.
 
 Plain unittest, no pytest dependency; writes a tiny synthetic source tree.
 """
@@ -10,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.nullable import extract_nullable, merge_nullable
+from parser.nullable import extract_nullable, extract_param_docs, merge_nullable
 
 SAMPLE = '''
 /**
@@ -36,6 +37,25 @@ temporal_append_tinstant(const TInstant *inst, const Interval *maxt, int interp)
 {
   return NULL;
 }
+
+/**
+ * @brief Replace a value at a path
+ * @param[in] jb JSONB value
+ * @param[in] newjb New value @nullable
+ * @param[in] handle_null Null value treatment, one of the four names the
+ * function accepts @nullable
+ * @param[in] create When true, create the missing key
+ * @nullable create
+ * @param[out] count Number of values @nullable
+ */
+#if MEOS
+Jsonb *
+jsonb_set_lax(const Jsonb *jb, const Jsonb *newjb, const text *handle_null,
+  bool create, int *count)
+{
+  return NULL;
+}
+#endif /* MEOS */
 '''
 
 
@@ -56,6 +76,24 @@ class NullableTests(unittest.TestCase):
         self.assertEqual(nul["temporal_append_tinstant"], ["maxt"])
         # `temp`, `inst`, `interp` carry no NULL note -> not nullable
         self.assertNotIn("temp", nul["temporal_as_mfjson"])
+
+    def test_reads_the_tag_inside_the_param_entry(self):
+        """The @nullable tag, as #test_extracts_only_may_be_null_params reads the
+        prose note."""
+        nul = extract_nullable(self.tmp.name)
+        # On the entry's line and on its continuation line, behind an `#if MEOS`
+        # guard, and on an output a caller may pass as NULL
+        self.assertEqual(nul["jsonb_set_lax"], ["newjb", "handle_null", "count"])
+        # A line opening with @nullable qualifies no entry
+        self.assertNotIn("create", nul["jsonb_set_lax"])
+        self.assertNotIn("jb", nul["jsonb_set_lax"])
+
+    def test_param_docs_leave_out_the_tag(self):
+        """The description #test_extracts_only_may_be_null_params reads, without the
+        tag."""
+        docs = extract_param_docs(self.tmp.name)
+        self.assertEqual(docs["jsonb_set_lax"]["newjb"], "New value")
+        self.assertNotIn("@nullable", docs["jsonb_set_lax"]["handle_null"])
 
     def test_merge_only_existing_params(self):
         idl = {"functions": [

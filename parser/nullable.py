@@ -1,14 +1,19 @@
 """Extract per-parameter nullability from the MEOS C Doxygen as the SoT.
 
-A MEOS function parameter accepts NULL iff its Doxygen ``@param`` line says so,
-e.g. ``@param[in] srs Spatial reference system, may be `NULL```.  This is the
-single source of truth the codegens consume — grounded in the C code, keyed by
-parameter name, and cross-checked in MobilityDB against the PG layer (a SQL
-function declared without ``STRICT`` + the wrapper's ``PG_ARGISNULL`` guards).
+A MEOS function parameter accepts NULL iff its Doxygen ``@param`` entry carries
+the ``@nullable`` tag, e.g. ``@param[in] newjb New value @nullable``, or, in the
+sources not yet converted to the tag, says so in prose, e.g.
+``@param[in] srs Spatial reference system, may be `NULL```.  The tag sits inside the
+entry of the parameter it qualifies, so renaming the parameter edits the line that
+carries both; on an output it states that a caller may pass NULL to skip it.  This is the single source of truth the codegens consume — grounded in
+the C code, keyed by parameter name, and cross-checked in MobilityDB against the PG
+layer (a SQL function declared without ``STRICT`` + the wrapper's ``PG_ARGISNULL``
+guards).
 
 The extractor walks the MEOS sources, pairs each Doxygen block with the function
-it documents, and records the params whose description carries a NULL note.  The
-result feeds ``shape.nullable`` in the IDL so every binding can guard the param.
+it documents, and records the params whose description carries the tag or a NULL
+note.  The result feeds ``shape.nullable`` in the IDL so every binding can guard the
+param.
 """
 from __future__ import annotations
 
@@ -20,12 +25,23 @@ from pathlib import Path
 # by an `#if MEOS` guard in pgtypes/ is paired with it here too.
 from parser.outparam import _FUNC, doxygen_sources
 
-# One @param entry: capture the (possibly comma-separated) names + description.
+# One @param entry: capture the direction, the (possibly comma-separated) names and
+# the description, which runs to the next line opening a Doxygen command.
 _PARAM = re.compile(
-    r'@param\[[^\]]*\]\s+(?P<names>\w+(?:\s*,\s*\w+)*)\s+(?P<desc>.*?)'
+    r'@param\[(?P<dir>[^\]]*)\]\s+(?P<names>\w+(?:\s*,\s*\w+)*)\s+(?P<desc>.*?)'
     r'(?=\n\s*\*\s*@|\*/|\Z)', re.S)
+# The @nullable tag inside a @param description. A line opening with @nullable ends
+# the description before it, so the tag is read only where it qualifies one entry.
+_TAG = re.compile(r'(?<![\w@])@nullable\b')
 _NULLISH = re.compile(r'may be\s+`?NULL`?|can be\s+`?NULL`?|`?NULL`?\s+is allowed'
                       r'|or\s+`?NULL`?', re.I)
+
+
+def _is_nullable(direction: str, desc: str) -> bool:
+    """Whether an @param entry states that its parameter accepts NULL: the @nullable
+    tag, on an input or on an output a caller may pass as NULL to skip it (the
+    direction #extract_outparams reads from ``@param[out]``), or the prose note."""
+    return bool(_TAG.search(desc) or _NULLISH.search(desc))
 
 
 def extract_nullable(meos_root: str | Path) -> dict[str, list[str]]:
@@ -37,7 +53,7 @@ def extract_nullable(meos_root: str | Path) -> dict[str, list[str]]:
         for m in _FUNC.finditer(txt):
             name = m.group("name")
             for pm in _PARAM.finditer(m.group("doc")):
-                if not _NULLISH.search(pm.group("desc")):
+                if not _is_nullable(pm.group("dir"), pm.group("desc")):
                     continue
                 for p in (n.strip() for n in pm.group("names").split(",")):
                     out.setdefault(name, [])
@@ -48,14 +64,15 @@ def extract_nullable(meos_root: str | Path) -> dict[str, list[str]]:
 
 def extract_param_docs(meos_root: str | Path) -> dict[str, dict[str, str]]:
     """Return ``{function: {parameter: description}}`` from the MEOS C Doxygen, the
-    ``@param`` text #extract_nullable reads, whitespace collapsed, over the same files."""
+    ``@param`` text #extract_nullable reads, whitespace collapsed and the @nullable tag
+    removed, over the same files."""
     out: dict[str, dict[str, str]] = {}
     for f in doxygen_sources(meos_root):
         txt = Path(f).read_text(errors="ignore")
         for m in _FUNC.finditer(txt):
             docs = out.setdefault(m.group("name"), {})
             for pm in _PARAM.finditer(m.group("doc")):
-                desc = " ".join(pm.group("desc").split())
+                desc = " ".join(_TAG.sub("", pm.group("desc")).split())
                 for p in (n.strip() for n in pm.group("names").split(",")):
                     if p:
                         docs.setdefault(p, desc)
