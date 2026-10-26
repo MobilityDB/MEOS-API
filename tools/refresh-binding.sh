@@ -45,6 +45,10 @@
 #   --force             Rebuild libmeos even when the MobilityDB commit is unchanged.
 #   -h, --help
 set -euo pipefail
+# A command substitution runs with errexit too, so a step that fails inside one stops the
+# refresh: resolve_repo's fetch of a ref the remote does not have would otherwise leave the
+# earlier checkout in place and the refresh would derive from it.
+shopt -s inherit_errexit
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "$0"; }
 
