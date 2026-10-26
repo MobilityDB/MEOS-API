@@ -12,17 +12,14 @@ result feeds ``shape.nullable`` in the IDL so every binding can guard the param.
 """
 from __future__ import annotations
 
-import glob
 import re
 from pathlib import Path
 
-# Doxygen block immediately followed by a function definition (``name(...) {``).
-_FUNC = re.compile(
-    r'/\*\*(?P<doc>.*?)\*/\s*\n'
-    r'(?:[A-Za-z_][\w\s\*]*?\n)?'          # optional return-type line
-    r'(?P<name>[a-z][a-z0-9_]*)\s*\('
-    r'(?P<params>[^;{]*?)\)\s*\{',
-    re.S)
+# The Doxygen block of a function and the files that carry it are the ones every
+# @param reader shares (#extract_outparams), so a block separated from its function
+# by an `#if MEOS` guard in pgtypes/ is paired with it here too.
+from parser.outparam import _FUNC, doxygen_sources
+
 # One @param entry: capture the (possibly comma-separated) names + description.
 _PARAM = re.compile(
     r'@param\[[^\]]*\]\s+(?P<names>\w+(?:\s*,\s*\w+)*)\s+(?P<desc>.*?)'
@@ -32,13 +29,10 @@ _NULLISH = re.compile(r'may be\s+`?NULL`?|can be\s+`?NULL`?|`?NULL`?\s+is allowe
 
 
 def extract_nullable(meos_root: str | Path) -> dict[str, list[str]]:
-    """Return ``{function: [nullable params]}`` from the MEOS C sources under
-    ``meos_root`` (scans both ``src`` and ``include``)."""
-    root = Path(meos_root)
+    """Return ``{function: [nullable params]}`` from the MEOS C sources
+    (#doxygen_sources)."""
     out: dict[str, list[str]] = {}
-    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
-    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
-    for f in files:
+    for f in doxygen_sources(meos_root):
         txt = Path(f).read_text(errors="ignore")
         for m in _FUNC.finditer(txt):
             name = m.group("name")
@@ -55,11 +49,8 @@ def extract_nullable(meos_root: str | Path) -> dict[str, list[str]]:
 def extract_param_docs(meos_root: str | Path) -> dict[str, dict[str, str]]:
     """Return ``{function: {parameter: description}}`` from the MEOS C Doxygen, the
     ``@param`` text #extract_nullable reads, whitespace collapsed, over the same files."""
-    root = Path(meos_root)
     out: dict[str, dict[str, str]] = {}
-    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
-    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
-    for f in files:
+    for f in doxygen_sources(meos_root):
         txt = Path(f).read_text(errors="ignore")
         for m in _FUNC.finditer(txt):
             docs = out.setdefault(m.group("name"), {})

@@ -20,7 +20,24 @@ import glob
 import re
 from pathlib import Path
 
-# Doxygen block immediately followed by a function definition (mirrors nullable.py).
+
+def doxygen_sources(meos_root: str | Path) -> list[str]:
+    """The files whose Doxygen documents the MEOS functions: the ``src`` and ``include``
+    trees under ``meos_root`` and the sibling ``pgtypes/`` tree, the vendored PostgreSQL
+    base-type layer (json, date/interval, …) that defines public MEOS functions outside
+    ``meos/`` and documents them on its ``.c`` definitions (mirrors doxygroup/run.py
+    pgtypes). Every ``@param`` reader, here and in #extract_nullable, scans this one
+    list, so a function documented in ``pgtypes/`` states its parameters to all of them
+    alike."""
+    root = Path(meos_root)
+    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
+    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
+    files += glob.glob(str(root.parent / "pgtypes/**/*.c"), recursive=True)
+    return files
+
+
+# Doxygen block immediately followed by a function definition, the one every @param
+# reader pairs a block with its function by (#extract_nullable imports it).
 # The doxygen block and the function it labels can be separated by preprocessor
 # guards (`#if MEOS` … `#endif`) and blank lines — the shape the vendored pgtypes
 # base sources use to guard the MEOS-build twin of a symbol (e.g.
@@ -47,7 +64,7 @@ _PANY = re.compile(r'@param(?:\[[^\]]*\])?\s+(?P<names>\w+(?:\s*,\s*\w+)*)', re.
 
 def extract_param_names(meos_root: str | Path) -> dict[str, set]:
     """Return ``{function: {every @param-documented parameter name}}`` from the MEOS C
-    Doxygen (scans both ``src`` and ``include``).
+    Doxygen (#doxygen_sources).
 
     Whichever direction a parameter carries, an ``@param`` entry names a parameter the
     function's documentation OWNS.  A wrapper argument bound to such a parameter is a
@@ -56,15 +73,8 @@ def extract_param_names(meos_root: str | Path) -> dict[str, set]:
     — never a hard-coded literal.  ``boundargs`` consumes this set to skip those
     systematically, so a bare-identifier argument only drifts when its parameter is
     UNDOCUMENTED (the exceptional manual gap worth inspecting)."""
-    root = Path(meos_root)
     out: dict[str, set] = {}
-    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
-    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
-    # The vendored PostgreSQL base-type layer (json, date/interval, …) lives in the
-    # sibling `pgtypes/` tree, outside meos/, and carries its `@param[out]` tags on
-    # the `.c` definitions there — scan them too (mirrors doxygroup/run.py pgtypes).
-    files += glob.glob(str(root.parent / "pgtypes/**/*.c"), recursive=True)
-    for f in files:
+    for f in doxygen_sources(meos_root):
         txt = Path(f).read_text(errors="ignore")
         for m in _FUNC.finditer(txt):
             name = m.group("name")
@@ -76,17 +86,10 @@ def extract_param_names(meos_root: str | Path) -> dict[str, set]:
 
 
 def extract_outparams(meos_root: str | Path) -> dict[str, list[str]]:
-    """Return ``{function: [params tagged @param[out]]}`` from the MEOS C sources under
-    ``meos_root`` (scans both ``src`` and ``include``)."""
-    root = Path(meos_root)
+    """Return ``{function: [params tagged @param[out]]}`` from the MEOS C sources
+    (#doxygen_sources)."""
     out: dict[str, list[str]] = {}
-    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
-    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
-    # The vendored PostgreSQL base-type layer (json, date/interval, …) lives in the
-    # sibling `pgtypes/` tree, outside meos/, and carries its `@param[out]` tags on
-    # the `.c` definitions there — scan them too (mirrors doxygroup/run.py pgtypes).
-    files += glob.glob(str(root.parent / "pgtypes/**/*.c"), recursive=True)
-    for f in files:
+    for f in doxygen_sources(meos_root):
         txt = Path(f).read_text(errors="ignore")
         for m in _FUNC.finditer(txt):
             name = m.group("name")
