@@ -15,8 +15,8 @@ from pathlib import Path
 from parser.boundargs import (_sql_arg_params, attach_call_literals, attach_null_default_binds,
                               attach_type_derived_args,
                               extract_call_literals,
-                              extract_wrappers, merge_boundargs, resolve_bound_names,
-                              strip_call_literals)
+                              extract_wrappers, merge_boundargs, merge_sql_arg_params,
+                              resolve_bound_names, strip_call_literals)
 
 # A synthetic MobilityDB wrapper source (mobilitydb/src/**/*.c shape).
 SAMPLE = '''
@@ -174,6 +174,124 @@ class DelegatingWrapperTests(unittest.TestCase):
         bound = idl["functions"][0]["shape"]["boundArgs"]
         self.assertNotIn("temp", bound)
         self.assertNotIn("key", bound)
+
+
+SPECIALIZED = """
+Datum
+Box_constructor(FunctionCallInfo fcinfo, bool hasx, bool hast)
+{
+  double xmin = 0, xmax = 0, zmin = 0;
+  int32_t srid = 0;
+  Span *period = NULL;
+  int i = 0;
+  if (hasx)
+  {
+    xmin = PG_GETARG_FLOAT8(i++);
+    xmax = PG_GETARG_FLOAT8(i++);
+  }
+  if (hast)
+  {
+    MeosType basetype = oid_meostype(get_fn_expr_argtype(fcinfo->flinfo, i));
+    if (basetype == T_TSTZSPAN)
+      period = PG_GETARG_SPAN_P(i++);
+    else
+    {
+      TimestampTz t = PG_GETARG_TIMESTAMPTZ(i++);
+      period = span_make(t, t, true, true, T_TIMESTAMPTZ);
+    }
+  }
+  if (hasx)
+    srid = PG_GETARG_INT32(i++);
+  PG_RETURN_POINTER(box_make(hasx, srid, xmin, xmax, zmin, period));
+}
+
+Datum
+Box_constructor_x(PG_FUNCTION_ARGS)
+{
+  return Box_constructor(fcinfo, true, false);
+}
+
+Datum
+Box_constructor_xt(PG_FUNCTION_ARGS)
+{
+  return Box_constructor(fcinfo, true, true);
+}
+
+Datum
+Terrain_index(FunctionCallInfo fcinfo, bool has_extent,
+  Raster * (*func)(const Raster *, int, const Raster *, const char *))
+{
+  int i = has_extent ? 1 : 0;
+  Raster *rast = (Raster *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+  int band = PG_GETARG_INT32(1);
+  Raster *extent = (has_extent && ! PG_ARGISNULL(2)) ?
+    (Raster *) PG_DETOAST_DATUM(PG_GETARG_DATUM(2)) : NULL;
+  char *pixeltype = text_to_cstring(PG_GETARG_TEXT_P(2 + i));
+  PG_RETURN_POINTER(func(rast, band, extent, pixeltype));
+}
+
+Datum
+Raster_tpi(PG_FUNCTION_ARGS)
+{
+  return Terrain_index(fcinfo, false, &raster_tpi);
+}
+"""
+
+
+class SpecializedHelperTests(unittest.TestCase):
+    """A shared helper read as the wrapper's call makes it run, as
+    #DelegatingWrapperTests reads the literal a wrapper hands its helper: the flags
+    decide the branches, a running index numbers the arguments, a function-pointer
+    parameter calls the function the wrapper hands it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        src = Path(self.tmp.name) / "src"
+        src.mkdir()
+        (src / "specialized.c").write_text(SPECIALIZED)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _box(wrapper):
+        return {"functions": [
+            {"name": "box_make", "mdbC": wrapper,
+             "params": [{"name": n} for n in
+                        ("hasx", "srid", "xmin", "xmax", "zmin", "s")]}]}
+
+    def test_constants_the_flags_leave_unread_are_bound(self):
+        # per signature, as #test_signature_omitting_the_argument_carries_the_default
+        # reads a default the call leaves the local at
+        idl = self._box("Box_constructor_x")
+        idl["functions"][0]["sqlSignatures"] = [
+            {"args": ["float", "float", "integer"], "ret": "box"}]
+        idl, _, _ = merge_boundargs(idl, self.tmp.name)
+        self.assertEqual(idl["functions"][0]["shape"]["boundArgs"],
+                         {"hasx": "true", "zmin": "0", "s": "NULL"})
+
+    def test_a_running_index_states_the_argument_order(self):
+        idl, n = merge_sql_arg_params(self._box("Box_constructor_x"), self.tmp.name)
+        self.assertEqual(idl["functions"][0]["shape"]["sqlArgParams"],
+                         ["xmin", "xmax", "srid"])
+        self.assertEqual(n, 1)
+
+    def test_a_branch_reading_one_argument_either_way_keeps_the_order(self):
+        idl, _ = merge_sql_arg_params(self._box("Box_constructor_xt"), self.tmp.name)
+        self.assertEqual(idl["functions"][0]["shape"]["sqlArgParams"],
+                         ["xmin", "xmax", "s", "srid"])
+
+    def test_the_function_a_pointer_parameter_receives_is_read(self):
+        idl, _, _ = merge_boundargs(
+            {"functions": [{"name": "raster_tpi", "mdbC": "Raster_tpi",
+                            "params": [{"name": "rast"}, {"name": "band"},
+                                       {"name": "customextent"},
+                                       {"name": "pixeltype"}],
+                            "sqlSignatures": [{"args": ["raster", "integer", "text"],
+                                               "ret": "raster"}]}]},
+            self.tmp.name)
+        self.assertEqual(idl["functions"][0]["shape"]["boundArgs"],
+                         {"customextent": "NULL"})
 
 
 PG_TWIN = """
@@ -689,6 +807,27 @@ Tgeo_union(PG_FUNCTION_ARGS)
   GSERIALIZED *result = tgeo_union(temp, unary_union);
   PG_RETURN_GSERIALIZED_P(result);
 }
+
+/* The default #Tgeo_scale guards with an if, chosen by a ternary */
+Datum
+Tpoint_to_geomeas(PG_FUNCTION_ARGS)
+{
+  Temporal *tpoint = PG_GETARG_TEMPORAL_P(0);
+  bool segmentize = (PG_NARGS() == 2) ? PG_GETARG_BOOL(1) : false;
+  GSERIALIZED *result;
+  tpoint_tfloat_to_geomeas(tpoint, NULL, segmentize, &result);
+  PG_RETURN_GSERIALIZED_P(result);
+}
+
+/* A literal as #Tgeo_scale passes NULL, behind a comment naming its parameter */
+Datum
+Union_tpcbox_tpcbox(PG_FUNCTION_ARGS)
+{
+  TPCBox *a = PG_GETARG_TPCBOX_P(0);
+  TPCBox *b = PG_GETARG_TPCBOX_P(1);
+  TPCBox *result = union_tpcbox_tpcbox(a, b, /* strict */ false);
+  PG_RETURN_TPCBOX_P(result);
+}
 '''
 
 
@@ -758,6 +897,30 @@ class GuardedDefaultTests(unittest.TestCase):
              "sqlSignatures": [{"args": ["tgeompoint"], "ret": "tgeompoint"}]})
         self.assertNotIn("shape", idl["functions"][0])
         self.assertEqual(n, 0)
+
+    def test_value_chosen_by_the_number_of_arguments_is_the_default(self):
+        # #test_signature_omitting_the_argument_carries_the_default for the wrapper's own
+        # ternary, which reads as an inlined helper's does
+        idl, _, _ = self._merge(
+            {"name": "tpoint_tfloat_to_geomeas", "mdbC": "Tpoint_to_geomeas",
+             "params": [{"name": "tpoint"}, {"name": "measure"}, {"name": "segmentize"},
+                        {"name": "result"}],
+             "sqlSignatures": [{"args": ["tgeompoint"], "ret": "geometry"},
+                               {"args": ["tgeompoint", "boolean"], "ret": "geometry"}]})
+        f = idl["functions"][0]
+        self.assertEqual([s.get("boundArgs") for s in f["sqlSignatures"]],
+                         [{"measure": "NULL", "segmentize": "false"},
+                          {"measure": "NULL"}])
+
+    def test_literal_behind_a_comment_naming_its_parameter_is_bound(self):
+        # #test_literal_behind_the_helper_parameter_is_captured for a literal the wrapper
+        # writes behind a comment
+        idl, n, _ = self._merge(
+            {"name": "union_tpcbox_tpcbox", "mdbC": "Union_tpcbox_tpcbox",
+             "params": [{"name": "box1"}, {"name": "box2"}, {"name": "strict"}],
+             "sqlSignatures": [{"args": ["tpcbox", "tpcbox"], "ret": "tpcbox"}]})
+        self.assertEqual(idl["functions"][0]["shape"]["boundArgs"], {"strict": "false"})
+        self.assertEqual(n, 1)
 
     def test_computed_initializer_is_not_a_default(self):
         idl, n, _ = self._merge(
