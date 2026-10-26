@@ -1526,5 +1526,161 @@ CREATE FUNCTION absent(rast raster, value float DEFAULT NULL)
         self.assertEqual(n, 2)
 
 
+ARGUMENT_HELPER = r'''
+static bool
+value_count_args(FunctionCallInfo fcinfo, bool scalar, int *band,
+  bool *exclude_nodata, double **searchvalues, int *nsearch, double *roundto)
+{
+  int nargs = PG_NARGS();
+  /* The search values stand before the rounding, the last argument */
+  int s = nargs - 2;
+  if (PG_ARGISNULL(0) || PG_ARGISNULL(nargs - 1))
+    return false;
+  *band = nargs >= 4 ? PG_GETARG_INT32(1) : 1;
+  *exclude_nodata = nargs == 5 ? PG_GETARG_BOOL(2) : true;
+  *roundto = PG_GETARG_FLOAT8(nargs - 1);
+  *searchvalues = NULL;
+  *nsearch = 0;
+  if (scalar)
+  {
+    *searchvalues = palloc(sizeof(double));
+    (*searchvalues)[0] = PG_GETARG_FLOAT8(s);
+    *nsearch = 1;
+  }
+  else if (! PG_ARGISNULL(s))
+  {
+    Datum *elems = datumarr_extract(PG_GETARG_ARRAYTYPE_P(s), nsearch);
+    if (*nsearch > 0)
+      *searchvalues = palloc(sizeof(double) * (size_t) *nsearch);
+  }
+  return true;
+}
+
+static Datum
+Raster_value_count_rows(FunctionCallInfo fcinfo, bool percent)
+{
+  int band, nsearch, count = 0;
+  bool exclude_nodata;
+  double *searchvalues, roundto;
+  ValueCount *rows = NULL;
+  if (value_count_args(fcinfo, false, &band, &exclude_nodata, &searchvalues,
+      &nsearch, &roundto))
+  {
+    Raster *rast = (Raster *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+    rows = raster_value_count(rast, band, exclude_nodata, searchvalues,
+      nsearch, roundto, &count);
+  }
+  PG_RETURN_POINTER(rows);
+}
+
+Datum
+Raster_value_count(PG_FUNCTION_ARGS)
+{
+  return Raster_value_count_rows(fcinfo, false);
+}
+
+static void
+jsonb_path_args(FunctionCallInfo fcinfo, Jsonb **vars, bool *silent)
+{
+  *vars = PG_NARGS() > 2 ? PG_GETARG_JSONB_P(2) : NULL;
+  *silent = PG_NARGS() > 3 ? PG_GETARG_BOOL(3) : false;
+}
+
+Datum
+Jsonb_path_exists(PG_FUNCTION_ARGS)
+{
+  Jsonb *jb = PG_GETARG_JSONB_P(0);
+  JsonPath *jp = PG_GETARG_JSONPATH_P(1);
+  Jsonb *vars;
+  bool silent;
+  jsonb_path_args(fcinfo, &vars, &silent);
+  int result = pg_jsonb_path_exists(jb, jp, vars, silent, false);
+  PG_RETURN_BOOL(result > 0);
+}
+'''
+
+
+class ArgumentHelperTests(unittest.TestCase):
+    """A wrapper whose locals an argument helper fills through their addresses, choosing
+    each by the number of arguments, is read as #ArityBranchTests reads one choosing in
+    its own body: each signature binds what its number of arguments leaves to a literal,
+    and a NULL default the helper replaces only when the argument is not NULL, at an
+    index it computes from the number of arguments, passes the values it starts from."""
+
+    SQL = '''
+CREATE FUNCTION valueCount(rast raster, nband integer DEFAULT 1,
+    exclude_nodata_value boolean DEFAULT true,
+    searchvalues float[] DEFAULT NULL, roundto float DEFAULT 0,
+    OUT value float, OUT count integer)
+  RETURNS SETOF record
+  AS 'MODULE_PATHNAME', 'Raster_value_count'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION valueCount(rast raster, nband integer, searchvalues float[],
+    roundto float DEFAULT 0, OUT value float, OUT count integer)
+  RETURNS SETOF record
+  AS 'MODULE_PATHNAME', 'Raster_value_count'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION valueCount(rast raster, searchvalues float[],
+    roundto float DEFAULT 0, OUT value float, OUT count integer)
+  RETURNS SETOF record
+  AS 'MODULE_PATHNAME', 'Raster_value_count'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+'''
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "src").mkdir()
+        (root / "src" / "temporal_raster.c").write_text(ARGUMENT_HELPER)
+        (root / "sql").mkdir()
+        (root / "sql" / "500_raster.in.sql").write_text(self.SQL)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _func(self):
+        def sig(args, defaults):
+            return {"sqlName": "valueCount", "args": args, "ret": "record",
+                    "retSet": True, "argDefaults": defaults}
+        return {"name": "raster_value_count", "mdbC": "Raster_value_count",
+                "sqlfn": "valueCount",
+                "params": [{"name": n} for n in
+                           ("rast", "band", "exclude_nodata", "searchvalues", "nsearch",
+                            "roundto", "count")],
+                "sqlSignatures": [
+                    sig(["raster", "integer", "boolean", "float[]", "float"],
+                        [None, "1", "true", "NULL", "0"]),
+                    sig(["raster", "integer", "float[]", "float"], [None, None, None, "0"]),
+                    sig(["raster", "float[]", "float"], [None, None, "0"])]}
+
+    def test_each_number_of_arguments_binds_what_the_helper_leaves(self):
+        idl, _, drift = merge_boundargs({"functions": [self._func()]}, self.tmp.name)
+        self.assertEqual(
+            [s.get("boundArgs") for s in idl["functions"][0]["sqlSignatures"]],
+            [None, {"exclude_nodata": "true"},
+             {"band": "1", "exclude_nodata": "true"}])
+        self.assertEqual(drift, [])
+
+    def test_a_null_default_replaced_only_when_given_passes_its_start(self):
+        idl = {"functions": [self._func()]}
+        idl, n = attach_null_default_binds(idl, Path(self.tmp.name) / "src",
+                                           Path(self.tmp.name) / "sql")
+        sigs = idl["functions"][0]["sqlSignatures"]
+        self.assertEqual(sigs[0]["nullDefaultBinds"],
+                         {"3": {"searchvalues": "NULL", "nsearch": "0"}})
+        self.assertEqual(n, 1)
+
+    def test_every_signature_stating_every_argument_binds_nothing(self):
+        # jsonbPathExists states all four of the arguments the helper reads
+        func = {"name": "jsonb_path_exists", "mdbC": "Jsonb_path_exists",
+                "params": [{"name": n} for n in ("jb", "jp", "vars", "silent", "tz")],
+                "sqlSignatures": [{"args": ["jsonb", "jsonpath", "jsonb", "boolean"],
+                                   "ret": "boolean"}]}
+        idl, _, _ = merge_boundargs({"functions": [func]}, self.tmp.name)
+        self.assertEqual(idl["functions"][0].get("shape", {}).get("boundArgs"),
+                         {"tz": "false"})
+        self.assertNotIn("boundArgs", idl["functions"][0]["sqlSignatures"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -150,18 +150,21 @@ def _call_args(body: str, fn: str) -> list[str] | None:
 
 
 def extract_wrappers(mdb_src: str | Path) -> dict[str, str]:
-    """Return ``{wrapper_name: body_text}`` for every PG wrapper under ``mdb_src``."""
+    """Return ``{wrapper_name: body_text}`` for every PG wrapper under ``mdb_src``, each
+    call of an argument helper read as the statements it runs (#_expand_arg_helpers)."""
+    helpers = _raw_helpers(str(mdb_src))
     out: dict[str, str] = {}
     for cf in built_files(mdb_src, "*.c"):
         text = cf.read_text(errors="ignore")
         for m in _WRAP.finditer(text):
-            out[m.group("name")] = _body(text, m.end() - 1)
+            out[m.group("name")] = _expand_arg_helpers(_body(text, m.end() - 1), helpers)
     return out
 
 
-def extract_helpers(mdb_src: str | Path) -> dict[str, tuple[str, list[str]]]:
-    """``{helper_name: (body_text, [param names after the call info])}`` for every shared
-    wrapper helper under ``mdb_src``."""
+@functools.lru_cache(maxsize=None)
+def _raw_helpers(mdb_src: str) -> dict[str, tuple[str, list[str]]]:
+    """``{helper_name: (body_text, [param names after the call info])}`` for every function
+    under ``mdb_src`` taking the call info first, as written."""
     out: dict[str, tuple[str, list[str]]] = {}
     for cf in built_files(mdb_src, "*.c"):
         text = cf.read_text(errors="ignore")
@@ -175,6 +178,91 @@ def extract_helpers(mdb_src: str | Path) -> dict[str, tuple[str, list[str]]]:
                         names.append(tok[-1])
             out[m.group("name")] = (_body(text, m.end() - 1), names)
     return out
+
+
+def extract_helpers(mdb_src: str | Path) -> dict[str, tuple[str, list[str]]]:
+    """``{helper_name: (body_text, [param names after the call info])}`` for every shared
+    wrapper helper under ``mdb_src``, each call of an argument helper in its body read as
+    the statements it runs (#_expand_arg_helpers)."""
+    raw = _raw_helpers(str(mdb_src))
+    return {name: (_expand_arg_helpers(body, raw), names)
+            for name, (body, names) in raw.items()}
+
+
+# A call handing the call info to a helper, followed by the helper's other arguments.
+_ARG_CALL = re.compile(r"\b(?P<name>[A-Za-z_]\w*)\s*\(\s*fcinfo\s*,")
+# The number of arguments of the call kept in a local: `int nargs = PG_NARGS();`.
+_NARGS_LOCAL = re.compile(r"\b(?:int\s+)?(?P<var>\w+)\s*=\s*PG_NARGS\s*\(\s*\)\s*;")
+# A value chosen by the number of arguments: `band = nargs >= 4 ? PG_GETARG_INT32(1) : 1;`.
+_NARGS_CHOICE = re.compile(
+    r"(?P<lhs>(?<![\w.>])\w+)\s*=(?!=)\s*\(?\s*(?P<test>PG_NARGS\s*\(\s*\)\s*"
+    r"(?:==|!=|>=|<=|>|<)\s*\d+)\s*\)?\s*\?\s*(?P<then>[^:;]+?)\s*:\s*(?P<else>[^;]+?)\s*;")
+
+
+def _inline_arg_helper(hbody: str, hparams: list[str], args: list[str]) -> str:
+    """The statements of the argument helper ``hbody`` called with ``args`` (the arguments
+    after the call info, matched to ``hparams``), written as statements of its caller.
+
+    An argument helper fills locals of its caller through their addresses:
+    ``value_count_args(fcinfo, false, &band, &exclude_nodata, &searchvalues, &nsearch,
+    &roundto)`` sets ``*band = nargs >= 4 ? PG_GETARG_INT32(1) : 1``. Each ``*p`` and
+    ``(*p)`` reads as the local whose address ``p`` receives, a bare ``p`` as that address,
+    a parameter given a literal as the literal, the local holding ``PG_NARGS()`` as
+    ``PG_NARGS()``, and a value chosen by the number of arguments as the value of the other
+    numbers followed by its replacement under that test, the shape #_guarded_default reads:
+    ``band = 1; if (PG_NARGS() >= 4) band = PG_GETARG_INT32(1);``. A ``return`` leaves
+    nothing the caller runs."""
+    text = _COMMENT.sub(" ", hbody)
+    m = _NARGS_LOCAL.search(text)
+    if m:
+        text = text[:m.start()] + text[m.end():]
+        text = re.sub(r"\b" + re.escape(m.group("var")) + r"\b", "PG_NARGS()", text)
+    for p, a in zip(hparams, args):
+        a = a.strip()
+        if a.startswith("&") and _IDENT.match(a[1:].strip()):
+            local = a[1:].strip()
+            pe = re.escape(p)
+            text = re.sub(r"\(\s*\*\s*" + pe + r"\s*\)|(?<![\w)\]])\*\s*" + pe + r"\b"
+                          r"|(?<![\w.>])" + pe + r"\b",
+                          lambda x, local=local: local if x.group().lstrip("(").lstrip()
+                          .startswith("*") else "&" + local, text)
+        else:
+            lit = _literal(a)
+            if lit is not None:
+                text = re.sub(r"(?<![\w.>])" + re.escape(p) + r"\b", lit, text)
+    text = re.sub(r"\breturn\b[^;]*;", ";", text)
+    text = _NARGS_CHOICE.sub(lambda c: f"{c['lhs']} = {c['else']}; "
+                             f"if ({c['test']}) {c['lhs']} = {c['then']};", text)
+    return "{" + text + "}"
+
+
+def _expand_arg_helpers(body: str, helpers: dict[str, tuple[str, list[str]]]) -> str:
+    """``body`` with each call of an argument helper read as the statements the helper runs
+    (#_inline_arg_helper), placed before the statement holding the call, the call itself
+    reading as ``true``. An argument helper is one the call hands the address of a local
+    for each parameter it writes through: ``jsonb_path_args(fcinfo, &vars, &silent)``
+    sets ``*vars`` and ``*silent``. A call handing it no address is a delegation
+    (#_delegated) and stays."""
+    for _ in range(8):
+        for m in _ARG_CALL.finditer(body):
+            entry = helpers.get(m.group("name"))
+            if entry is None:
+                continue
+            hbody, hparams = entry
+            open_ = body.index("(", m.start())
+            close = _close_paren(body, open_)
+            args = _split_args(body[open_ + 1:close])[1:]
+            outs = [p for p, a in zip(hparams, args) if a.strip().startswith("&")]
+            if not outs or not all(re.search(r"\*\s*" + re.escape(p) + r"\s*=(?!=)", hbody)
+                                   for p in outs):
+                continue
+            start = max(body.rfind(c, 0, m.start()) for c in ";{}") + 1
+            body = (body[:start] + _inline_arg_helper(hbody, hparams, args) +
+                    body[start:m.start()] + "true" + body[close + 1:])
+            break
+        else:
+            return body
+    return body
 
 
 def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
@@ -738,6 +826,99 @@ def _presence_flag(body: str, var: str) -> tuple[int, str] | None:
     return None
 
 
+# A condition whose value no argument changes: `false`, or `5 >= 4` once the number of
+# arguments is known (#_fold_nargs).
+_CONST_COND = re.compile(r"^\s*(?:(?P<b>true|false)|(?P<a>\d+)\s*(?P<op>==|!=|>=|<=|>|<)\s*"
+                         r"(?P<c>\d+))\s*$")
+
+
+def _fold_nargs(body: str, nargs: int) -> str:
+    """``body`` read for a call of ``nargs`` arguments, as #_guards reads the statements a
+    number of arguments runs: ``PG_NARGS()`` as that number, a sum or difference of two
+    numbers as its value, and a local set once to a number as that number where it indexes
+    an argument, so ``int s = PG_NARGS() - 2`` makes ``PG_ARGISNULL(s)`` read
+    ``PG_ARGISNULL(3)`` for five arguments."""
+    b = re.sub(r"PG_NARGS\s*\(\s*\)", str(nargs), _COMMENT.sub(" ", body))
+    arith = re.compile(r"(?<![\w.])(\d+)\s*([-+])\s*(\d+)(?![\w.])")
+    while True:
+        m = arith.search(b)
+        if not m:
+            break
+        v = int(m.group(1)) + (int(m.group(3)) if m.group(2) == "+" else -int(m.group(3)))
+        b = b[:m.start()] + str(v) + b[m.end():]
+    for m in re.finditer(r"(?<![\w.>])(\w+)\s*=(?!=)\s*(\d+)\s*;", b):
+        var = re.escape(m.group(1))
+        if len(re.findall(r"(?<![\w.>])" + var + r"\s*=(?!=)", b)) == 1:
+            b = re.sub(r"(PG_ARGISNULL|PG_GETARG_\w+)\s*\(\s*" + var + r"\s*\)",
+                       lambda x, v=m.group(2): f"{x.group(1)}({v})", b)
+    return b
+
+
+def _if_spans(body: str):
+    """``(condition, then_span, else_span or None)`` for every ``if`` of ``body``, its
+    statements delimited as #_guards delimits them (#_statement_end)."""
+    for m in re.finditer(r"\bif\s*\(", body):
+        close = _close_paren(body, m.end() - 1)
+        j = _skip_space(body, close + 1)
+        end = _statement_end(body, j)
+        e = _skip_space(body, end)
+        other = None
+        if re.match(r"else\b", body[e:]):
+            k = _skip_space(body, e + 4)
+            other = (k, _statement_end(body, k))
+        yield body[m.end():close], (j, end), other
+
+
+def _notnull_default(body: str, var: str, nargs: int) -> tuple[int, str] | None:
+    """``(k, literal)`` when, for a call of ``nargs`` arguments (#_fold_nargs), the local
+    ``var`` starts from ``literal`` and every later write of it, an assignment or its
+    address handed on, runs only where SQL argument ``k`` is not NULL: under a test
+    conjoining ``! PG_ARGISNULL(k)``, or in the ``else`` of ``PG_ARGISNULL(k)``. It is the
+    sibling of #_guarded_default, whose later assignments run only for some numbers of
+    arguments. A statement a condition no argument changes never runs is no write
+    (``if (false)``, the branch an argument helper takes for a scalar search value).
+    ``Raster_value_count_rows`` starts ``searchvalues`` from NULL and ``nsearch`` from 0
+    and reads them from argument ``PG_NARGS() - 2`` only when it is not NULL, so a NULL
+    argument passes NULL and 0."""
+    b = _fold_nargs(body, nargs)
+    v = re.escape(var)
+    writes = [(m.start(), m.group().startswith("&")) for m in
+              re.finditer(r"(?<![\w.>])" + v + r"\s*=(?!=)|&\s*" + v + r"\b", b)]
+    if len(writes) < 2 or writes[0][1]:
+        return None
+    init = re.match(r"\s*([^;]+?)\s*;", b[b.index("=", writes[0][0]) + 1:])
+    lit = _literal(init.group(1)) if init else None
+    if lit is None:
+        return None
+    dead, given = [], {}
+    for cond, then, other in _if_spans(b):
+        c = _CONST_COND.match(cond)
+        if c:
+            holds = (c.group("b") == "true" if c.group("b") else
+                     _NARGS_OPS[c.group("op")](int(c.group("a")), int(c.group("c"))))
+            dead.append(other if holds else then)
+            continue
+        for conj in _split_top(cond, "&&"):
+            g = re.fullmatch(r"\s*!\s*PG_ARGISNULL\s*\(\s*(\d+)\s*\)\s*", conj)
+            if g:
+                given.setdefault(int(g.group(1)), []).append(then)
+        g = re.fullmatch(r"\s*PG_ARGISNULL\s*\(\s*(\d+)\s*\)\s*", cond)
+        if g and other:
+            given.setdefault(int(g.group(1)), []).append(other)
+
+    # whether the position lies in one of the spans, as #_runs_at tests a guard
+    def inside(pos, spans):
+        return any(s is not None and s[0] <= pos < s[1] for s in spans)
+
+    if inside(writes[0][0], dead) or any(inside(writes[0][0], s) for s in given.values()):
+        return None
+    live = [p for p, _ in writes[1:] if not inside(p, dead)]
+    for k, spans in given.items():
+        if live and all(inside(p, spans) for p in live):
+            return k, lit
+    return None
+
+
 def _null_value(body: str, var: str, k: int, sig: dict, linear: dict) -> str | None:
     """The literal local ``var`` of wrapper ``body`` holds when SQL argument ``k`` is NULL,
     or None when the wrapper states none: the literal it starts from where every assignment
@@ -745,8 +926,12 @@ def _null_value(body: str, var: str, k: int, sig: dict, linear: dict) -> str | N
     (#_guarded_default), the interpolation of the signature's temporal type it takes when
     the call carries no ``k`` (#_type_choice), the literal of
     ``var = PG_ARGISNULL(k) ? literal : ...``, the value of a presence flag of ``k``
-    (#_presence_flag) when the argument is not given, or the literal of the branch
-    ``var = flag ? ... : ...`` takes when that flag states it is not given."""
+    (#_presence_flag) when the argument is not given, the literal of the branch
+    ``var = flag ? ... : ...`` takes when that flag states it is not given, or the literal
+    it starts from where it is replaced only when ``k`` is not NULL (#_notnull_default)."""
+    nd = _notnull_default(body, var, len(sig.get("args") or ()))
+    if nd is not None:
+        return nd[1] if nd[0] == k else None
     flag = _presence_flag(body, var)
     if flag is not None:
         return ("false" if flag[1] == "true" else "true") if flag[0] == k else None
@@ -794,6 +979,7 @@ def attach_null_default_binds(idl: dict, mdb_src: str | Path, sql_src: str | Pat
     #merge_boundargs traces them."""
     from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs, _wrapper_sql_strict
     wrappers = extract_wrappers(mdb_src)
+    helpers = extract_helpers(mdb_src)
     m2d = _meos_to_mdb(meos_src) if meos_src else {}
     w2sig = _wrapper_sql_sigs(sql_src)
     w2strict = _wrapper_sql_strict(sql_src)
@@ -818,16 +1004,30 @@ def attach_null_default_binds(idl: dict, mdb_src: str | Path, sql_src: str | Pat
                 continue
             args = _call_args(body, func["name"]) or _call_args(body, "pg_" + func["name"])
             if not args:
+                # the wrapper hands its call info to a shared helper calling the function,
+                # as merge_boundargs follows it (#_delegated)
+                for d in _DELEG.finditer(body):
+                    if d.group("name") in helpers:
+                        body = helpers[d.group("name")][0]
+                        args = (_call_args(body, func["name"]) or
+                                _call_args(body, "pg_" + func["name"]))
+                        break
+            if not args:
                 continue
+            nargs = len(sig.get("args") or ())
             fed, flags = {}, {}
             for pos, a in enumerate(args):
                 if pos < len(params) and _IDENT.match(a):
-                    k = _caller_index(body, a, nargs=len(sig.get("args") or ()))
+                    k = _caller_index(body, a, nargs=nargs)
                     if k is None:
                         flag = _presence_flag(body, a)
                         if flag is not None:
                             k = flag[0]
                             flags.setdefault(k, {})[params[pos]] = flag[1]
+                    if k is None:
+                        nd = _notnull_default(body, a, nargs)
+                        if nd is not None:
+                            k = nd[0]
                     if k is not None:
                         fed.setdefault(k, []).append((params[pos], a))
             binds, present = {}, {}
