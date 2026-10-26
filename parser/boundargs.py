@@ -84,8 +84,7 @@ _IDENT = re.compile(r"^\w+$")
 # A shared helper takes the call info plus the parameters the wrappers bind, whatever it
 # returns: a `Datum` helper answers for the wrapper, a `void` one lays the state a
 # set-returning wrapper then streams (`Tgeo_split_start`, `Stbox_tiles_start`).
-_HELPER = re.compile(r"\b(?P<name>[A-Za-z_]\w*)\s*\(\s*FunctionCallInfo\s+\w+"
-                     r"(?P<rest>[^)]*)\)\s*\{")
+_HELPER_HEAD = re.compile(r"\b(?P<name>[A-Za-z_]\w*)\s*\(\s*FunctionCallInfo\s+\w+")
 # ... and a wrapper delegates to it by passing that same call info straight through.
 _DELEG = re.compile(r"\b(?P<name>\w+)\s*\(\s*fcinfo\s*(?P<args>,[^;]*?)?\)\s*;")
 
@@ -168,15 +167,24 @@ def _raw_helpers(mdb_src: str) -> dict[str, tuple[str, list[str]]]:
     out: dict[str, tuple[str, list[str]]] = {}
     for cf in built_files(mdb_src, "*.c"):
         text = cf.read_text(errors="ignore")
-        for m in _HELPER.finditer(text):
-            rest = (m.group("rest") or "").strip()
+        for m in _HELPER_HEAD.finditer(text):
+            # the parameter list closes at its balanced parenthesis, so a function-pointer
+            # parameter, `Raster * (*func)(const Raster *, int, ...)`, stays one parameter
+            close = _close_paren(text, m.end("name") + text[m.end("name"):].index("("))
+            brace = _skip_space(text, close + 1)
+            if not text.startswith("{", brace):
+                continue
+            rest = text[m.end():close].strip()
             names: list[str] = []
             if rest.startswith(","):
                 for decl in _split_args(rest[1:]):
+                    fnptr = re.search(r"\(\s*\*\s*(\w+)\s*\)", decl)
                     tok = decl.replace("*", " ").split()
-                    if tok:
+                    if fnptr:
+                        names.append(fnptr.group(1))
+                    elif tok:
                         names.append(tok[-1])
-            out[m.group("name")] = (_body(text, m.end() - 1), names)
+            out[m.group("name")] = (_body(text, brace), names)
     return out
 
 
@@ -197,6 +205,16 @@ _NARGS_LOCAL = re.compile(r"\b(?:int\s+)?(?P<var>\w+)\s*=\s*PG_NARGS\s*\(\s*\)\s
 _NARGS_CHOICE = re.compile(
     r"(?P<lhs>(?<![\w.>])\w+)\s*=(?!=)\s*\(?\s*(?P<test>PG_NARGS\s*\(\s*\)\s*"
     r"(?:==|!=|>=|<=|>|<)\s*\d+)\s*\)?\s*\?\s*(?P<then>[^:;]+?)\s*:\s*(?P<else>[^;]+?)\s*;")
+
+
+def _nargs_choices(text: str) -> str:
+    """``text`` with each value chosen by the number of arguments written as the value of
+    the other numbers followed by its replacement under that test, the shape
+    #_guarded_default reads: ``bool segmentize = (PG_NARGS() == 2) ?
+    PG_GETARG_BOOL(1) : false;`` reads as ``bool segmentize = false; if (PG_NARGS() == 2)
+    segmentize = PG_GETARG_BOOL(1);``."""
+    return _NARGS_CHOICE.sub(lambda c: f"{c['lhs']} = {c['else']}; "
+                             f"if ({c['test']}) {c['lhs']} = {c['then']};", text)
 
 
 def _inline_arg_helper(hbody: str, hparams: list[str], args: list[str]) -> str:
@@ -231,9 +249,7 @@ def _inline_arg_helper(hbody: str, hparams: list[str], args: list[str]) -> str:
             if lit is not None:
                 text = re.sub(r"(?<![\w.>])" + re.escape(p) + r"\b", lit, text)
     text = re.sub(r"\breturn\b[^;]*;", ";", text)
-    text = _NARGS_CHOICE.sub(lambda c: f"{c['lhs']} = {c['else']}; "
-                             f"if ({c['test']}) {c['lhs']} = {c['then']};", text)
-    return "{" + text + "}"
+    return "{" + _nargs_choices(text) + "}"
 
 
 def _expand_arg_helpers(body: str, helpers: dict[str, tuple[str, list[str]]]) -> str:
@@ -242,7 +258,8 @@ def _expand_arg_helpers(body: str, helpers: dict[str, tuple[str, list[str]]]) ->
     reading as ``true``. An argument helper is one the call hands the address of a local
     for each parameter it writes through: ``jsonb_path_args(fcinfo, &vars, &silent)``
     sets ``*vars`` and ``*silent``. A call handing it no address is a delegation
-    (#_delegated) and stays."""
+    (#_delegated) and stays. A value ``body`` itself chooses by the number of arguments
+    reads as an inlined helper's does (#_nargs_choices)."""
     for _ in range(8):
         for m in _ARG_CALL.finditer(body):
             entry = helpers.get(m.group("name"))
@@ -261,8 +278,8 @@ def _expand_arg_helpers(body: str, helpers: dict[str, tuple[str, list[str]]]) ->
                     body[start:m.start()] + "true" + body[close + 1:])
             break
         else:
-            return body
-    return body
+            return _nargs_choices(body)
+    return _nargs_choices(body)
 
 
 def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
@@ -270,7 +287,10 @@ def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
     ``body`` delegates to a shared helper, passing the call info through: the helper
     parameters the wrapper binds to literals, and those it binds to a local it reads from
     an argument only for the numbers of arguments ``arities`` (#_guarded_default), the
-    literal the local starts from being what a signature of another number passes on."""
+    literal the local starts from being what a signature of another number passes on.
+    The helper body comes as the call makes it run (#_specialize), a function the wrapper
+    hands a function-pointer parameter, ``&raster_tpi``, read as the function it calls."""
+    assigned = {a.group("var") for a in _ASSIGNED.finditer(body)}
     for m in _DELEG.finditer(body):
         entry = helpers.get(m.group("name"))
         if entry is None:
@@ -278,17 +298,21 @@ def _delegated(body: str, helpers: dict[str, tuple[str, list[str]]]):
         hbody, hparams = entry
         raw = (m.group("args") or "").strip()
         vals = _split_args(raw[1:]) if raw.startswith(",") else []
-        subst, gsubst = {}, {}
+        subst, gsubst, fnptrs = {}, {}, {}
         for pname, val in zip(hparams, vals):
+            val = val.strip()
             lit = _literal(val)
             if lit is not None:
                 subst[pname] = lit
+            elif (val.startswith("&") and _IDENT.match(val[1:].strip())
+                  and val[1:].strip() not in assigned):
+                fnptrs[pname] = val[1:].strip()
             elif _IDENT.match(val):
                 dflt = _guarded_default(body, val)
                 if dflt is not None:
                     gsubst[pname] = dflt
-        if subst or gsubst:
-            return hbody, subst, gsubst
+        if subst or gsubst or fnptrs:
+            return _specialize(hbody, subst, fnptrs), subst, gsubst
     return None, {}, {}
 
 
@@ -327,7 +351,10 @@ def extract_param_lists(meos_src: str | Path) -> dict[str, list[str]]:
 
 
 def _literal(arg: str) -> str | None:
-    """Normalise a call argument to the literal to record, or None if not a literal."""
+    """Normalise a call argument to the literal to record, or None if not a literal. A
+    comment naming the parameter, as ``union_tpcbox_tpcbox(a, b, /* strict */ false)``
+    writes it, is read as the blank #_guards reads a comment as."""
+    arg = _COMMENT.sub(" ", arg).strip()
     if _TRUE.match(arg):
         return "true"
     if _FALSE.match(arg):
@@ -449,6 +476,128 @@ def _runs_at(body: str, pos: int) -> frozenset:
     return runs
 
 
+def _decided(cond: str) -> bool | None:
+    """The truth of condition ``cond`` once a wrapper's literals stand in it, or None when
+    it still depends on the call: ``false && ! PG_ARGISNULL(4)`` is false and
+    ``true || x`` true, as #_guards splits a test on its top-level operators."""
+    c = cond.strip()
+    while c.startswith("(") and _close_paren(c, 0) == len(c) - 1:
+        c = c[1:-1].strip()
+    if c in ("true", "false"):
+        return c == "true"
+    if c.startswith("!") and not c.startswith("!="):
+        v = _decided(c[1:])
+        return None if v is None else not v
+    ors = _split_top(c, "||")
+    if len(ors) > 1:
+        vals = [_decided(o) for o in ors]
+        return True if True in vals else (False if all(v is False for v in vals) else None)
+    ands = _split_top(c, "&&")
+    if len(ands) > 1:
+        vals = [_decided(a) for a in ands]
+        return False if False in vals else (True if all(vals) else None)
+    return None
+
+
+# An assignment of a value chosen by a condition: `int i = has_extent ? 1 : 0;`.
+_CHOICE = re.compile(
+    r"=(?!=)\s*(?P<cond>\((?:[^()]|\([^()]*\))*\)|!?\s*\w+)\s*\?\s*(?P<then>[^:;]+?)\s*:"
+    r"\s*(?P<else>[^;]+?)\s*;")
+
+
+def _number_reads(seg: str, inc: re.Pattern, c: int) -> tuple[str, int] | None:
+    """``seg`` with each read of a running index, ``i++``, written as the number it holds,
+    starting from ``c``, and the number after the last read, or None when a branch leaves
+    it undecided: both arms of a test advance it by as many reads, as
+    ``Stbox_constructor`` reads the period from a span or a timestamp, one argument
+    either way."""
+    out, i = "", 0
+    test = re.compile(r"\bif\s*\(")
+    while True:
+        mi, mf = inc.search(seg, i), test.search(seg, i)
+        if not mi:
+            return out + seg[i:], c
+        if mf and mf.start() < mi.start():
+            close = _close_paren(seg, mf.end() - 1)
+            j = _skip_space(seg, close + 1)
+            end = _statement_end(seg, j)
+            e = _skip_space(seg, end)
+            has_else = re.match(r"else\b", seg[e:]) is not None
+            k = _skip_space(seg, e + 4) if has_else else end
+            stop = _statement_end(seg, k) if has_else else end
+            a = _number_reads(seg[j:end], inc, c)
+            b = _number_reads(seg[k:stop], inc, c) if has_else else ("", c)
+            if a is None or b is None or a[1] != b[1]:
+                return None
+            out += seg[i:j] + a[0] + seg[end:k] + b[0]
+            i, c = stop, a[1]
+            continue
+        out += seg[i:mi.start()] + str(c)
+        i, c = mi.end(), c + 1
+
+
+def _number_indices(text: str) -> str:
+    """``text`` with the SQL arguments it reads through an index local stated by number:
+    a running index, ``int i = 0; ... PG_GETARG_FLOAT8(i++)``, numbered read by read
+    (#_number_reads), and an index assigned once, ``int i = 0; ...
+    PG_GETARG_TEXT_P(2 + i)``, added in, so #_direct_indices reads each argument."""
+    for m in re.finditer(r"\bint\s+(?P<v>\w+)\s*=\s*(?P<n>\d+)\s*;", text):
+        v, n = m.group("v"), int(m.group("n"))
+        inc = re.compile(r"(?<![\w.>])" + re.escape(v) + r"\s*\+\+")
+        rest = text[m.end():]
+        if re.search(r"(?<![\w.>])" + re.escape(v) + r"\s*(?:=(?!=)|--|[-+*/]=)", rest):
+            continue
+        if inc.search(rest):
+            numbered = _number_reads(rest, inc, n)
+            if numbered is not None:
+                text = text[:m.end()] + numbered[0]
+            continue
+        text = text[:m.end()] + re.sub(
+            r"(PG_GETARG_\w+\s*\(\s*)(\d+)\s*\+\s*" + re.escape(v) + r"\b|"
+            r"(PG_GETARG_\w+\s*\(\s*)" + re.escape(v) + r"\s*\+\s*(\d+)",
+            lambda x: (x.group(1) or x.group(3)) + str(int(x.group(2) or x.group(4)) + n),
+            rest)
+    return text
+
+
+def _specialize(hbody: str, subst: dict[str, str], fnptrs: dict[str, str]) -> str:
+    """The shared helper ``hbody`` as the wrapper's call makes it run: each parameter
+    ``subst`` binds reads as its literal, each function-pointer parameter ``fnptrs`` binds
+    calls the function the wrapper hands it, and each test and choice those literals
+    decide keeps its branch alone (#_decided). ``Raster_terrain_index(fcinfo, false,
+    &raster_tpi)`` runs ``i = 0``, ``extent = NULL`` and ``raster_tpi(rast, band, extent,
+    ...)``, and ``Jsonbset_set_common(fcinfo, false)`` never reads the null treatment of
+    its lax twin. Comments are read as blanks, one for each character, as #_guards reads
+    them."""
+    text = _COMMENT.sub(lambda c: " " * len(c.group()), hbody)
+    for p, fn in fnptrs.items():
+        text = re.sub(r"(?<![\w.>])" + re.escape(p) + r"\s*\(", fn + "(", text)
+    for p, lit in subst.items():
+        text = re.sub(r"(?<![\w.>])" + re.escape(p) + r"\b", lit, text)
+    text = _CHOICE.sub(lambda c: c.group() if _decided(c["cond"]) is None else
+                       "= " + (c["then"] if _decided(c["cond"]) else c["else"]) + ";",
+                       text)
+    pos = 0
+    while True:
+        m = re.compile(r"\bif\s*\(").search(text, pos)
+        if not m:
+            return _number_indices(text)
+        close = _close_paren(text, m.end() - 1)
+        verdict = _decided(text[m.end():close])
+        j = _skip_space(text, close + 1)
+        end = _statement_end(text, j)
+        e = _skip_space(text, end)
+        has_else = re.match(r"else\b", text[e:]) is not None
+        k = _skip_space(text, e + 4) if has_else else end
+        stop = _statement_end(text, k) if has_else else end
+        if verdict is None:
+            pos = m.end()
+            continue
+        kept = text[j:end] if verdict else (text[k:stop] if has_else else ";")
+        text = text[:m.start()] + kept + text[stop:]
+        pos = m.start()
+
+
 def _guarded_default(body: str, var: str) -> tuple[frozenset, str] | None:
     """``(arities, literal)`` when local ``var`` starts from a literal and every later
     assignment of it runs only for the numbers of arguments ``arities`` (#_guards).  A SQL
@@ -463,12 +612,18 @@ def _guarded_default(body: str, var: str) -> tuple[frozenset, str] | None:
                  body):
         return None
     assigns = list(re.finditer(r"(?<![\w.>])" + v + r"\s*=(?!=)", body))
-    if len(assigns) < 2:
+    if not assigns:
         return None
-    init = re.match(r"\s*([^;]+?)\s*;", body[assigns[0].end():])
+    # an initialiser ends at the comma of a declaration of several locals, `double xmin =
+    # 0, xmax = 0;`, as at its semicolon
+    init = re.match(r"\s*([^;,]+?)\s*[;,]", body[assigns[0].end():])
     lit = _literal(init.group(1)) if init else None
     if lit is None or _runs_at(body, assigns[0].start()) != _ARITIES:
         return None
+    if len(assigns) == 1:
+        # assigned once, from a literal, by every call: the literal for every number of
+        # arguments, as `period` stays NULL in `Stbox_constructor` for a box without T
+        return frozenset(), lit
     runs: frozenset = frozenset()
     for a in assigns[1:]:
         r = _runs_at(body, a.start())
@@ -1222,9 +1377,21 @@ def merge_sql_arg_params(idl: dict, mdb_src: str | Path,
     parameters."""
     from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs
     wrappers = extract_wrappers(mdb_src)
+    helpers = extract_helpers(mdb_src)
     m2d = _meos_to_mdb(meos_src) if meos_src else {}
     w2sig = _wrapper_sql_sigs(sql_src) if sql_src else {}
     bodies = extract_meos_bodies(meos_src) if meos_src else {}
+
+    def reading_body(w: str, func: dict) -> str:
+        # a wrapper calling no MEOS function of its own reads its arguments in the shared
+        # helper it delegates to, as the call makes it run, as #merge_boundargs reads the
+        # literals there: `Stbox_constructor_x` reads xmin, ymin, xmax, ymax, srid
+        body = wrappers[w]
+        if _call_args(body, func["name"]) or _call_args(body, "pg_" + func["name"]):
+            return body
+        hbody, _, _ = _delegated(body, helpers)
+        return hbody or body
+
     n = 0
     for func in idl["functions"]:
         primary = func.get("mdbC")
@@ -1233,7 +1400,7 @@ def merge_sql_arg_params(idl: dict, mdb_src: str | Path,
         ws = [primary] + [w for w in m2d.get(func["name"]) or () if w != primary]
         sigs = func.get("sqlSignatures") or []
         sig_ws = [_signature_wrapper(func, s, ws, w2sig) or primary for s in sigs] or [primary]
-        orders = [_sql_arg_params(wrappers[w], func, bodies.get(func["name"]))
+        orders = [_sql_arg_params(reading_body(w, func), func, bodies.get(func["name"]))
                   if w in wrappers else None for w in sig_ws]
         if len({tuple(o or ()) for o in orders}) == 1:
             if orders[0]:
