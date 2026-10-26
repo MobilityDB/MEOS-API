@@ -39,6 +39,8 @@
 #   catalog-path=<abs path to meos-idl.json>
 #   libmeos-prefix=<abs runtime prefix, or empty when --build-libmeos is not given>
 set -euo pipefail
+# A command substitution runs with errexit too, as in refresh-binding.sh.
+shopt -s inherit_errexit
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "$0"; }
 

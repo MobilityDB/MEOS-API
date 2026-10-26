@@ -12,6 +12,8 @@
 # branch (recorded below + in each binding's compose-order.txt). WORKDIR defaults to a $HOME
 # path (NEVER /tmp — it is reaped).
 set -euo pipefail
+# A command substitution runs with errexit too, as in refresh-binding.sh.
+shopt -s inherit_errexit
 
 PIN_REF="${1:?usage: ecosystem-generate.sh <pin-tag|sha> [workdir]}"
 WORK="${2:-$HOME/ecosystem-gen}"
