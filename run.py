@@ -145,12 +145,12 @@ def main():
     # 1d. Generate the codegen `shape` from the signatures + Doxygen, replacing
     #     the hand-maintained meta stub.  inputArrays/outputArrays/arrayReturn
     #     come from the parameter forms; nullable comes from the C
-    #     `@param ... may be NULL` SoT.
+    #     `@param ... @nullable` SoT.
     idl, sh = infer_shapes(idl)
     print(f"      inferred shape: {sh['arrayReturn']} array returns, "
           f"{sh['outputArrays']} output arrays, "
           f"{sh['inputArrays']} input arrays", file=sys.stderr)
-    # The `may be NULL` / `@param[out]` Doxygen tags live in the MEOS C *source*
+    # The `@nullable` / `@param[out]` Doxygen tags live in the MEOS C *source*
     # (meos/src/**/*.c), not the parsed header tree. On the build-libmeos path
     # HEADERS_DIR is the INSTALLED headers (generated meos_export.h, no src/), so
     # scan from the source checkout (MDB_SRC_ROOT/meos) — the same root the
@@ -160,7 +160,7 @@ def main():
                  if os.environ.get("MDB_SRC_ROOT") else HEADERS_DIR.parent)
     _doxy_root = _src_root if (_src_root / "src").is_dir() else HEADERS_DIR.parent
     idl, nn = merge_nullable(idl, _doxy_root)
-    print(f"      nullable params from Doxygen `may be NULL`: {nn}",
+    print(f"      nullable params from Doxygen `@nullable`: {nn}",
           file=sys.stderr)
     idl, nsa = attach_struct_input_arrays(idl, extract_param_docs(_doxy_root))
     print(f"      input arrays of structs from Doxygen `Array of`: {nsa}",
