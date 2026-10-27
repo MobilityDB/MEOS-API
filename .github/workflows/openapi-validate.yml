@@ -43,7 +43,7 @@ jobs:
           bash .github/actions/provision-meos/apt-get.sh update -qq
           bash .github/actions/provision-meos/apt-get.sh install -y --no-install-recommends \
             clang libclang-dev \
-            libjson-c-dev libgsl-dev libproj-dev libgeos-dev \
+            libjson-c-dev libproj-dev \
             "$(bash .github/actions/provision-meos/server-dev-package.sh)"
 
       - name: Clone MobilityDB master (MEOS headers source)

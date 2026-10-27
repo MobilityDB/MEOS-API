@@ -68,7 +68,7 @@ runs:
       shell: bash
       env:
         PACKAGES: >-
-          clang libclang-dev libjson-c-dev libgsl-dev libproj-dev libgeos-dev
+          clang libclang-dev libjson-c-dev libproj-dev
       run: |
         # The PostgreSQL server headers are those of the PostgreSQL the image ships.
         packages="$PACKAGES $(bash "$GITHUB_ACTION_PATH/server-dev-package.sh")"
@@ -153,7 +153,7 @@ runs:
       shell: bash
       env:
         PACKAGES: >-
-          libgeos-dev libproj-dev libjson-c-dev libgsl-dev libh3-dev libgdal-dev libxml2-dev
+          libproj-dev libjson-c-dev libh3-dev libgdal-dev libxml2-dev
           autoconf automake libtool pkg-config postgresql-17 postgresql-server-dev-17
         FAMILIES: ${{ inputs.families }}
       run: |
