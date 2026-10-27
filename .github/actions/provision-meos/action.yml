@@ -138,22 +138,23 @@ runs:
         bash "$GITHUB_ACTION_PATH/apt-get.sh" --purge remove postgresql* -y || true
         sudo rm -rf /var/lib/postgresql/ /etc/postgresql/ /var/log/postgresql/ || true
 
-    # The two caches of the build path. The packages: libgdal-dev depends on the -dev
-    # packages of its drivers (mariadb, poppler, spatialite, xerces) and postgresql-server-dev-17
-    # on clang-19 and llvm-19, about 200 MB a runner downloads on every run, so the .deb files
-    # are kept in a runner-writable directory keyed on the runner image and the package list;
-    # a new image restores the previous one's files and downloads only what changed. The
-    # derivation: the libmeos prefix and the catalog are a function of the MobilityDB commit,
-    # the MEOS-API files that derive them, the families and the runner image, so a run on the
-    # same four restores them instead of building. A cross-repo action has no .git, so the
-    # MEOS-API side of the key is a hash of its files' contents.
+    # The three caches of the build path. The packages: postgresql-server-dev-17 depends on
+    # clang-19 and llvm-19, which a runner would download on every run, so the .deb files are
+    # kept in a runner-writable directory keyed on the runner image and the package list; a new
+    # image restores the previous one's files and downloads only what changed. GDAL: libmeos
+    # links the GDAL build-gdal.sh builds from its release source without GEOS, a function of the
+    # runner image and of that script, so a run on the same two restores it. The derivation: the
+    # libmeos prefix and the catalog are a function of the MobilityDB commit, the MEOS-API files
+    # that derive them, the families and the runner image, so a run on the same four restores them
+    # instead of building. A cross-repo action has no .git, so the MEOS-API side of each key is a
+    # hash of its files' contents.
     - name: Key the provision caches
       id: keys
       if: inputs.build-libmeos == 'true'
       shell: bash
       env:
         PACKAGES: >-
-          libproj-dev libjson-c-dev libh3-dev libgdal-dev libxml2-dev
+          libproj-dev libjson-c-dev libh3-dev libsqlite3-dev zlib1g-dev libxml2-dev
           autoconf automake libtool pkg-config postgresql-17 postgresql-server-dev-17
         FAMILIES: ${{ inputs.families }}
       run: |
@@ -165,10 +166,12 @@ runs:
           | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
         pkg_hash="$(echo "$PACKAGES" | tr -s ' \n' '\n\n' | sort | sha256sum | cut -c1-16)"
         fam_hash="$(echo "$FAMILIES" | sha256sum | cut -c1-16)"
+        gdal_hash="$(sha256sum "$GITHUB_ACTION_PATH/build-gdal.sh" | cut -c1-16)"
         {
           echo "packages=$PACKAGES"
           echo "deb-prefix=provision-meos-debs-${ImageOS:-unknown}-"
           echo "deb-key=provision-meos-debs-$image-$pkg_hash"
+          echo "gdal-key=provision-meos-gdal-$image-$gdal_hash"
           echo "build-key=provision-meos-build-$image-$mdb_sha-$api_hash-$fam_hash"
         } >> "$GITHUB_OUTPUT"
 
@@ -204,6 +207,28 @@ runs:
         # The cache step saves the directory as the runner user; apt wrote it as root.
         sudo chmod -R a+rX "$APT_ARCHIVES"
         sudo rm -f "$APT_ARCHIVES/lock"
+
+    - name: Restore the GDAL build
+      id: gdal-cache
+      if: inputs.build-libmeos == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/gdal-prefix
+        key: ${{ steps.keys.outputs.gdal-key }}
+
+    - name: Build GDAL without GEOS
+      if: inputs.build-libmeos == 'true' && steps.gdal-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/build-gdal.sh" "$RUNNER_TEMP/gdal-prefix"
+
+    # Installed on a cache hit of the libmeos prefix too, as libmeos.so links it. MobilityDB's
+    # CMake finds it under /usr/local, the GDAL every consumer then builds and runs against.
+    - name: Install GDAL
+      if: inputs.build-libmeos == 'true'
+      shell: bash
+      run: |
+        sudo cp -a "$RUNNER_TEMP/gdal-prefix/." /usr/local/
+        sudo ldconfig
 
     # Build path: provision-meos.sh builds libmeos, stages a clean MEOS-only
     # header prefix ($RUNNER_TEMP/meos-headers) that the parse reads, and installs
@@ -247,3 +272,16 @@ runs:
           echo "libmeos-prefix=/usr/local"
         } >> "$GITHUB_OUTPUT"
         echo "Restored libmeos and the catalog ($(wc -c < "$REPO_ROOT/output/meos-idl.json") bytes)" >&2
+
+    # MEOS calls no GEOS function, so no GEOS library loads with libmeos: the step fails where
+    # one does, naming the library that brings it.
+    - name: Check that no GEOS loads with libmeos
+      if: inputs.build-libmeos == 'true'
+      shell: bash
+      run: |
+        deps="$(ldd /usr/local/lib/libmeos.so)"
+        echo "$deps" | grep -E 'libgdal|libproj|libmeos' >&2 || true
+        if echo "$deps" | grep -i 'libgeos'; then
+          echo "::error::libmeos loads GEOS: $(echo "$deps" | grep -i libgeos | awk '{print $1}' | tr '\n' ' ')"
+          exit 1
+        fi
