@@ -1,9 +1,9 @@
 """Regression tests for parser/nullable.py.
 
 Nullability is read from the C Doxygen (the source of truth), the `@nullable` tag
-inside a `@param` entry or the `@param ... may be NULL` note, and folded into each
-function's ``shape.nullable`` for the params that actually exist on the IDL
-function.
+inside a `@param` entry, and folded into each function's ``shape.nullable`` for
+the params that actually exist on the IDL function. A description naming NULL in
+prose states nothing.
 
 Plain unittest, no pytest dependency; writes a tiny synthetic source tree.
 """
@@ -18,7 +18,7 @@ SAMPLE = '''
  * @ingroup meos_temporal_inout
  * @brief Return the MF-JSON representation
  * @param[in] temp Temporal value
- * @param[in] srs Spatial reference system, may be `NULL`
+ * @param[in] srs Spatial reference system @nullable
  */
 char *
 temporal_as_mfjson(const Temporal *temp, char *srs)
@@ -29,13 +29,24 @@ temporal_as_mfjson(const Temporal *temp, char *srs)
 /**
  * @brief Append an instant
  * @param[in] inst Instant
- * @param[in] maxt Maximum time interval, may be `NULL`
+ * @param[in] maxt Maximum time interval @nullable
  * @param[in] interp Interpolation
  */
 Temporal *
 temporal_append_tinstant(const TInstant *inst, const Interval *maxt, int interp)
 {
   return NULL;
+}
+
+/**
+ * @brief Dissolve the parts of a geometry
+ * @param[in] geom Geometry, may be `NULL`
+ * @param[out] dissolved The dissolved geometry, or NULL where nothing dissolves
+ */
+bool
+geom_dissolve(const LWGEOM *geom, LWGEOM **dissolved)
+{
+  return false;
 }
 
 /**
@@ -70,16 +81,22 @@ class NullableTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_extracts_only_may_be_null_params(self):
+    def test_extracts_only_tagged_params(self):
         nul = extract_nullable(self.tmp.name)
         self.assertEqual(nul["temporal_as_mfjson"], ["srs"])
         self.assertEqual(nul["temporal_append_tinstant"], ["maxt"])
-        # `temp`, `inst`, `interp` carry no NULL note -> not nullable
+        # `temp`, `inst`, `interp` carry no tag -> not nullable
         self.assertNotIn("temp", nul["temporal_as_mfjson"])
 
+    def test_prose_naming_null_states_nothing(self):
+        """A description naming NULL without the tag, as
+        #test_extracts_only_tagged_params reads the tag."""
+        nul = extract_nullable(self.tmp.name)
+        self.assertNotIn("geom_dissolve", nul)
+
     def test_reads_the_tag_inside_the_param_entry(self):
-        """The @nullable tag, as #test_extracts_only_may_be_null_params reads the
-        prose note."""
+        """The @nullable tag on its continuation line, behind a guard and on an
+        output, as #test_extracts_only_tagged_params reads it on one line."""
         nul = extract_nullable(self.tmp.name)
         # On the entry's line and on its continuation line, behind an `#if MEOS`
         # guard, and on an output a caller may pass as NULL
@@ -89,7 +106,7 @@ class NullableTests(unittest.TestCase):
         self.assertNotIn("jb", nul["jsonb_set_lax"])
 
     def test_param_docs_leave_out_the_tag(self):
-        """The description #test_extracts_only_may_be_null_params reads, without the
+        """The description #test_extracts_only_tagged_params reads, without the
         tag."""
         docs = extract_param_docs(self.tmp.name)
         self.assertEqual(docs["jsonb_set_lax"]["newjb"], "New value")
