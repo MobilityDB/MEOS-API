@@ -154,6 +154,86 @@ class TypeRelationsParseTest(unittest.TestCase):
         self.assertEqual(by_base["float8"]["spanset"], "floatspanset")
 
 
+_PREDICATES = _FIXTURE + """
+bool
+numspan_type(MeosType type)
+{
+  return (/* Dates are represented as integers */ type == T_FLOATSPAN);
+}
+
+bool
+span_type(MeosType type)
+{
+  return (numspan_type(type) || type == T_FLOATSET);
+}
+
+bool
+tspatial_type(MeosType type)
+{
+  return (type == T_TGEOMPOINT
+#if GEOMETRY
+    || type == T_TGEOMETRY
+#endif
+    );
+}
+
+bool
+linear_type(MeosType type)
+{
+  bool result = (type == T_TFLOAT || type == T_TGEOMPOINT);
+  return result;
+}
+
+bool
+ensure_tspatial_type(MeosType type)
+{
+  if (tspatial_type(type))
+    return true;
+  return false;
+}
+
+bool
+alternative_type(MeosType type)
+{
+#if GEOMETRY
+  return type == T_TGEOMETRY;
+#else
+  return type == T_TGEOMPOINT;
+#endif
+}
+"""
+
+
+class TypePredicatesParseTest(unittest.TestCase):
+
+    def _predicates(self, text):
+        with tempfile.TemporaryDirectory() as d:
+            catalog = Path(d) / "temporal"
+            catalog.mkdir()
+            (catalog / "meos_catalog.c").write_text(text)
+            return attach_type_relations({}, Path(d))["typeRelations"]["predicates"]
+
+    def test_a_predicate_lists_its_members_in_meostype_order(self):
+        preds = self._predicates(_PREDICATES)
+        self.assertEqual(preds["numspan_type"], ["floatspan"])
+        self.assertEqual(preds["linear_type"], ["tfloat", "tgeompoint"])
+
+    def test_a_predicate_calling_another_takes_its_members(self):
+        self.assertEqual(self._predicates(_PREDICATES)["span_type"], ["floatset", "floatspan"])
+
+    def test_a_family_guard_admits_its_members(self):
+        # The catalog describes the build with every family, so a member behind `#if` is one
+        self.assertEqual(self._predicates(_PREDICATES)["tspatial_type"],
+                         ["tgeompoint", "tgeometry"])
+
+    def test_what_states_no_membership_is_left_out(self):
+        # an ensure_ raises rather than states a category, and a body with an alternative
+        # (`#else`) holds no one membership
+        preds = self._predicates(_PREDICATES)
+        self.assertNotIn("ensure_tspatial_type", preds)
+        self.assertNotIn("alternative_type", preds)
+
+
 class TypeRelationsSourceTest(unittest.TestCase):
 
     def test_canonical_numeric_mappings(self):
@@ -181,6 +261,21 @@ class TypeRelationsSourceTest(unittest.TestCase):
         reachable = {t for record in by_base.values() for t in record.get("temporal", ())}
         for name in ("tpose", "tgeompoint", "tgeogpoint", "trgeometry", "tgeometry"):
             self.assertIn(name, reachable)
+
+    def test_canonical_categories(self):
+        # The live counterpart of TypePredicatesParseTest, as #test_canonical_numeric_mappings
+        # is of the relation parse
+        src = find_mobilitydb_src()
+        if src is None and locate_catalog(None) is None:
+            self.skipTest("MobilityDB source not available")
+        preds = attach_type_relations({}, src)["typeRelations"]["predicates"]
+        # The numbers of a temporal box and the temporal numbers whose box it is
+        self.assertEqual(preds["tnumber_spantype"], ["floatspan", "intspan", "bigintspan"])
+        self.assertEqual(preds["tnumber_type"], ["tfloat", "tint", "tbigint"])
+        self.assertEqual(preds["timespan_type"], ["datespan", "tstzspan"])
+        # A member behind a family guard (`#if POINTCLOUD`)
+        self.assertIn("pcpatchset", preds["spatialset_type"])
+        self.assertFalse(any(name.startswith("ensure_") for name in preds))
 
 
 if __name__ == "__main__":

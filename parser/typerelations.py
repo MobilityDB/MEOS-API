@@ -133,6 +133,69 @@ def locate_catalog(src_root: Path | None) -> Path | None:
     return locate_temporal_source(src_root, "meos_catalog.c")
 
 
+_PREDICATE_RE = re.compile(r'\nbool\s*\n(\w+)\(' + MEOSTYPE_PARAM + r' type\)\s*\{(.*?)\n\}', re.S)
+_TERM_RE = re.compile(r'^(?:type\s*==\s*(T_\w+)|(\w+)\(\s*type\s*\))$')
+
+
+def type_predicates(text: str, names: dict) -> dict:
+    """The members of every membership predicate of ``meos_catalog.c``, in MeosType order.
+
+    A membership predicate is a ``bool <name>(MeosType type)`` whose body returns a
+    disjunction of ``type == T_X`` tests and of calls to other membership predicates
+    (`numspan_type`, `tnumber_type`, `spatialset_type`, ...): it states a category of types,
+    the sets of numbers or the spans a temporal box carries, and the catalog publishes each
+    category with its members so that a binding reads which types a category holds where
+    MEOS states it. A predicate whose body does anything else is not a membership statement
+    and is left out rather than approximated, as #object_model.predicate_types reads only a
+    predicate it names.
+    """
+    bodies = {}
+    for name, body in _PREDICATE_RE.findall(text):
+        body = re.sub(r'/\*.*?\*/', '', body, flags=re.S)
+        # A family guard (`#if POINTCLOUD` ... `#endif`) admits its members in the build with
+        # every family, which is the build the catalog describes; an alternative (`#else`) is
+        # not a membership the catalog can state.
+        if re.search(r'^\s*#\s*(else|elif)\b', body, re.M):
+            continue
+        body = re.sub(r'^\s*#\s*(if|ifdef|ifndef|endif)\b.*$', '', body, flags=re.M)
+        m = (re.fullmatch(r'\s*return\s*\(?(.*?)\)?\s*;\s*', body, re.S)
+             or re.fullmatch(r'\s*bool\s+(\w+)\s*=\s*\(?(.*?)\)?\s*;\s*return\s+\1\s*;\s*',
+                             body, re.S))
+        if not m:
+            continue
+        terms = [t.strip() for t in re.split(r'\|\|', m.group(m.lastindex))]
+        parsed = [_TERM_RE.match(t) for t in terms]
+        if all(parsed):
+            bodies[name] = [(p.group(1), p.group(2)) for p in parsed]
+
+    order = {t: i for i, t in enumerate(names)}
+    resolved = {}
+
+    def members(name, seen=()):
+        if name in resolved:
+            return resolved[name]
+        if name in seen or name not in bodies:
+            return None
+        out = set()
+        for literal, call in bodies[name]:
+            if literal:
+                out.add(literal)
+            else:
+                sub = members(call, seen + (name,))
+                if sub is None:
+                    return None
+                out |= sub
+        resolved[name] = out
+        return out
+
+    result = {}
+    for name in bodies:
+        types = members(name)
+        if types and all(t in names for t in types):
+            result[name] = [names[t] for t in sorted(types, key=lambda t: order[t])]
+    return dict(sorted(result.items()))
+
+
 def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
     """Attach ``idl["typeRelations"]`` from the ``MEOS_RELTYPE_CATALOG`` array.
 
@@ -203,5 +266,6 @@ def attach_type_relations(idl: dict, src_root: Path | None) -> dict:
             f"{catalog}: no type relation parsed from MEOS_RELTYPE_CATALOG — the catalog's "
             "shape has changed and parser/typerelations.py no longer reads it")
 
-    idl["typeRelations"] = {"byBase": dict(sorted(by_base.items()))}
+    idl["typeRelations"] = {"byBase": dict(sorted(by_base.items())),
+                            "predicates": type_predicates(text, names)}
     return idl
