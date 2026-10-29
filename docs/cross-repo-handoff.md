@@ -21,6 +21,7 @@ python tools/portable_parity.py  # -> output/meos-portable-parity.json (bare-nam
 | `meos-idl.json#/functions[].{network,wire,api}` | per-function projectability + decode/encode/array/out-param wire model |
 | `meos-idl.json#/temporalTypes` | per `Temporal<T>`: its `base`, its `bbox`, the `mfjson` type token `asMFJSON` writes, and the `number` / `spatial` / `linear` classes |
 | `meos-idl.json#/typeRelations/byBase` | each base type's `set`, `span`, `spanset` and its `temporal` types, the last a list since a base carries several |
+| `meos-idl.json#/typeRelations/predicates` | each type category `meos_catalog.c` states as a membership predicate (`numspan_type`, `timespan_type`, `tnumber_spantype`, `tspatial_type`, ...) → its member types in `MeosType` order, with every family the catalog describes; the `ensure_*` validators state no category and are left out |
 | `meos-coverage.json#/worklist` | every non-exposable public function with a `class` + concrete upstream `suggest`, ranked by `byClass` |
 | `meos-portable-parity.json` | each bare name → backing family, with the verified parity headline |
 | OpenAPI / MCP / runtime server | generated from the same catalog |
