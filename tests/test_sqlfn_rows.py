@@ -23,7 +23,8 @@ import unittest
 from pathlib import Path
 
 from parser.sqlfn import (_wrapper_sql_sigs, attach_row_sources, attach_sqlfn_map,
-                          attach_array_shapes, declared_arrays, declared_columns,
+                          attach_array_shapes, attach_input_shapes, declared_arrays,
+                          declared_columns, declared_inputs,
                           declared_composites)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -557,6 +558,63 @@ class ArrayShapeTests(unittest.TestCase):
         layout = dict(DUMP_VALUES_LAYOUT, pixelValues={"nulls": "nodata"})
         with self.assertRaisesRegex(ValueError, "pixelValues"):
             _array_idl(layout)
+
+
+SET_VALUES_INPUTS = {"setValues": {
+    4: {"values": "values", "nulls": "nodata", "rows": "height", "columns": "width",
+        "count": "count"},
+    5: {"values": "noset", "rows": "nosetheight", "columns": "nosetwidth",
+        "nullElement": "false"}}}
+
+
+def _input_idl(inputs=None, args=None):
+    """raster_set_values over the signature of setValues, through #attach_input_shapes with
+    the statement `inputs`."""
+    names = ["rast", "band", "x", "y", "width", "height", "values", "nodata", "noset",
+             "nosetwidth", "nosetheight", "count", "keepnodata"]
+    func = {"name": "raster_set_values", "sqlfn": "setValues",
+            "params": [{"name": n} for n in names],
+            "sqlSignatures": [{"args": args or ["raster", "integer", "integer", "integer",
+                                                "float[]", "boolean[]", "boolean"],
+                               "ret": "raster"}]}
+    idl, n = attach_input_shapes({"functions": [func]},
+                                 SET_VALUES_INPUTS if inputs is None else inputs)
+    return idl["functions"][0]["sqlSignatures"][0], n
+
+
+class InputShapeTests(unittest.TestCase):
+    """#attach_input_shapes, the arrays a signature takes as #ArrayShapeTests the array a
+    signature returns."""
+
+    def test_each_array_states_the_parameters_it_fills(self):
+        sig, n = _input_idl()
+        self.assertEqual(n, 1)
+        self.assertEqual(sig["inputShape"], {
+            "4": SET_VALUES_INPUTS["setValues"][4], "5": SET_VALUES_INPUTS["setValues"][5]})
+
+    def test_a_parameter_the_function_lacks_stops_the_catalog(self):
+        """As #test_a_null_mask_naming_no_output_array_stops_the_catalog."""
+        inputs = {"setValues": {**SET_VALUES_INPUTS["setValues"],
+                                5: dict(SET_VALUES_INPUTS["setValues"][5], rows="nosetrows")}}
+        with self.assertRaisesRegex(ValueError, "setValues"):
+            _input_idl(inputs)
+
+    def test_an_argument_that_is_no_array_stops_the_catalog(self):
+        with self.assertRaisesRegex(ValueError, "setValues"):
+            _input_idl(args=["raster", "integer", "integer", "integer", "float",
+                             "boolean[]", "boolean"])
+
+    def test_a_statement_no_signature_takes_stops_the_catalog(self):
+        """As #test_a_layout_no_signature_takes_stops_the_catalog."""
+        inputs = dict(SET_VALUES_INPUTS, reclass={0: {"values": "values", "rows": "height",
+                                                      "columns": "width"}})
+        with self.assertRaisesRegex(ValueError, "reclass"):
+            _input_idl(inputs)
+
+    def test_the_inputs_are_read_by_sql_name(self):
+        """As #test_the_array_layouts_are_read_by_sql_name."""
+        self.assertEqual(declared_inputs(COLUMNS)["setValues"],
+                         SET_VALUES_INPUTS["setValues"])
 
 
 if __name__ == "__main__":

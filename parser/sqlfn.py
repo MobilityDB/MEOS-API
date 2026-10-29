@@ -590,6 +590,56 @@ def attach_array_shapes(idl, declared=None):
     return idl, n
 
 
+def declared_inputs(path=_COLUMNS_META):
+    """The C parameters a wrapper fills from a two-dimensional SQL array it takes, stated in
+    `meta/sql-columns.json` beside the layouts #declared_arrays reads, keyed by SQL name and
+    then by the position of the argument: {sqlName: {position: {"values": ..., "rows": ...,
+    "columns": ..., ...}}}."""
+    doc = json.loads(Path(path).read_text())
+    return {key: {int(k): dict(v) for k, v in entry["args"].items()}
+            for key, entry in (doc.get("inputs") or {}).items()}
+
+
+def attach_input_shapes(idl, declared=None):
+    """(idl, number of signatures stating the layout of an array they take) once each SQL
+    signature taking a two-dimensional array whose layout only its wrapper reads states it
+    as `inputShape`, as #attach_array_shapes states the layout of an array a signature
+    returns: for the position of each such argument, `values`, the C array of its elements
+    row by row, `rows` and `columns`, the parameters of its size, `count`, the parameter of
+    its number of elements, `nulls`, the C array true for its NULL elements, or
+    `nullElement`, the value a NULL element passes where none is stated.
+    `setValues(raster, integer, integer, integer, float[], boolean[], boolean)` passes its
+    values as `values`, `nodata`, `height`, `width` and `count` of raster_set_values, and
+    its flags as `noset`, `nosetheight` and `nosetwidth`, a NULL flag false.
+
+    A statement naming a parameter the function does not take, an argument that is no
+    array, or a statement no signature takes, stops the catalog: a binding reading it would
+    pass the function arguments PostgreSQL does not."""
+    declared = declared_inputs() if declared is None else declared
+    bad, used, n = [], set(), 0
+    for f in idl["functions"]:
+        params = {p["name"] for p in f.get("params") or ()}
+        for s in f.get("sqlSignatures") or ():
+            key = s.get("sqlName") or f.get("sqlfn")
+            st = declared.get(key)
+            if not st:
+                continue
+            used.add(key)
+            args = list(s.get("args") or ())
+            named = {v for a in st.values() for k, v in a.items() if k != "nullElement"}
+            if not named <= params or any(k >= len(args) or not args[k].endswith("[]")
+                                          for k in st):
+                bad.append(f"{f['name']}: {key}({', '.join(args)})")
+                continue
+            s["inputShape"] = {str(k): dict(v) for k, v in sorted(st.items())}
+            n += 1
+    bad += [f"{key}: no SQL signature taking an array" for key in declared if key not in used]
+    if bad:
+        raise ValueError("SQL array inputs meta/sql-columns.json states that no function "
+                         "takes:\n  " + "\n  ".join(sorted(set(bad))))
+    return idl, n
+
+
 def _c_base(ctype):
     """A C type without `const`, `struct` and its pointer levels, with the
     `<stdint.h>` spellings read as MEOS's own (`int64_t` is `int64`), and the number of

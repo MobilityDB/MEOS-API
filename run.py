@@ -27,7 +27,7 @@ from parser.indexsearch import attach_index_search
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
-                          attach_array_shapes, attach_claims_fit,
+                          attach_array_shapes, attach_claims_fit, attach_input_shapes,
                           attach_sqlaggfn_map, lint_container_family_csqlfn,
                           lint_ea_sqlfn, lint_positional_sqlfn,
                           lint_sqlfn_case_collisions, state_deployed_sqlfn)
@@ -429,6 +429,10 @@ def main():
     if SQL_SRC.exists():
         idl, narrays = attach_array_shapes(idl)
         print(f"      SQL arrays stating their layout: {narrays}", file=sys.stderr)
+        # and the C parameters a wrapper fills from a two-dimensional array it takes
+        idl, ninputs = attach_input_shapes(idl)
+        print(f"      SQL signatures stating the layout of an array they take: {ninputs}",
+              file=sys.stderr)
 
     # State each SQL function composed over the functions of another type, its casts,
     # call and restore named by MEOS function, read from the deployed SQL bodies and
