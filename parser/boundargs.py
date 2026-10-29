@@ -1086,7 +1086,9 @@ def _notnull_default(body: str, var: str, nargs: int) -> tuple[int, str] | None:
               re.finditer(r"(?<![\w.>])" + v + r"\s*=(?!=)|&\s*" + v + r"\b", b)]
     if len(writes) < 2 or writes[0][1]:
         return None
-    init = re.match(r"\s*([^;]+?)\s*;", b[b.index("=", writes[0][0]) + 1:])
+    # an initialiser ends at the comma of a declaration of several locals, `int nrows = 0,
+    # ncols = 0;`, as at its semicolon, as #_guarded_default reads it
+    init = re.match(r"\s*([^;,]+?)\s*[;,]", b[b.index("=", writes[0][0]) + 1:])
     lit = _literal(init.group(1)) if init else None
     if lit is None:
         return None
