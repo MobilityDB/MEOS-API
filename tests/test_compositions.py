@@ -676,5 +676,113 @@ class HelperCompositionTests(unittest.TestCase):
                          ["tstzspan", "tstzspan"])
 
 
+
+GATHER_WRAPPERS = """
+Datum
+Pcpoint_make(PG_FUNCTION_ARGS)
+{
+  uint32_t pcid = (uint32_t) PG_GETARG_INT32(0);
+  int count = PG_NARGS() - 1;
+  assert(count > 0 && count <= PCPOINT_MAX_COORDS);
+  double values[PCPOINT_MAX_COORDS];
+  for (int i = 0; i < count; i++)
+    values[i] = PG_GETARG_FLOAT8(i + 1);
+  PG_RETURN_PCPOINT_P(pcpoint_make(pcid, values, count));
+}
+
+Datum
+Pcpoint_make_coords(PG_FUNCTION_ARGS)
+{
+  uint32_t pcid = (uint32_t) PG_GETARG_INT32(0);
+  ArrayType *array = PG_GETARG_ARRAYTYPE_P(1);
+  int count;
+  const double *values = float8arr_extract(array, &count);
+  Pcpoint *result = pcpoint_make(pcid, values, count);
+  PG_FREE_IF_COPY(array, 1);
+  PG_RETURN_PCPOINT_P(result);
+}
+"""
+
+GATHER_SQL = """
+-- The vocabulary of multi-word types comes from a RETURNS clause, as cellArea(quadbin) states
+-- double precision in the SQL of MobilityDB
+CREATE FUNCTION cellArea(quadbin)
+  RETURNS double precision
+  AS 'MODULE_PATHNAME', 'Quadbin_cell_area'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION pcpoint(pcid integer, x double precision, y double precision)
+  RETURNS pcpoint
+  AS 'MODULE_PATHNAME', 'Pcpoint_make'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION pcpoint(pcid integer, x double precision, y double precision,
+    z double precision)
+  RETURNS pcpoint
+  AS 'MODULE_PATHNAME', 'Pcpoint_make'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+CREATE FUNCTION pcpoint(pcid integer, coordinates double precision[])
+  RETURNS pcpoint
+  AS 'MODULE_PATHNAME', 'Pcpoint_make_coords'
+  LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+"""
+
+GATHER_MEOS = """
+/**
+ * @brief Return a pcpoint from a point cloud identifier and coordinates
+ * @csqlfn #Pcpoint_make(), #Pcpoint_make_coords()
+ */
+Pcpoint *
+pcpoint_make(uint32_t pcid, const double *values, int count)
+{
+  return NULL;
+}
+"""
+
+
+class GatherCompositionTests(unittest.TestCase):
+    """#attach_wrapper_compositions over a wrapper gathering its trailing arguments into a C
+    array (#_gathers): pcpoint(pcid, x, y) and pcpoint(pcid, x, y, z) pass the coordinates
+    as the values of pcpoint_make and their number as its count, while pcpoint(pcid,
+    coordinates) passes its SQL array as it is."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        for sub, name, text in (("src", "pcset.c", GATHER_WRAPPERS),
+                                ("sql", "pcpoint.in.sql", GATHER_SQL),
+                                ("meos", "pcpoint.c", GATHER_MEOS)):
+            (root / sub).mkdir()
+            (root / sub / name).write_text(text)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _attach(self):
+        root = Path(self.tmp.name)
+        double = "double precision"
+        idl = {"functions": [
+            {"name": "pcpoint_make", "api": "public", "mdbC": "Pcpoint_make", "sqlfn": "pcpoint",
+             "params": [{"name": "pcid"}, {"name": "values"}, {"name": "count"}],
+             "sqlSignatures": [{"args": ["integer", double, double], "ret": "pcpoint"},
+                               {"args": ["integer", double, double, double], "ret": "pcpoint"},
+                               {"args": ["integer", double + "[]"], "ret": "pcpoint"}]}],
+            "compositions": []}
+        return attach_wrapper_compositions(idl, root / "src", root / "sql", root / "meos")
+
+    def test_the_coordinates_are_gathered_into_the_values(self):
+        idl, n = self._attach()
+        self.assertEqual(n, 2)
+        self.assertEqual([c["operands"] for c in idl["compositions"]], [
+            [{"arg": 0, "param": "pcid"}, {"gather": [1, 2], "param": "values"},
+             {"value": "2", "param": "count"}],
+            [{"arg": 0, "param": "pcid"}, {"gather": [1, 2, 3], "param": "values"},
+             {"value": "3", "param": "count"}]])
+        self.assertEqual({c["call"] for c in idl["compositions"]}, {"pcpoint_make"})
+
+    def test_the_array_signature_keeps_its_place(self):
+        idl, _ = self._attach()
+        self.assertEqual([s["args"] for s in idl["functions"][0]["sqlSignatures"]],
+                         [["integer", "double precision[]"]])
+
+
 if __name__ == "__main__":
     unittest.main()
