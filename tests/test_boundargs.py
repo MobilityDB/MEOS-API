@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.boundargs import (_sql_arg_params, attach_call_literals, attach_null_default_binds,
+from parser.boundargs import (_notnull_default, _sql_arg_params, attach_call_literals,
+                              attach_null_default_binds,
                               attach_type_derived_args,
                               extract_call_literals,
                               extract_wrappers, merge_boundargs, merge_sql_arg_params,
@@ -1843,6 +1844,43 @@ CREATE FUNCTION valueCount(rast raster, searchvalues float[],
         self.assertEqual(idl["functions"][0].get("shape", {}).get("boundArgs"),
                          {"tz": "false"})
         self.assertNotIn("boundArgs", idl["functions"][0]["sqlSignatures"][0])
+
+
+
+SET_VALUES_WRAPPER = r"""
+Datum
+Raster_set_values(PG_FUNCTION_ARGS)
+{
+  Raster *rast = (Raster *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+  bool *noset = NULL;
+  int nrows = 0, ncols = 0;
+  if (! PG_ARGISNULL(5))
+  {
+    int ncount;
+    bool *nnulls;
+    Datum *nelems = raster_block_extract(PG_GETARG_ARRAYTYPE_P(5), &nrows,
+      &ncols, &nnulls, &ncount);
+  }
+  Raster *result = raster_set_values(rast, noset, ncols, nrows);
+  PG_RETURN_POINTER(result);
+}
+"""
+
+
+class DeclarationListTests(unittest.TestCase):
+    """#_notnull_default over the locals of one declaration, as #_guarded_default reads
+    them: `int nrows = 0, ncols = 0;` starts both from 0, each written only where
+    argument 5 is not NULL, as Raster_set_values reads the size of its flags."""
+
+    def test_each_local_of_the_declaration_starts_from_its_literal(self):
+        self.assertEqual(_notnull_default(SET_VALUES_WRAPPER, "ncols", 7), (5, "0"))
+        self.assertEqual(_notnull_default(SET_VALUES_WRAPPER, "nrows", 7), (5, "0"))
+
+    def test_a_local_starting_from_a_call_states_no_literal(self):
+        body = SET_VALUES_WRAPPER.replace("int nrows = 0, ncols = 0;",
+                                          "int nrows = f(a, b), ncols = 0;")
+        self.assertIsNone(_notnull_default(body, "nrows", 7))
+        self.assertEqual(_notnull_default(body, "ncols", 7), (5, "0"))
 
 
 if __name__ == "__main__":
