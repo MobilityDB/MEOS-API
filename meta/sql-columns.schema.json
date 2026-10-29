@@ -72,6 +72,74 @@
         }
       }
     },
+    "inputs": {
+      "type": "object",
+      "description": "The C parameters a wrapper fills from a two-dimensional SQL array it takes, keyed by SQL name.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "note",
+          "args"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "What the wrapper reads of the arrays, and why MEOS does not state it.",
+            "minLength": 1
+          },
+          "args": {
+            "type": "object",
+            "description": "Keyed by the position of the argument, from 0.",
+            "propertyNames": {
+              "pattern": "^[0-9]+$"
+            },
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "values",
+                "rows",
+                "columns"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "values": {
+                  "description": "The C array of the elements, row by row.",
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]*$"
+                },
+                "rows": {
+                  "description": "The parameter of the number of rows.",
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]*$"
+                },
+                "columns": {
+                  "description": "The parameter of the number of columns.",
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]*$"
+                },
+                "count": {
+                  "description": "The parameter of the number of elements.",
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]*$"
+                },
+                "nulls": {
+                  "description": "The C array true for a NULL element.",
+                  "type": "string",
+                  "pattern": "^[a-z_][a-z0-9_]*$"
+                },
+                "nullElement": {
+                  "description": "The C value a NULL element passes, where no nulls array is stated.",
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "rows": {
       "type": "object",
       "description": "Keyed by the composite type a function returns, or by its SQL name when it returns record.",

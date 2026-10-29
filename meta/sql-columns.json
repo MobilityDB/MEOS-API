@@ -14,6 +14,15 @@
       "rowLength": {"call": "raster_width", "args": ["rast"]}
     }
   },
+  "inputs": {
+    "setValues": {
+      "note": "Raster_set_values reads its values, a one- or two-dimensional array, row by row into the values of raster_set_values, true in nodata for a NULL element, its rows and columns the height and width of the block, as PostGIS's ST_SetValues does; it reads its flags, an array of their own size, into noset, a NULL flag false.",
+      "args": {
+        "4": {"values": "values", "nulls": "nodata", "rows": "height", "columns": "width", "count": "count"},
+        "5": {"values": "noset", "rows": "nosetheight", "columns": "nosetwidth", "nullElement": "false"}
+      }
+    }
+  },
   "rows": {
     "geomval": {
       "note": "A GeomVal holds a polygon and the value of the pixels it covers; the rows of geomval read its geom and its val, as PostGIS's ST_DumpAsPolygons does.",
