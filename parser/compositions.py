@@ -553,10 +553,13 @@ def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
     one parameter. A C literal the wrapper passes, as ``true`` for the ``spheroid`` of
     ``edwithin_tgeo_geo``, is a value operand. A signature whose wrapper casts nothing
     stays where it is."""
-    from parser.boundargs import (_call_args, _caller_index, _signature_wrapper,
-                                  extract_wrappers)
+    from parser.boundargs import (_call_args, _caller_index, _delegated, _signature_wrapper,
+                                  extract_helpers, extract_wrappers, specialize_argtypes)
     from parser.sqlfn import _meos_to_mdb, _wrapper_sql_sigs
     wrappers = extract_wrappers(mdb_src)
+    helpers = extract_helpers(mdb_src)
+    members = {v["name"] for e in idl.get("enums") or () if e.get("name") == "MeosType"
+               for v in e.get("values") or ()}
     m2d = _meos_to_mdb(meos_src)
     w2sig = _wrapper_sql_sigs(sql_src)
     public = {f["name"]: f for f in idl["functions"] if f.get("api") == "public"}
@@ -574,17 +577,29 @@ def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
             w = _signature_wrapper(func, sig, claimed, w2sig)
             body = wrappers.get(w) if w else None
             args = _call_args(body, func["name"]) if body else None
+            if body and args is None:
+                # A wrapper delegating to a shared helper: the helper as the wrapper's
+                # literals and this signature's argument types make it run
+                hbody = _delegated(body, helpers)[0]
+                if hbody:
+                    body = specialize_argtypes(hbody, list(sig.get("args") or ()), members)
+                    args = _call_args(body, func["name"])
+            bound = sig.get("boundArgs") or (func.get("shape") or {}).get("boundArgs") or {}
             operands = None
             if args is not None and len(args) == len(params):
                 operands, cast_seen = [], False
                 for a, p in zip(args, params):
                     a = a.strip()
                     rhs = [m.group(1) for m in re.finditer(
-                        r"(?<![\w.>])" + re.escape(a) + r"\s*=(?!=)\s*([^;]+);", body)]
+                        r"(?<![\w.>])" + re.escape(a) + r"\s*=(?!=)\s*([^;]+);", body)
+                           if m.group(1).strip() != "NULL"]
                     hit = _CAST_CALL.match(rhs[0]) if len(rhs) == 1 else None
                     cast = hit.group(1) if hit else None
                     if _C_LITERAL.match(a):
                         operands.append({"value": a, "param": p})
+                    elif p in bound and not hit:
+                        # A local the wrapper leaves at the literal it starts from
+                        operands.append({"value": bound[p], "param": p})
                     elif cast in public and len(public[cast].get("params") or ()) == 1:
                         operands.append({"arg": _caller_index(body, hit.group(2)),
                                          "casts": [cast], "param": p})
