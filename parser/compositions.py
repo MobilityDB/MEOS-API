@@ -533,6 +533,29 @@ def attach_compositions(idl, sql_src):
 
 _CAST_CALL = re.compile(r"^\s*(\w+)\s*\(\s*(\w+)\s*\)\s*$")
 _C_LITERAL = re.compile(r"^(?:true|false|-?\d+(?:\.\d+)?)$")
+# A loop filling a local array from the arguments past the first k, `values[i] =
+# PG_GETARG_FLOAT8(i + 1)` for `i < count`, and the count of those arguments,
+# `count = PG_NARGS() - 1`
+_GATHER_LOOP = re.compile(
+    r"for\s*\(\s*int\s+(\w+)\s*=\s*0\s*;\s*\1\s*<\s*(\w+)\s*;\s*\1\s*\+\+\s*\)\s*"
+    r"(\w+)\s*\[\s*\1\s*\]\s*=\s*PG_GETARG_\w+\s*\(\s*\1\s*\+\s*(\d+)\s*\)\s*;")
+_NARGS_LESS = r"(?<![\w.>]){}\s*=\s*PG_NARGS\s*\(\s*\)\s*-\s*(\d+)\s*;"
+
+
+def _gathers(body, nargs):
+    """{array local: (the SQL arguments it gathers, its count local)} of a wrapper ``body``
+    called with ``nargs`` arguments: ``Pcpoint_make`` gathers arguments 1 and 2 of
+    pcpoint(pcid, x, y) into ``values`` and counts 2 in ``count``. #_caller_index reads the
+    one argument a local carries and #_nargs_choices of parser/boundargs.py a value the
+    number of arguments chooses; no reader there follows a loop over the arguments, which
+    this one does for the loop counting them from ``PG_NARGS()``."""
+    out = {}
+    for m in _GATHER_LOOP.finditer(body):
+        _, count, array, k = m.groups()
+        c = re.search(_NARGS_LESS.format(re.escape(count)), body)
+        if c and c.group(1) == k and nargs > int(k):
+            out[array] = (list(range(int(k), nargs)), count)
+    return out
 
 
 def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
@@ -551,7 +574,11 @@ def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
     states it (#_signature_wrapper of parser/boundargs.py) and each argument of the call to
     the SQL argument it carries (#_caller_index); a cast is a public catalog function of
     one parameter. A C literal the wrapper passes, as ``true`` for the ``spheroid`` of
-    ``edwithin_tgeo_geo``, is a value operand. A signature whose wrapper casts nothing
+    ``edwithin_tgeo_geo``, is a value operand. The arguments a wrapper gathers into a C
+    array (#_gathers) are a gather operand and their count a value operand:
+    ``pcpoint(integer, double precision, double precision)`` is ``{"operands": [{"arg": 0,
+    "param": "pcid"}, {"gather": [1, 2], "param": "values"}, {"value": "2", "param":
+    "count"}], "call": "pcpoint_make"}``. A signature whose wrapper casts or gathers nothing
     stays where it is."""
     from parser.boundargs import (_call_args, _caller_index, _delegated, _signature_wrapper,
                                   extract_helpers, extract_wrappers, specialize_argtypes)
@@ -588,6 +615,8 @@ def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
             operands = None
             if args is not None and len(args) == len(params):
                 operands, cast_seen = [], False
+                gathers = _gathers(body, len(sig.get("args") or ()))
+                counts = {c: str(len(ks)) for ks, c in gathers.values()}
                 for a, p in zip(args, params):
                     a = a.strip()
                     rhs = [m.group(1) for m in re.finditer(
@@ -595,7 +624,14 @@ def attach_wrapper_compositions(idl, mdb_src, sql_src, meos_src):
                            if m.group(1).strip() != "NULL"]
                     hit = _CAST_CALL.match(rhs[0]) if len(rhs) == 1 else None
                     cast = hit.group(1) if hit else None
-                    if _C_LITERAL.match(a):
+                    if a in gathers:
+                        # The arguments the wrapper gathers into a C array, which a binding
+                        # passes as it passes a SQL array of them
+                        operands.append({"gather": gathers[a][0], "param": p})
+                        cast_seen = True
+                    elif a in counts:
+                        operands.append({"value": counts[a], "param": p})
+                    elif _C_LITERAL.match(a):
                         operands.append({"value": a, "param": p})
                     elif p in bound and not hit:
                         # A local the wrapper leaves at the literal it starts from
