@@ -508,5 +508,173 @@ class WrapperCompositionTests(unittest.TestCase):
                          [["tgeompoint", "geometry"]])
 
 
+HELPER_WRAPPERS = '''
+static Datum
+Stbox_constructor(FunctionCallInfo fcinfo, bool hasx, bool hasz,
+  bool hast, bool geodetic)
+{
+  double xmin = 0, xmax = 0, ymin = 0, ymax = 0, zmin = 0, zmax = 0;
+  int32_t srid = 0;
+  Span *period = NULL;
+
+  int i = 0;
+  if (hasx)
+  {
+    xmin = PG_GETARG_FLOAT8(i++);
+    ymin = PG_GETARG_FLOAT8(i++);
+    xmax = PG_GETARG_FLOAT8(i++);
+    ymax = PG_GETARG_FLOAT8(i++);
+  }
+  if (hast)
+  {
+    MeosType basetype = oid_meostype(get_fn_expr_argtype(fcinfo->flinfo, i));
+    assert(basetype == T_TSTZSPAN || basetype == T_TIMESTAMPTZ);
+    if (basetype == T_TSTZSPAN)
+      period = PG_GETARG_SPAN_P(i++);
+    else /* basetype == T_TIMESTAMPTZ */
+    {
+      TimestampTz t = PG_GETARG_TIMESTAMPTZ(i++);
+      period = timestamptz_to_span(t);
+    }
+  }
+  if (hasx)
+    srid = PG_GETARG_INT32(i++);
+  PG_RETURN_STBOX_P(stbox_make(hasx, hasz, geodetic, srid, xmin, xmax,
+    ymin, ymax, zmin, zmax, period));
+}
+
+PGDLLEXPORT Datum Stbox_constructor_t(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Stbox_constructor_t);
+Datum
+Stbox_constructor_t(PG_FUNCTION_ARGS)
+{
+  return Stbox_constructor(fcinfo, false, false, true, false);
+}
+
+PGDLLEXPORT Datum Stbox_constructor_xt(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(Stbox_constructor_xt);
+Datum
+Stbox_constructor_xt(PG_FUNCTION_ARGS)
+{
+  return Stbox_constructor(fcinfo, true, false, true, false);
+}
+'''
+
+HELPER_SQL = '''
+CREATE FUNCTION stboxT(timestamptz)
+  RETURNS stbox
+  AS 'MODULE_PATHNAME', 'Stbox_constructor_t'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION stboxT(tstzspan)
+  RETURNS stbox
+  AS 'MODULE_PATHNAME', 'Stbox_constructor_t'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION stboxXT(float, float, float, float, timestamptz, integer DEFAULT 0)
+  RETURNS stbox
+  AS 'MODULE_PATHNAME', 'Stbox_constructor_xt'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+CREATE FUNCTION stboxXT(float, float, float, float, tstzspan, integer DEFAULT 0)
+  RETURNS stbox
+  AS 'MODULE_PATHNAME', 'Stbox_constructor_xt'
+  LANGUAGE C IMMUTABLE PARALLEL SAFE;
+'''
+
+HELPER_MEOS = '''
+/**
+ * @brief Return a spatiotemporal box from its arguments
+ * @csqlfn #Stbox_constructor_t(), #Stbox_constructor_xt()
+ */
+STBox *
+stbox_make(bool hasx, bool hasz, bool geodetic, int32_t srid, double xmin,
+  double xmax, double ymin, double ymax, double zmin, double zmax, const Span *p)
+{
+  return NULL;
+}
+'''
+
+
+class HelperCompositionTests(unittest.TestCase):
+    """#attach_wrapper_compositions over a wrapper delegating to a shared helper: the helper
+    runs as the wrapper's literals and each signature's argument types make it, so the
+    signature taking a timestamptz builds its period through the public cast
+    ``timestamptz_to_span`` and states a composition, while the one taking the span passes
+    it as it is and keeps its signature."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        for sub, name, text in (("src", "stbox.c", HELPER_WRAPPERS),
+                                ("sql", "stbox.in.sql", HELPER_SQL),
+                                ("meos", "stbox_meos.c", HELPER_MEOS)):
+            (root / sub).mkdir()
+            (root / sub / name).write_text(text)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _attach(self):
+        root = Path(self.tmp.name)
+        flags_t = {"hasx": "false", "hasz": "false", "geodetic": "false", "srid": "0",
+                   "xmin": "0", "xmax": "0", "ymin": "0", "ymax": "0", "zmin": "0",
+                   "zmax": "0"}
+        flags_xt = {"hasx": "true", "hasz": "false", "geodetic": "false", "zmin": "0",
+                    "zmax": "0"}
+        idl = {"functions": [
+            {"name": "stbox_make", "api": "public", "sqlfn": "stboxT",
+             "params": [{"name": n} for n in ("hasx", "hasz", "geodetic", "srid", "xmin",
+                                              "xmax", "ymin", "ymax", "zmin", "zmax", "p")],
+             "sqlSignatures": [
+                 {"sqlName": "stboxT", "args": ["timestamptz"], "ret": "stbox",
+                  "boundArgs": flags_t},
+                 {"sqlName": "stboxT", "args": ["tstzspan"], "ret": "stbox",
+                  "boundArgs": flags_t},
+                 {"sqlName": "stboxXT",
+                  "args": ["float", "float", "float", "float", "timestamptz", "integer"],
+                  "argDefaults": [None, None, None, None, None, "0"], "ret": "stbox",
+                  "boundArgs": flags_xt},
+                 {"sqlName": "stboxXT",
+                  "args": ["float", "float", "float", "float", "tstzspan", "integer"],
+                  "argDefaults": [None, None, None, None, None, "0"], "ret": "stbox",
+                  "boundArgs": flags_xt}]},
+            {"name": "timestamptz_to_span", "api": "public", "params": [{"name": "t"}],
+             "sqlSignatures": []}],
+            "enums": [{"name": "MeosType", "values": [
+                {"name": "T_TIMESTAMPTZ"}, {"name": "T_TSTZSPAN"}]}],
+            "compositions": []}
+        return attach_wrapper_compositions(idl, root / "src", root / "sql", root / "meos")
+
+    def test_a_timestamptz_is_cast_to_the_period(self):
+        idl, n = self._attach()
+        self.assertEqual(n, 2)
+        self.assertEqual(idl["compositions"][0], {
+            "sqlName": "stboxT", "args": ["timestamptz"], "required": 1,
+            "argDefaults": [None], "ret": "stbox",
+            "operands": [{"value": "false", "param": "hasx"},
+                         {"value": "false", "param": "hasz"},
+                         {"value": "false", "param": "geodetic"},
+                         {"value": "0", "param": "srid"},
+                         {"value": "0", "param": "xmin"}, {"value": "0", "param": "xmax"},
+                         {"value": "0", "param": "ymin"}, {"value": "0", "param": "ymax"},
+                         {"value": "0", "param": "zmin"}, {"value": "0", "param": "zmax"},
+                         {"arg": 0, "casts": ["timestamptz_to_span"], "param": "p"}],
+            "call": "stbox_make"})
+
+    def test_the_arguments_read_before_the_period_number_it(self):
+        idl, _ = self._attach()
+        self.assertEqual(idl["compositions"][1]["operands"], [
+            {"value": "true", "param": "hasx"}, {"value": "false", "param": "hasz"},
+            {"value": "false", "param": "geodetic"}, {"arg": 5, "param": "srid"},
+            {"arg": 0, "param": "xmin"}, {"arg": 2, "param": "xmax"},
+            {"arg": 1, "param": "ymin"}, {"arg": 3, "param": "ymax"},
+            {"value": "0", "param": "zmin"}, {"value": "0", "param": "zmax"},
+            {"arg": 4, "casts": ["timestamptz_to_span"], "param": "p"}])
+
+    def test_the_span_signatures_keep_their_place(self):
+        idl, _ = self._attach()
+        self.assertEqual([s["args"][-1] if s["sqlName"] == "stboxT" else s["args"][4]
+                          for s in idl["functions"][0]["sqlSignatures"]],
+                         ["tstzspan", "tstzspan"])
+
+
 if __name__ == "__main__":
     unittest.main()

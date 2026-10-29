@@ -496,6 +496,12 @@ def _decided(cond: str) -> bool | None:
     if len(ands) > 1:
         vals = [_decided(a) for a in ands]
         return False if False in vals else (True if all(vals) else None)
+    # Two constants compared: the type #specialize_argtypes states for an argument against
+    # the one a test names, `T_TIMESTAMPTZ == T_TSTZSPAN`, or two numbers
+    eq = (re.fullmatch(r"(T_[A-Z0-9_]+)\s*(==|!=)\s*(T_[A-Z0-9_]+)", c)
+          or re.fullmatch(r"(-?\d+)\s*(==|!=)\s*(-?\d+)", c))
+    if eq:
+        return (eq.group(1) == eq.group(3)) == (eq.group(2) == "==")
     return None
 
 
@@ -505,16 +511,24 @@ _CHOICE = re.compile(
     r"\s*(?P<else>[^;]+?)\s*;")
 
 
-def _number_reads(seg: str, inc: re.Pattern, c: int) -> tuple[str, int] | None:
+def _number_reads(seg: str, inc: re.Pattern, c: int,
+                  plain: re.Pattern | None = None) -> tuple[str, int] | None:
     """``seg`` with each read of a running index, ``i++``, written as the number it holds,
     starting from ``c``, and the number after the last read, or None when a branch leaves
     it undecided: both arms of a test advance it by as many reads, as
     ``Stbox_constructor`` reads the period from a span or a timestamp, one argument
-    either way."""
+    either way. A read that does not advance it, ``plain`` (#_number_indices builds both
+    patterns), is the number it holds there: ``get_fn_expr_argtype(fcinfo->flinfo, i)``
+    after four reads is argument 4."""
     out, i = "", 0
     test = re.compile(r"\bif\s*\(")
     while True:
         mi, mf = inc.search(seg, i), test.search(seg, i)
+        mp = plain.search(seg, i) if plain else None
+        if mp and (not mi or mp.start() < mi.start()) and (not mf or mp.start() < mf.start()):
+            out += seg[i:mp.start()] + str(c)
+            i = mp.end()
+            continue
         if not mi:
             return out + seg[i:], c
         if mf and mf.start() < mi.start():
@@ -525,8 +539,8 @@ def _number_reads(seg: str, inc: re.Pattern, c: int) -> tuple[str, int] | None:
             has_else = re.match(r"else\b", seg[e:]) is not None
             k = _skip_space(seg, e + 4) if has_else else end
             stop = _statement_end(seg, k) if has_else else end
-            a = _number_reads(seg[j:end], inc, c)
-            b = _number_reads(seg[k:stop], inc, c) if has_else else ("", c)
+            a = _number_reads(seg[j:end], inc, c, plain)
+            b = _number_reads(seg[k:stop], inc, c, plain) if has_else else ("", c)
             if a is None or b is None or a[1] != b[1]:
                 return None
             out += seg[i:j] + a[0] + seg[end:k] + b[0]
@@ -544,11 +558,12 @@ def _number_indices(text: str) -> str:
     for m in re.finditer(r"\bint\s+(?P<v>\w+)\s*=\s*(?P<n>\d+)\s*;", text):
         v, n = m.group("v"), int(m.group("n"))
         inc = re.compile(r"(?<![\w.>])" + re.escape(v) + r"\s*\+\+")
+        plain = re.compile(r"(?<![\w.>])" + re.escape(v) + r"\b(?!\s*\+\+)")
         rest = text[m.end():]
         if re.search(r"(?<![\w.>])" + re.escape(v) + r"\s*(?:=(?!=)|--|[-+*/]=)", rest):
             continue
         if inc.search(rest):
-            numbered = _number_reads(rest, inc, n)
+            numbered = _number_reads(rest, inc, n, plain)
             if numbered is not None:
                 text = text[:m.end()] + numbered[0]
             continue
@@ -596,6 +611,36 @@ def _specialize(hbody: str, subst: dict[str, str], fnptrs: dict[str, str]) -> st
         kept = text[j:end] if verdict else (text[k:stop] if has_else else ";")
         text = text[:m.start()] + kept + text[stop:]
         pos = m.start()
+
+
+_ARGTYPE = re.compile(r"oid_meostype\s*\(\s*get_fn_expr_argtype\s*\(\s*fcinfo\s*->\s*flinfo"
+                      r"\s*,\s*(\d+)\s*\)\s*\)")
+
+
+def specialize_argtypes(hbody: str, args: list[str], members: set[str]) -> str:
+    """The helper ``hbody`` (#_specialize's output) as one SQL signature of argument types
+    ``args`` makes it run: the type the wrapper reads of argument ``k``,
+    ``oid_meostype(get_fn_expr_argtype(fcinfo->flinfo, k))``, is the member of ``MeosType``
+    naming ``args[k]`` (``timestamptz`` is ``T_TIMESTAMPTZ``), a local assigned that type
+    once reads as it, and each test the types decide keeps its branch alone, as
+    #_specialize keeps the branch a literal decides. ``Stbox_constructor`` reads the period
+    of ``stboxT(timestamptz)`` through ``timestamptz_to_span`` and that of
+    ``stboxT(tstzspan)`` as the span it is. A type ``members`` does not hold stays
+    undecided."""
+    text = _ARGTYPE.sub(
+        lambda m: ("T_" + args[int(m.group(1))].upper()
+                   if int(m.group(1)) < len(args)
+                   and "T_" + args[int(m.group(1))].upper() in members else m.group(0)),
+        hbody)
+    decl = re.compile(r"\b\w+\s+(?P<v>\w+)\s*=\s*(?P<t>T_[A-Z0-9_]+)\s*;")
+    pos = 0
+    while (m := decl.search(text, pos)):
+        v, rest = m.group("v"), text[m.end():]
+        pos = m.end()
+        if re.search(r"(?<![\w.>])" + re.escape(v) + r"\s*(?:=(?!=)|--|\+\+|[-+*/]=)", rest):
+            continue
+        text = text[:m.end()] + re.sub(r"(?<![\w.>])" + re.escape(v) + r"\b", m.group("t"), rest)
+    return _specialize(text, {}, {})
 
 
 def _guarded_default(body: str, var: str) -> tuple[frozenset, str] | None:
