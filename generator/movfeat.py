@@ -78,8 +78,10 @@ _OGC_MOVFEAT_ROUTES: list[dict] = [
     {"path": "/collections/{collectionId}/items", "method": "get",
      "operationId": "listItems", "meos": None,
      "summary": "List moving-feature items in a collection."},
+    # The temporal geometry of an item is an MF-JSON MovingPoint, the token
+    # ``temporalTypes`` states for ``tgeompoint``, read by its public reader.
     {"path": "/collections/{collectionId}/items", "method": "post",
-     "operationId": "createItem", "meos": "temporal_from_mfjson",
+     "operationId": "createItem", "meos": "tgeompoint_from_mfjson",
      "summary": "Create a moving-feature item from an MF-JSON payload."},
     {"path": "/collections/{collectionId}/items/{featureId}", "method": "get",
      "operationId": "getItem", "meos": "temporal_as_mfjson",
