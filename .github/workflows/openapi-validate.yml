@@ -15,6 +15,7 @@ on:
       - 'meta/**'
       - 'generate_openapi.py'
       - 'run.py'
+      - 'tools/provision-meos.sh'
       - 'requirements.txt'
       - '.github/workflows/openapi-validate.yml'
   push:
@@ -50,8 +51,6 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/MobilityDB/MobilityDB \
             "$RUNNER_TEMP/mobilitydb"
-          echo "MOBILITYDB_HEADERS=$RUNNER_TEMP/mobilitydb/meos/include" \
-            >> "$GITHUB_ENV"
 
       - name: Install Python dependencies
         run: |
@@ -59,8 +58,11 @@ jobs:
           pip install -r requirements.txt
           pip install openapi-spec-validator
 
+      # tools/provision-meos.sh is the one recipe of the catalog: it parses the source
+      # headers with MDB_SRC_ROOT naming the checkout, from which run.py reads the
+      # @ingroup groups that make a function public, and so exposable.
       - name: Regenerate the catalog (parse + reconcile + enrich in one step)
-        run: python3 run.py "$MOBILITYDB_HEADERS"
+        run: tools/provision-meos.sh --mdb-src "$RUNNER_TEMP/mobilitydb"
 
       - name: Project to OpenAPI 3.1
         run: python3 generate_openapi.py
@@ -74,6 +76,8 @@ jobs:
           # OpenAPIV31SpecValidator(spec).validate() raises on violation,
           # returns None on success. Works with openapi-spec-validator 0.9.x.
           OpenAPIV31SpecValidator(spec).validate()
+          # A document with no path is valid OpenAPI and projects nothing.
+          assert spec.get('paths'), 'meos-openapi.json exposes no path'
           print(f\"::notice::meos-openapi.json conforms to OpenAPI 3.1 — \"
                 f\"{len(spec.get('paths', {}))} paths, \"
                 f\"{len(spec.get('components', {}).get('schemas', {}))} schemas.\")
