@@ -36,7 +36,7 @@ FULL_CATALOG = {
             },
         },
         {
-            "name": "temporal_from_mfjson", "category": "io",
+            "name": "tgeompoint_from_mfjson", "category": "io",
             "network": {"exposable": True},
             "wire": {
                 "params": [{"name": "json", "kind": "json", "json": "string"}],
