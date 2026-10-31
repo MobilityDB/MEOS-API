@@ -22,7 +22,7 @@ Engine contract (all tags are simple strings the app layer assigns from the
 
     decode(fn_name, value:str)            -> handle          (opaque)
     invoke(fn_name, args:[(tag,val)], rt) -> handle|scalar|None
-    encode(fn_name, handle)               -> str
+    encode(fn_name, handle, aux, outparams) -> str
 """
 
 from __future__ import annotations
@@ -46,7 +46,9 @@ class Engine:
     def invoke(self, fn_name: str, args: list, result_tag: str):
         raise NotImplementedError
 
-    def encode(self, fn_name: str, handle, aux=()) -> str:
+    def encode(self, fn_name: str, handle, aux=(), outparams=()) -> str:
+        """``outparams``: the ``(position, cType)`` of the writer's out-parameters,
+        from the catalog's ``shape.outParams`` (#writer_outparams of server/app.py)."""
         raise NotImplementedError
 
     def invoke_outparam(self, fn_name: str, args: list, out_ctype: str,
@@ -83,7 +85,7 @@ class StubEngine(Engine):
         return {"str": "", "int": 0, "double": 0.0,
                 "bool": False, "enum": ""}.get(result_tag, "")
 
-    def encode(self, fn_name, handle, aux=()):
+    def encode(self, fn_name, handle, aux=(), outparams=()):
         return f"<stub:{fn_name}>"
 
     def invoke_outparam(self, fn_name, args, out_ctype, presence):
@@ -198,15 +200,47 @@ class CtypesEngine(Engine):
         self._raise_if_error()
         return r
 
-    def encode(self, fn_name, handle, aux=()):
+    def encode(self, fn_name, handle, aux=(), outparams=()):
+        """``char *f(const T *, aux..., size_t *size_out)``: the writer called with its
+        own signature. ``outparams`` are the ``(position, cType)`` of the parameters
+        the catalog states in its ``shape.outParams``, positions counted from the value
+        at 0; each gets a slot of its own, as #invoke_outparam gives its result one,
+        and the trailing inputs fill the other positions in order. A writer handing
+        back its size in a ``size_t *`` is read for that many bytes."""
         self._last_error = None
         f = self._sym(fn_name)
+        ct = self._ct
         atypes, avals = self._aux_ctypes(aux)
-        f.argtypes = [self._ct.c_void_p, *atypes]
-        f.restype = self._ct.c_char_p
-        r = f(handle, *avals)
+        outs = dict(outparams)
+        argtypes, cargs, slots = [ct.c_void_p], [handle], {}
+        rest = iter(zip(atypes, avals))
+        for pos in range(1, 1 + len(atypes) + len(outs)):
+            if pos in outs:
+                slot = self._pointee_ctype(outs[pos])()
+                slots[pos] = (outs[pos], slot)
+                argtypes.append(ct.POINTER(type(slot)))
+                cargs.append(ct.byref(slot))
+            else:
+                t, v = next(rest)
+                argtypes.append(t)
+                cargs.append(v)
+        f.argtypes = argtypes
+        if not slots:
+            f.restype = ct.c_char_p
+            r = f(*cargs)
+            self._raise_if_error()
+            return r.decode() if r else None
+        f.restype = ct.c_void_p
+        r = f(*cargs)
         self._raise_if_error()
-        return r.decode() if r else None
+        if not r:
+            return None
+        sizes = [s.value for c, s in slots.values()
+                 if " ".join(c.replace("*", " ").split()) == "size_t"]
+        raw = ct.string_at(r, sizes[0]) if sizes else ct.string_at(r)
+        # The size of a string MEOS writes counts its terminating NUL
+        # (``datum_as_wkb`` sizes a hex buffer ``2 * size + 1``).
+        return (raw[:-1] if raw.endswith(b"\0") else raw).decode()
 
     def _pointee_ctype(self, out_ctype: str):
         ct = self._ct
@@ -217,7 +251,7 @@ class CtypesEngine(Engine):
             "long long": ct.c_longlong, "unsigned long": ct.c_ulong,
             "long": ct.c_long, "unsigned int": ct.c_uint,
             "short": ct.c_short, "unsigned char": ct.c_ubyte,
-            "signed char": ct.c_byte,
+            "signed char": ct.c_byte, "size_t": ct.c_size_t,
         }.get(base, ct.c_int)
 
     def invoke_outparam(self, fn_name, args, out_ctype, presence):
