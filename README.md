@@ -167,9 +167,9 @@ Each function gains a `category`, a `network` verdict, and a `wire` mapping:
   "wire": {
     "params": [
       { "name": "temp1", "kind": "serialized", "cType": "const struct Temporal *",
-        "decode": "temporal_in", "encodings": ["mfjson","text","wkb"] },
+        "decode": "temporal_from_hexwkb", "encodings": ["ewkt","hexewkb","hexwkb","mfjson","text"] },
       { "name": "temp2", "kind": "serialized", "cType": "const struct Temporal *",
-        "decode": "temporal_in", "encodings": ["mfjson","text","wkb"] }
+        "decode": "temporal_from_hexwkb", "encodings": ["ewkt","hexewkb","hexwkb","mfjson","text"] }
     ],
     "result": { "kind": "json", "json": "integer" }
   }

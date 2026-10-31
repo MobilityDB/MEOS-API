@@ -353,10 +353,11 @@ def main():
               f"handle them uniformly", file=sys.stderr)
 
     # State the codec of every class once the SQL signatures and the bound literals are
-    # in: the reader of each SQL type a class serves, the hex-WKB writer with the
-    # variant its type's send binds, and every trailing input by name with its value.
+    # in: the reader and the writer of each SQL type a class serves in each encoding,
+    # every trailing input by name with its value, and the parent of a subtype class
+    # (TInstant) the object model states, which it reads and writes through.
     # A class whose codec contradicts itself stops the catalog.
-    idl, codec_errors = state_type_encodings(idl)
+    idl, codec_errors = state_type_encodings(idl, json.loads(OBJMODEL_PATH.read_text()))
     if codec_errors:
         raise ValueError("type encodings that contradict themselves:\n  "
                          + "\n  ".join(codec_errors))

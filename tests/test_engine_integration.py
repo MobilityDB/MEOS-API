@@ -154,6 +154,31 @@ class CtypesIntegrationTests(unittest.TestCase):
         self.assertIn("1.23@", outs[0])
         self.assertIn("7.65@", outs[1])
 
+    def test_the_service_wire_keeps_the_srid(self):
+        """A tgeompoint of SRID 4326 written by the out of Temporal with the variant its
+        out_aux states, the one temporal_send binds, reads back through the in of
+        Temporal with its SRID, as #test_each_type_round_trips_through_its_own_writer
+        round-trips a value through its text."""
+        import ctypes
+        te = json.loads(_CATALOG.read_text())["typeEncodings"]["Temporal"]
+        self.assertEqual((te["in"], te["out"]), ("temporal_from_hexwkb", "temporal_as_hexwkb"))
+        h = self.eng.decode("tgeompoint_in",
+                            "SRID=4326;[Point(1 1)@2000-01-01, Point(2 2)@2000-01-02]")
+        variant = dict((a["name"], a["default"]) for a in te["out_aux"])["variant"]
+        write = self.eng._sym(te["out"])
+        write.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.POINTER(ctypes.c_size_t)]
+        write.restype = ctypes.c_char_p
+        size = ctypes.c_size_t()
+        hexwkb = write(h, variant, ctypes.byref(size)).decode()
+        back = self.eng.decode(te["in"], hexwkb, _aux(te["in_aux"]))
+        srid = self.eng.invoke("tspatial_srid", [("ptr", back)], "int")
+        self.assertEqual(srid, 4326)
+        # the portable asHexWKB writer, variant 0, writes plain WKB without it
+        plain = write(h, 0, ctypes.byref(size)).decode()
+        srid0 = self.eng.invoke("tspatial_srid",
+                                [("ptr", self.eng.decode(te["in"], plain))], "int")
+        self.assertEqual(srid0, 0)
+
     def test_bad_input_raises_not_exits(self):
         with self.assertRaises(MeosError):
             self.eng.decode("tbool_in", "not a temporal value at all")

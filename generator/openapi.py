@@ -7,8 +7,8 @@ onto an OpenAPI 3.1 service contract.
 The projection is deliberately RPC-style — MEOS is a value algebra, not a
 REST resource model, so each *stateless-exposable* function becomes one
 ``POST /{function}`` operation (≈ an OGC API – Processes "process"). Opaque
-values cross the wire as strings carried in their `typeEncodings` (text /
-MF-JSON / WKB); each opaque type and referenced enum becomes a reusable
+values cross the wire as strings carried in their `typeEncodings` (text, EWKT,
+MF-JSON, hex WKB, hex EWKB); each opaque type and referenced enum becomes a reusable
 component schema. ``x-meos-*`` extensions carry the decode/encode function
 names and category so a downstream server or MCP generator can consume this
 same document.
@@ -116,6 +116,9 @@ def _type_schema(name: str, type_encodings: dict) -> dict:
     te = type_encodings.get(name)
     if not te:
         return {"type": "string", "title": name}
+    # A subtype class (``TInstant``) crosses the wire in the codec of the class it
+    # states ``through``, as #restate_wire of parser/enrich.py reads it.
+    te = type_encodings.get(te["through"], te) if "through" in te else te
     encs = te.get("encodings", [])
     return {
         "type": "string",
