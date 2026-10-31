@@ -6,7 +6,7 @@ from C headers:
 
 - ``category``     — a coarse semantic class (constructor, predicate, io, ...).
 - ``typeEncodings``— for each opaque C type, how it round-trips to the wire
-                      (text / MF-JSON / WKB) and the function names that do it,
+                      (text, EWKT, WKB, EWKB, hex WKB, hex EWKB, MF-JSON) and the functions,
                       and under ``bytes`` the reader and writer of its WKB bytes.
 - ``network``      — whether the function can be projected onto a *stateless*
                       endpoint, and if not, why.
@@ -58,29 +58,56 @@ _BOOL_BASES = {"bool", "_Bool"}
 # char-like pointers carry text or bytes (WKB) — represented as a JSON string.
 _STRING_PTR_BASES = {"char", "signed char", "unsigned char"}
 
-# name suffix -> wire encoding produced (encoder) / consumed (decoder)
+# name suffix -> encoding produced (encoder) / consumed (decoder). Each format is an
+# encoding of its own: the text (``*_out``, ``*_as_text``) beside the extended text carrying
+# the SRID (``*_as_ewkt``), the WKB bytes (``*_as_wkb``) beside the extended ones
+# (``*_as_ewkb``), and the hex string of each (``*_as_hexwkb``, ``*_as_hexewkb``), as the
+# SQL functions asText, asEWKT, asBinary, asEWKB, asHexWKB, asHexEWKB and asMFJSON name
+# them (#_SQL_ENCODERS).
 _ENCODERS = [
     (re.compile(r"_out$"), "text"),
     (re.compile(r"_as_text$"), "text"),
-    (re.compile(r"_as_e?wkt$"), "text"),
+    (re.compile(r"_as_wkt$"), "text"),
+    (re.compile(r"_as_ewkt$"), "ewkt"),
     (re.compile(r"_as_mfjson$"), "mfjson"),
     (re.compile(r"_as_geojson$"), "mfjson"),
-    # The plain hex-WKB writer ranks before the E one, so a class having both keeps the
-    # plain one as its codec (#keyed of parser/codecs.py ranks by this order).
-    (re.compile(r"_as_hex_?wkb$"), "wkb"),
-    (re.compile(r"_as_hex_?ewkb$"), "wkb"),
-    (re.compile(r"_as_e?wkb$"), "wkb"),
+    (re.compile(r"_as_hex_?wkb$"), "hexwkb"),
+    (re.compile(r"_as_hex_?ewkb$"), "hexewkb"),
+    (re.compile(r"_as_wkb$"), "wkb"),
+    (re.compile(r"_as_ewkb$"), "ewkb"),
 ]
 _DECODERS = [
     (re.compile(r"_in$"), "text"),
-    (re.compile(r"_from_e?wkt$"), "text"),
+    (re.compile(r"_from_wkt$"), "text"),
     (re.compile(r"_from_text$"), "text"),
+    (re.compile(r"_from_ewkt$"), "ewkt"),
     (re.compile(r"_from_mfjson$"), "mfjson"),
     (re.compile(r"_from_geojson$"), "mfjson"),
-    (re.compile(r"_from_hex_?wkb$"), "wkb"),
-    (re.compile(r"_from_hex_?ewkb$"), "wkb"),
-    (re.compile(r"_from_e?wkb$"), "wkb"),
+    (re.compile(r"_from_hex_?wkb$"), "hexwkb"),
+    (re.compile(r"_from_hex_?ewkb$"), "hexewkb"),
+    (re.compile(r"_from_wkb$"), "wkb"),
+    (re.compile(r"_from_ewkb$"), "ewkb"),
 ]
+# SQL name -> encoding: the portable writer each format has (``asText``) and the
+# portable reader of each type (``cbufferFromEWKT``). A function a signature names so
+# serves that encoding for the signature's SQL type, whatever its C name
+# (``cbuffer_in`` backs both ``cbufferFromText`` and ``cbufferFromEWKT``).
+_SQL_ENCODERS = {"asText": "text", "asEWKT": "ewkt", "asBinary": "wkb", "asEWKB": "ewkb",
+                 "asHexWKB": "hexwkb", "asHexEWKB": "hexewkb", "asMFJSON": "mfjson"}
+_SQL_DECODERS = [
+    (re.compile(r"[a-z0-9]FromText$"), "text"),
+    (re.compile(r"[a-z0-9]FromEWKT$"), "ewkt"),
+    (re.compile(r"[a-z0-9]FromBinary$"), "wkb"),
+    (re.compile(r"[a-z0-9]FromEWKB$"), "ewkb"),
+    (re.compile(r"[a-z0-9]FromHexWKB$"), "hexwkb"),
+    (re.compile(r"[a-z0-9]FromHexEWKB$"), "hexewkb"),
+    (re.compile(r"[a-z0-9]FromMFJSON$"), "mfjson"),
+]
+# The encodings a value travels in as a string, in the order a class's ``in`` and ``out``
+# take the first it both reads and writes: the extended text before the text, so a
+# spatial value keeps its SRID; the WKB bytes and the extended WKB bytes are no string.
+_STRING_ENCODINGS = ("ewkt", "text", "mfjson", "hexwkb", "hexewkb")
+_BYTE_ENCODINGS = ("wkb", "ewkb")
 _IO_RE = [rx for rx, _ in _DECODERS + _ENCODERS]
 
 _LIFECYCLE_RE = re.compile(r"^meos_")
@@ -211,6 +238,23 @@ def _aux_specs(params: list):
     return specs
 
 
+def _wire_encodings(te: dict) -> list:
+    """The encodings of the class ``te`` a value crosses a service in: those of
+    #_STRING_ENCODINGS, as the WKB bytes of ``wkb`` and ``ewkb`` are no JSON string."""
+    return [e for e in te["encodings"] if e in _STRING_ENCODINGS]
+
+
+def wire_pair(decoders: dict, encoders: dict) -> tuple:
+    """(encoding of ``in``, encoding of ``out``): the first of #_STRING_ENCODINGS the
+    class both reads and writes through one function each, so a service reads a value in
+    the format it writes it in; else the first it reads and the first it writes."""
+    both = next((e for e in _STRING_ENCODINGS if e in decoders and e in encoders), None)
+    if both:
+        return both, both
+    return (next((e for e in _STRING_ENCODINGS if e in decoders), None),
+            next((e for e in _STRING_ENCODINGS if e in encoders), None))
+
+
 def build_type_encodings(functions: list, structs: set,
                          values: frozenset = frozenset()) -> dict:
     """Scan the catalog for the in/out functions of every opaque struct.
@@ -248,7 +292,7 @@ def build_type_encodings(functions: list, structs: set,
         if (aux is not None and (rd >= 1 or rb in values) and rb in structs
                 and pd == 1 and pb in _STRING_PTR_BASES):
             for rx, encoding in _DECODERS:
-                if rx.search(name):
+                if rx.search(name) and encoding not in _BYTE_ENCODINGS:
                     s = slot(rb)
                     s["encodings"].add(encoding)
                     s["decoders"].setdefault(encoding, {})[name] = aux
@@ -258,7 +302,7 @@ def build_type_encodings(functions: list, structs: set,
         if (aux is not None and rd == 1 and rb in _STRING_PTR_BASES
                 and (pd >= 1 or pb in values) and pb in structs):
             for rx, encoding in _ENCODERS:
-                if rx.search(name):
+                if rx.search(name) and encoding not in _BYTE_ENCODINGS:
                     s = slot(pb)
                     s["encodings"].add(encoding)
                     s["encoders"].setdefault(encoding, {})[name] = aux
@@ -269,19 +313,23 @@ def build_type_encodings(functions: list, structs: set,
     # (`<type>_in` / `_out`) so the chosen in/out works for every subtype
     # (and `temporal_out` correctly serialises any subtype); fall back to a
     # deterministic alphabetical pick otherwise.
-    order = ("text", "mfjson", "wkb")
-    dec_suffix = {"text": "_in", "mfjson": "_from_mfjson",
-                  "wkb": "_from_hexwkb"}
-    enc_suffix = {"text": "_out", "mfjson": "_as_mfjson",
-                  "wkb": "_as_hexwkb"}
+    dec_suffix = {"text": "_in", "ewkt": "_in", "mfjson": "_from_mfjson",
+                  "hexwkb": "_from_hexwkb", "hexewkb": "_from_hexewkb"}
+    enc_suffix = {"ewkt": "_as_ewkt", "mfjson": "_as_mfjson",
+                  "hexwkb": "_as_hexwkb", "hexewkb": "_as_hexewkb"}
 
     # PostgreSQL's own spelling `pg_X` yields to the name MEOS states it under,
     # `X`, when both serve a type: `timetz_in` calls `pg_timetz_in`, and only the
     # first is the MEOS function a binding calls.
-    def choose(cands: dict, base: str, suffix: str) -> str:
+    # Of several candidates the one named for the class wins, then, where ``prefer``
+    # says so, one ending in ``suffix`` (``geo_as_text`` before ``geo_out``): the pick
+    # #keyed of parser/codecs.py makes from the SQL signatures, for a class having none.
+    def choose(cands: dict, base: str, suffix: str, prefer: bool = False) -> str:
         pool = [c for c in cands if not (c.startswith("pg_") and c[3:] in cands)]
         generic = base.lower() + suffix
-        return generic if generic in pool else sorted(pool)[0]
+        if generic in pool:
+            return generic
+        return sorted([c for c in pool if prefer and c.endswith(suffix)] or pool)[0]
 
     # The byte codec of a type, beside its wire encodings: a reader
     # ``T *f(const uint8_t *wkb, size_t size)`` and a writer
@@ -309,10 +357,14 @@ def build_type_encodings(functions: list, structs: set,
     for base, s in enc.items():
         dec = {e: choose(c, base, dec_suffix[e])
                for e, c in s["decoders"].items()}
-        encd = {e: choose(c, base, enc_suffix[e])
+        # A class having an EWKT writer is spatial: it writes its text as WKT, through
+        # ``*_as_text``, whose E twin ``*_as_ewkt`` writes it with the SRID, and every
+        # other class through ``*_out``.
+        spatial = "ewkt" in s["encoders"]
+        encd = {e: (choose(c, base, "_as_text" if spatial else "_out", spatial)
+                    if e == "text" else choose(c, base, enc_suffix[e]))
                 for e, c in s["encoders"].items()}
-        in_e = next((e for e in order if e in dec), None)
-        out_e = next((e for e in order if e in encd), None)
+        in_e, out_e = wire_pair(dec, encd)
         out[base] = {
             "encodings": sorted(s["encodings"]),
             "decoders": dec,
@@ -505,7 +557,7 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
                     "cType": " ".join(c.replace("*", " ").split()) + " *",
                     "decode": elem["in"],
                     "decode_aux": elem.get("in_aux", []),
-                    "encodings": elem["encodings"],
+                    "encodings": _wire_encodings(elem),
                 },
             })
             continue
@@ -523,7 +575,7 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
             wire_params.append({
                 "name": p["name"], "kind": "serialized", "cType": c,
                 "decode": te["in"], "decode_aux": te.get("in_aux", []),
-                "encodings": te["encodings"],
+                "encodings": _wire_encodings(te),
             })
         else:
             reasons.append(f"no-decoder:{base}")
@@ -548,7 +600,7 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
                 "kind": "serialized",
                 "cType": out_p["canonical"],
                 "encode": te["out"], "encode_aux": te.get("out_aux", []),
-                "encodings": te["encodings"],
+                "encodings": _wire_encodings(te),
                 "from_outparam": out_p["name"],
                 "out_ctype": out_p["canonical"],
                 "presence_return": presence,
@@ -562,7 +614,7 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
                 "kind": "serialized",
                 "cType": " ".join(ret.replace("*", " ").split()) + " *",
                 "encode": te["out"], "encode_aux": te.get("out_aux", []),
-                "encodings": te["encodings"],
+                "encodings": _wire_encodings(te),
             },
             "count_outparam": ret_count_name,
         }
@@ -575,7 +627,7 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
                 "kind": "serialized",
                 "cType": " ".join(ret.replace("*", " ").split()) + " *",
                 "encode": te["out"], "encode_aux": te.get("out_aux", []),
-                "encodings": te["encodings"],
+                "encodings": _wire_encodings(te),
             },
             "count_param": ret_length,
         }
@@ -600,7 +652,7 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
             wire_result = {"kind": "serialized", "cType": ret,
                            "encode": te["out"],
                            "encode_aux": te.get("out_aux", []),
-                           "encodings": te["encodings"]}
+                           "encodings": _wire_encodings(te)}
         else:
             reasons.append(
                 f"no-encoder:{base}" if depth == 1
@@ -695,7 +747,11 @@ def restate_wire(idl: dict) -> dict:
     ``tbigint_in``), so a wire read before it names codecs the catalog no longer
     states."""
     enum_names = {e["name"] for e in idl.get("enums", [])}
-    type_encodings = idl.get("typeEncodings", {})
+    # A class stating ``through`` (``TInstant``: ``Temporal``) crosses the wire in the
+    # codec of that class, as #state_type_encodings of parser/codecs.py states it.
+    stated = idl.get("typeEncodings", {})
+    type_encodings = {cls: stated.get(te["through"], te) if "through" in te else te
+                      for cls, te in stated.items()}
     functions = idl.get("functions", [])
     for fn in functions:
         fn["network"], fn["wire"] = assess(fn, type_encodings, enum_names)

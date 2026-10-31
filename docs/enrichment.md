@@ -41,14 +41,16 @@ literals are in the catalog.
 ```json
 "typeEncodings": {
   "Set": {
-    "encodings": ["text", "wkb"],
-    "decoders": { "wkb": "set_from_hexwkb" },
-    "decoderAux": { "wkb": [] },
-    "encoders": { "wkb": "set_as_hexwkb" },
-    "encoderAux": { "wkb": [{"name": "variant", "kind": "integer", "default": 4}] },
+    "encodings": ["ewkb", "ewkt", "hexewkb", "hexwkb", "text", "wkb"],
+    "decoders": { "hexwkb": "set_from_hexwkb", "wkb": "set_from_wkb" },
+    "decoderAux": { "hexwkb": [], "wkb": [{"name": "size", "kind": "length", "of": "wkb"}] },
+    "encoders": { "hexwkb": "set_as_hexwkb", "wkb": "set_as_wkb" },
+    "encoderAux": { "hexwkb": [{"name": "variant", "kind": "integer", "default": 0}],
+                    "wkb": [{"name": "variant", "kind": "integer", "default": 0}] },
     "readers": { "text": { "intset": "intset_in", "floatset": "floatset_in", "...": "..." } },
     "readerAux": { "text": { "intset": [], "floatset": [], "...": "..." } },
-    "writers": { "text": { "intset": "intset_out", "floatset": "floatset_out", "...": "..." } },
+    "writers": { "text": { "intset": "intset_out", "geomset": "spatialset_as_text", "...": "..." },
+                 "ewkt": { "geomset": "spatialset_as_ewkt", "...": "..." } },
     "writerAux": { "text": { "floatset": [{"name": "maxdd", "kind": "integer", "default": 15}] } },
     "in": "set_from_hexwkb", "in_aux": [],
     "out": "set_as_hexwkb", "out_aux": [{"name": "variant", "kind": "integer", "default": 4}],
@@ -63,10 +65,24 @@ literals are in the catalog.
 }
 ```
 
-- **decoder** — a public `const char * (+ aux) → T` (`*_in`, `*_from_mfjson`,
-  `*_from_hexwkb`, `*_from_hexewkb`, …); **encoder** — a public `T (+ aux) → char *`
-  (`*_out`, `*_as_mfjson`, `*_as_hexwkb`, `*_as_hexewkb`, …). A size the function writes back is an
-  out-parameter, stated in its `shape.outParams` as for any other function.
+- **Encodings** — each format is an encoding of its own, as the SQL functions name
+  them: `text` (`asText`, `<type>FromText`), `ewkt` (`asEWKT`, `<type>FromEWKT`), `wkb`
+  (`asBinary`, `<type>FromBinary`), `ewkb` (`asEWKB`, `<type>FromEWKB`), `hexwkb`
+  (`asHexWKB`, `<type>FromHexWKB`), `hexewkb` (`asHexEWKB`, `<type>FromHexEWKB`) and
+  `mfjson` (`asMFJSON`, `<type>FromMFJSON`). A function serves, for the SQL type of
+  each of its signatures, the encoding that signature's portable name states, and the
+  encoding of its C name for a signature named otherwise: `cbuffer_in` serves the
+  `text` and the `ewkt` of `cbuffer` (`cbufferFromText`, `cbufferFromEWKT`), and
+  `temporal_from_wkb` the `wkb` of every temporal type and the `ewkb` of those having
+  an SRID. A function no signature names serves the encoding of its C suffix (`_in`,
+  `_out`, `_as_text`: `text`; `_as_ewkt`: `ewkt`; `_from_wkb`, `_as_wkb`: `wkb`; …).
+- **decoder** — a public `const char * (+ aux) → T` in a string encoding (`*_in`,
+  `*_from_mfjson`, `*_from_hexwkb`, …), or `const uint8_t *, size_t (+ aux) → T` in
+  `wkb` and `ewkb`, whose size is stated as `{"kind": "length", "of": <the bytes>}`;
+  **encoder** — a public `T (+ aux) → char *` (`*_out`, `*_as_text`, `*_as_ewkt`,
+  `*_as_mfjson`, `*_as_hexwkb`, `*_as_hexewkb`), or `T (+ aux) → uint8_t *` in `wkb` and
+  `ewkb`. A size the function writes back is an out-parameter, stated in its
+  `shape.outParams` as for any other function.
 - **A PostgreSQL type passed by value** (`TimestampTz`, `Timestamp`, `TimeADT`,
   `DateADT`) is a class like a pointer type, its decoder returning it and its
   encoder taking it without a pointer (`timestamptz_in` / `timestamptz_out`).
@@ -76,15 +92,30 @@ literals are in the catalog.
   `SpanSet`, `Temporal`, `GSERIALIZED`) reads and writes each type through that type's own public
   function, keyed by the SQL type its signature returns (a reader) or takes (a writer).
   An encoding with a `readers` or `writers` entry has no single `decoders` or
-  `encoders` entry. Within one SQL type, the function the encoding table names first
-  wins (`cbuffer_out` before `cbuffer_as_ewkt`), then the narrower one
-  (`cbufferset_out` before `spatialset_out`); two that tie stop the catalog. An
+  `encoders` entry, and a function serving some of the SQL types of a class states
+  those alone (`tspatial_as_ewkt` writes no `tint`). Within one SQL type, the function
+  whose signature over the type carries the portable name of the encoding wins: the
+  text writer is the one `asText` reaches, `cbuffer_as_text` (WKT) before `cbuffer_out`
+  (the point as hex WKB) for a `cbuffer`, `spatialset_as_text` for a `geomset`,
+  `tspatial_as_text` for a `tgeompoint`, `tint_out` for a `tint`. Then the function the
+  encoding table names first (`cbuffer_as_hexwkb` before `cbuffer_as_hexewkb`), then the
+  narrower one (`cbufferset_out` before `spatialset_out`); two that tie stop the
+  catalog. A class having no SQL signature writes its text through `*_as_text` when it
+  has an EWKT writer (`geo_as_text`), through `*_out` otherwise. An
   encoding whose functions carry no SQL signature keeps the function the C shapes give
   it: the text and MF-JSON forms of `GSERIALIZED`, whose geometry and geography are
   PostGIS's types, while its HexEWKB readers `geom_from_hexewkb` and
   `geog_from_hexewkb` are keyed by `geometry` and `geography`.
-- **`in` / `out`** — the class's single decoder and encoder in the order `text` >
-  `mfjson` > `wkb`, absent when no single function serves the whole class.
+- **`in` / `out`** — the class's single decoder and encoder of the first string
+  encoding, in the order `ewkt` > `text` > `mfjson` > `hexwkb` > `hexewkb`, having one
+  of each, so a service reads a value in the format it writes it in: `Temporal` reads
+  and writes hex WKB (`temporal_from_hexwkb`, `temporal_as_hexwkb`), `Cbuffer` EWKT
+  (`cbuffer_in`, `cbuffer_as_ewkt`). Without such an encoding they are the first
+  single decoder and encoder in that order, absent when no single function serves the
+  whole class. A service writing a value in hex WKB writes it as PostgreSQL's wire does,
+  through the type's `send`: `out_aux` passes the variant `send` binds (`WKB_EXTENDED`,
+  4, the SRID included), where the portable `hexwkb` writer passes 0, and the hex-WKB
+  reader reads either form.
 - **Trailing inputs** — every decoder, encoder, reader and writer states the inputs
   after its value by name with the value a binding passes, in `decoderAux`,
   `encoderAux`, `readerAux` and `writerAux` (and `in_aux` / `out_aux`,
@@ -97,9 +128,21 @@ literals are in the catalog.
   `numeric_in` read with -1. A name passed two literals (`srid`, `maxdd`) or one
   macro takes the formatting default: `maxdd` and `precision` 15, flags 0, `srs`
   NULL.
-- **`variant`** of a WKB writer — the value the type's own `send` binds
-  (`WKB_EXTENDED`, 4, keeping the SRID), else the value its SQL hex writer passes when
-  the byte order is left out (`asHexWKB(raster, endian DEFAULT '')` passes 0).
+- **`variant`** of a WKB writer — the value the SQL function of its encoding passes
+  when the byte order is left out: `asBinary(intset, endian DEFAULT '')` and `asHexWKB`
+  pass 0, as `wkb_variant_from_endian` reads an empty order, so the `wkb` and `hexwkb`
+  writers write plain WKB; the `ewkb` and `hexewkb` writers, reached by `asEWKB` and
+  `asHexEWKB` with 0 too, set `WKB_EXTENDED` themselves and write the SRID, as in
+  PostgreSQL. The byte codec `bytes`, which carries a value in process, takes the
+  value the type's own `send` binds (`WKB_EXTENDED`, 4, keeping the SRID).
+- **Public codecs only** — every decoder, encoder, reader and writer is a public
+  function. A class of the subtype axis of the object model (`meta/object-model.json`
+  `axes.subtype`: `TInstant`, `TSequence`, `TSequenceSet`) that no public function reads
+  or writes states no codec of its own and `through` the root of the lattice,
+  `Temporal`: it reads and writes through the public readers and writers of each SQL
+  type `Temporal` states (`tint_in`, `tint_from_mfjson`, `temporal_from_hexwkb`, …), SQL
+  having no subtype type, and a function's wire takes the `in` and `out` of `Temporal`
+  for it.
 - **A type of its own** — a value whose slot carries a `typedef` (`H3Index`,
   `Quadbin`, `S2CellId`, each a `uint64_t`) is a class keyed by that name, read and
   written by its own functions.
@@ -129,10 +172,10 @@ For every function:
   "params": [
     { "name": "temp1", "kind": "serialized", "cType": "const Temporal *",
       "decode": "temporal_from_hexwkb", "decode_aux": [],
-      "encodings": ["mfjson","text","wkb"] },
+      "encodings": ["ewkt","hexewkb","hexwkb","mfjson","text"] },
     { "name": "temp2", "kind": "serialized", "cType": "const Temporal *",
       "decode": "temporal_from_hexwkb", "decode_aux": [],
-      "encodings": ["mfjson","text","wkb"] }
+      "encodings": ["ewkt","hexewkb","hexwkb","mfjson","text"] }
   ],
   "result": { "kind": "json", "json": "boolean" }
 }

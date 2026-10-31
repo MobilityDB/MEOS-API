@@ -365,6 +365,7 @@ class WireCatalogTests(unittest.TestCase):
             for v, key, side in vals:
                 cls = " ".join(v["cType"].replace("const", " ").replace("struct", " ")
                                .replace("*", " ").split())
+                cls = te[cls].get("through", cls)       # TInstant reads as Temporal
                 if v[key] != te[cls][side]:
                     stale.append((f["name"], v[key], te[cls][side]))
         self.assertEqual(stale, [])
