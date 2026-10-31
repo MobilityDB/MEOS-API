@@ -124,6 +124,7 @@ class FakeEngine(Engine):
 
     def __init__(self):
         self.calls = []
+        self.outparams = []
         self.fail = False
 
     def decode(self, fn, value, aux=()):
@@ -137,8 +138,9 @@ class FakeEngine(Engine):
         return {"void": None, "ptr": ("R", fn), "int": 42,
                 "bool": 1, "double": 1.5, "str": "s"}[rt]
 
-    def encode(self, fn, handle, aux=()):
+    def encode(self, fn, handle, aux=(), outparams=()):
         self.calls.append(("encode", fn, handle, list(aux)))
+        self.outparams.append((fn, list(outparams)))
         return f"ENC({fn})"
 
     def invoke_outparam(self, fn, args, out_ctype, presence):
@@ -325,6 +327,38 @@ class ServerTests(unittest.TestCase):
         st, _ = self.req("POST", "/temporal_round",
                          {"temp": "x", "maxdd": True})   # bool != integer
         self.assertEqual(st, 400)
+
+    def test_the_writer_gets_the_out_parameters_its_catalog_entry_states(self):
+        """A result written by a function the catalog lists with an out-parameter
+        (``size_t *size_out`` of a hex-WKB writer) reaches the engine with its position
+        and type, as #test_routes_exclude_non_exposable reads the routes."""
+        catalog = json.loads(json.dumps(CATALOG))
+        catalog["functions"].append(
+            {"name": "temporal_out", "network": {"exposable": False},
+             "params": [{"name": "temp", "cType": "const Temporal *"},
+                        {"name": "variant", "cType": "uint8_t"},
+                        {"name": "size_out", "cType": "size_t *"}],
+             "shape": {"outParams": ["size_out"]},
+             "wire": {"params": [], "result": {"kind": "unsupported"}}})
+        routes = build_routes(catalog)
+        self.assertEqual(routes["/temporal_round"]["result"]["encode_outparams"],
+                         [(2, "size_t *")])
+        self.assertEqual(routes["/temporal_set_interp"]["result"]["encode_outparams"],
+                         [(2, "size_t *")])
+        self.assertEqual(build_routes(CATALOG)["/temporal_round"]["result"]
+                         ["encode_outparams"], [])
+        srv = make_server(catalog, self.engine, "127.0.0.1", 0)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            c = HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            c.request("POST", "/temporal_round", json.dumps({"temp": "x", "maxdd": 3}),
+                      {"Content-Type": "application/json"})
+            self.assertEqual(c.getresponse().status, 200)
+            c.close()
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertEqual(self.engine.outparams, [("temporal_out", [(2, "size_t *")])])
 
     def test_bad_enum_value(self):
         st, b = self.req("POST", "/temporal_set_interp",

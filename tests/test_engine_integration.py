@@ -179,6 +179,28 @@ class CtypesIntegrationTests(unittest.TestCase):
                                 [("ptr", self.eng.decode(te["in"], plain))], "int")
         self.assertEqual(srid0, 0)
 
+    def test_each_hex_writer_round_trips_through_encode(self):
+        """A Set, a Span and a Temporal written by their hex-WKB writer through
+        #CtypesEngine.encode, with the out-parameters the catalog states
+        (#writer_outparams of server/app.py), read back to the value, as
+        #test_each_type_round_trips_through_its_own_writer round-trips the text."""
+        from server.app import writer_outparams
+        outs = writer_outparams(json.loads(_CATALOG.read_text()))
+        for reader, literal, writer, back, out in (
+                ("intset_in", "{1, 2, 3}", "set_as_hexwkb", "set_from_hexwkb",
+                 "intset_out"),
+                ("intspan_in", "[1, 5)", "span_as_hexwkb", "span_from_hexwkb",
+                 "intspan_out"),
+                ("tint_in", "{1@2000-01-01, 2@2000-01-02}", "temporal_as_hexwkb",
+                 "temporal_from_hexwkb", "tint_out")):
+            self.assertEqual(outs[writer], [(2, "size_t *")], writer)
+            h = self.eng.decode(reader, literal)
+            hexwkb = self.eng.encode(writer, h, [("int", 0)], outs[writer])
+            self.assertRegex(hexwkb, r"^(?:[0-9A-F]{2})+$", writer)
+            aux = [("int", 15)] if out == "tint_out" else []
+            again = self.eng.encode(out, self.eng.decode(back, hexwkb), aux)
+            self.assertEqual(again, self.eng.encode(out, h, aux), writer)
+
     def test_bad_input_raises_not_exits(self):
         with self.assertRaises(MeosError):
             self.eng.decode("tbool_in", "not a temporal value at all")

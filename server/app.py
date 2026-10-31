@@ -39,9 +39,31 @@ def build_enum_map(catalog: dict) -> dict:
     }
 
 
+def writer_outparams(catalog: dict) -> dict:
+    """{writer: [(position, cType)]}: the out-parameters each function states in its
+    ``shape.outParams``, by position, the value at 0 (``set_as_hexwkb``:
+    ``[(2, "size_t *")]``), which #CtypesEngine.encode of server/engine.py fills."""
+    out = {}
+    for fn in catalog.get("functions", []):
+        names = set((fn.get("shape") or {}).get("outParams") or ())
+        if names:
+            out[fn["name"]] = [(i, p["cType"]) for i, p in enumerate(fn["params"])
+                               if p["name"] in names]
+    return out
+
+
+def _with_outparams(value: dict | None, outs: dict) -> dict | None:
+    """``value`` (a wire result or element) with ``encode_outparams``, the
+    out-parameters of the writer it names."""
+    if not value or not value.get("encode"):
+        return value
+    return {**value, "encode_outparams": outs.get(value["encode"], [])}
+
+
 def build_routes(catalog: dict) -> dict:
     """`/{fn}` → route descriptor, for every exposable function."""
     routes = {}
+    outs = writer_outparams(catalog)
     for fn in catalog.get("functions", []):
         if not fn.get("network", {}).get("exposable"):
             continue
@@ -70,10 +92,11 @@ def build_routes(catalog: dict) -> dict:
             "result": {"kind": r["kind"], "json": r.get("json"),
                        "encode": r.get("encode"),
                        "encode_aux": r.get("encode_aux", []),
+                       "encode_outparams": outs.get(r.get("encode"), []),
                        "from_outparam": r.get("from_outparam"),
                        "out_ctype": r.get("out_ctype"),
                        "presence_return": r.get("presence_return", False),
-                       "element": r.get("element"),
+                       "element": _with_outparams(r.get("element"), outs),
                        "count_outparam": r.get("count_outparam"),
                        "count_param": r.get("count_param")},
         }
@@ -165,7 +188,8 @@ def _dispatch(body: dict, route: dict, engine: Engine, enums: dict):
             return None
         if res["kind"] == "serialized":         # opaque out-param -> encode
             return {"result": engine.encode(
-                res["encode"], val, _aux_args(res.get("encode_aux", [])))}
+                res["encode"], val, _aux_args(res.get("encode_aux", [])),
+                res.get("encode_outparams", []))}
         return {"result": bool(val) if res.get("json") == "boolean" else val}
 
     if res["kind"] == "array":
@@ -181,7 +205,8 @@ def _dispatch(body: dict, route: dict, engine: Engine, enums: dict):
             # Elem **f(.., int *count): MEOS returns a fresh array + byref count.
             ptrs = engine.invoke_array(route["name"], args)
         return {"result": [engine.encode(el["encode"], p,
-                                         _aux_args(el.get("encode_aux", [])))
+                                         _aux_args(el.get("encode_aux", [])),
+                                         el.get("encode_outparams", []))
                            for p in ptrs]}
 
     rtag = "void" if res["kind"] == "void" else (
@@ -193,7 +218,8 @@ def _dispatch(body: dict, route: dict, engine: Engine, enums: dict):
         return None
     if res["kind"] == "serialized":
         return {"result": engine.encode(
-            res["encode"], out, _aux_args(res.get("encode_aux", [])))}
+            res["encode"], out, _aux_args(res.get("encode_aux", [])),
+            res.get("encode_outparams", []))}
     if res["kind"] == "json" and res["json"] == "boolean":
         return {"result": bool(out)}
     return {"result": out}
