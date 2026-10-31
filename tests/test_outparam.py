@@ -76,7 +76,81 @@ some_fn(int n)
 """
 
 
+# A guard between the return-type line and the name choosing between two spellings
+# of one signature, the shape of `basetype_in` in meos/src/temporal/type_in.c, then
+# an undocumented neighbour that must not inherit the block.
+TWIN_SIGNATURE = """\
+/**
+ * @brief doc
+ * @param[in] str String
+ * @param[in] end True when the string must end where the value ends
+ * @param[out] result Value read
+ */
+bool
+#if CBUFFER || NPOINT || POSE
+basetype_in(const char *str, bool end, Datum *result)
+#else
+basetype_in(const char *str, bool end UNUSED, Datum *result)
+#endif
+{
+  return true;
+}
+
+/**
+ * @brief doc
+ */
+static Datum
+parse_coord(json_object *obj)
+{
+  return 0;
+}
+"""
+
+# A guard inside the parameter list, the shape of `skiplist_splice` in
+# meos/src/temporal/skiplist.c, then an undocumented neighbour.
+TWIN_TAIL = """\
+/**
+ * @brief doc
+ * @param[in] list Skiplist
+ * @param[in] sktype Type of the skiplist
+ */
+void
+skiplist_splice(SkipList *list,
+#if MEOS
+  SkipListType sktype)
+#else
+  SkipListType sktype UNUSED)
+#endif /* ! MEOS */
+{
+  return;
+}
+
+/**
+ * @brief doc
+ */
+void **
+skiplist_values(SkipList *list)
+{
+  return NULL;
+}
+"""
+
+
 class TestExtract(unittest.TestCase):
+    def test_guard_between_return_type_and_name(self):
+        with tempfile.TemporaryDirectory() as root:
+            _write(root, "meos/src/type_in.c", TWIN_SIGNATURE)
+            out = extract_outparams(Path(root) / "meos")
+            self.assertEqual(out.get("basetype_in"), ["result"])
+            self.assertNotIn("parse_coord", out)
+
+    def test_guard_inside_the_parameter_list(self):
+        with tempfile.TemporaryDirectory() as root:
+            _write(root, "meos/src/skiplist.c", TWIN_TAIL)
+            names = extract_param_names(Path(root) / "meos")
+            self.assertEqual(names.get("skiplist_splice"), {"list", "sktype"})
+            self.assertNotIn("skiplist_values", names)
+
     def test_plain_meos_src(self):
         with tempfile.TemporaryDirectory() as root:
             _write(root, "meos/src/temporal_tile_meos.c", PLAIN)

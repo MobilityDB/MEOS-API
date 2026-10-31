@@ -48,12 +48,27 @@ def doxygen_sources(meos_root: str | Path) -> list[str]:
 # here because, combined with this module's whole-doc-block `_FUNC` match, a DOTALL
 # `.*?` inside the skip run backtracks catastrophically (doxygroup runs a bounded
 # two-step search, so it can afford it); no vendored out-param carrier needs it.
+# A guard may also sit between the return-type line and the name, choosing between two
+# spellings of one signature (`basetype_in` in meos/src/temporal/type_in.c marks a
+# parameter UNUSED in the build that does not read it):
+#   bool
+#   #if CBUFFER || NPOINT || POSE
+#   basetype_in(const char *str, MeosType type, bool end, Datum *result)
+#   #else
+#   basetype_in(const char *str, MeosType type, bool end UNUSED, Datum *result)
+#   #endif
+#   {
+# `_TWIN` steps over the `#else`/`#elif` spellings and the closing `#endif`, so
+# `params` is the first spelling and the match still ends at the body's `{`.
 _SKIP = r"(?:[^\S\n]*(?:\#[^\n]*|//[^\n]*)?[^\S\n]*\n)*"
+_TWIN = (r"(?:[^\S\n]*\n[^\S\n]*\#[^\S\n]*(?:else|elif)[^\n]*\n[^;{]*?\))*"
+         r"(?:[^\S\n]*\n[^\S\n]*\#[^\S\n]*endif[^\n]*)?")
 _FUNC = re.compile(
     r'/\*\*(?P<doc>.*?)\*/[^\S\n]*\n' + _SKIP +
     r'(?:[A-Za-z_][\w\s\*]*?\n)?'          # optional return-type line
+    + _SKIP +
     r'(?P<name>[a-z][a-z0-9_]*)\s*\('
-    r'(?P<params>[^;{]*?)\)\s*\{',
+    r'(?P<params>[^;{]*?)\)' + _TWIN + r'\s*\{',
     re.S)
 # One @param[out] entry: capture the (possibly comma-separated) parameter names.
 _POUT = re.compile(r'@param\[out\]\s+(?P<names>\w+(?:\s*,\s*\w+)*)', re.S)
