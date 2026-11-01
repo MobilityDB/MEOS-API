@@ -211,11 +211,34 @@ class AttachTests(unittest.TestCase):
         ]}, MODEL, None)["objectModel"]
         names = {m["function"]: m["ooName"]
                  for s in om["classes"].values() for m in s["methods"]}
-        self.assertEqual(names["geom_from_hexewkb"], "fromHexewkb")
-        self.assertEqual(names["geog_from_hexewkb"], "fromHexewkb")
+        self.assertEqual(names["geom_from_hexewkb"], "fromHexEWKB")
+        self.assertEqual(names["geog_from_hexewkb"], "fromHexEWKB")
         self.assertEqual(names["geoset_start_value"], "startValue")
         # One token is dropped, not every repetition of it.
         self.assertEqual(names["set_set_subspan"], "setSubspan")
+
+    def test_an_acronym_is_spelled_as_the_sql_names_spell_it(self):
+        # Each format token takes the spelling of MobilityDB's SQL names
+        # (asHexWKB, asHexEWKB, asEWKB, asEWKT, asMFJSON, asGeoJSON), the
+        # class and member read as in
+        # #test_ooname_drops_the_prefix_the_classifier_matched.
+        om = attach_object_model({"functions": [
+            {"name": n} for n in (
+                "temporal_as_hexwkb", "tspatial_as_hexewkb", "tspatial_as_ewkb",
+                "temporal_as_wkb", "tspatial_as_ewkt", "temporal_as_mfjson",
+                "geo_as_geojson", "geom_from_geojson", "tspatial_set_srid")
+        ]}, MODEL, None)["objectModel"]
+        names = {m["function"]: m["ooName"]
+                 for s in om["classes"].values() for m in s["methods"]}
+        self.assertEqual(names["temporal_as_hexwkb"], "asHexWKB")
+        self.assertEqual(names["tspatial_as_hexewkb"], "asHexEWKB")
+        self.assertEqual(names["tspatial_as_ewkb"], "asEWKB")
+        self.assertEqual(names["temporal_as_wkb"], "asWKB")
+        self.assertEqual(names["tspatial_as_ewkt"], "asEWKT")
+        self.assertEqual(names["temporal_as_mfjson"], "asMFJSON")
+        self.assertEqual(names["geo_as_geojson"], "asGeoJSON")
+        self.assertEqual(names["geom_from_geojson"], "fromGeoJSON")
+        self.assertEqual(names["tspatial_set_srid"], "setSRID")
 
     def test_the_spatial_sets_carry_their_own_functions(self):
         # `spatialset_*` takes every set spatialset_type admits and `geoset_*`

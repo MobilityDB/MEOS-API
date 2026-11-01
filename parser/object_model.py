@@ -205,10 +205,15 @@ def _role(fn_name: str) -> str:
     return "accessor"
 
 
-# Acronym runs kept upper-case so a binding's case transform can render them
-# idiomatically (Python ``as_hex_wkb``, Go ``AsHexWKB``, JS ``asHexWKB``).
-_ACRONYMS = {"wkb", "ewkb", "hexwkb", "wkt", "ewkt", "mfjson", "mvt",
-             "geojson", "gml", "kml", "srid", "srs"}
+# Each acronym token spelled as the SQL names of MobilityDB spell it
+# (``asHexWKB``, ``asHexEWKB``, ``asEWKB``, ``asEWKT``, ``asMFJSON``,
+# ``asGeoJSON``, ``asMVTGeom``, ``setSRID``), so a binding's case transform
+# renders it as the portable name does (Go ``AsHexWKB``, JS ``asHexWKB``); the
+# tokens no SQL name carries are upper-case, as PostGIS's ``ST_AsGML``.
+_ACRONYMS = {"wkb": "WKB", "ewkb": "EWKB", "hexwkb": "HexWKB",
+             "hexewkb": "HexEWKB", "wkt": "WKT", "ewkt": "EWKT",
+             "mfjson": "MFJSON", "mvt": "MVT", "geojson": "GeoJSON",
+             "gml": "GML", "kml": "KML", "srid": "SRID", "srs": "SRS"}
 
 # Generic superclass / companion tokens a method may carry when its scope is
 # not the leaf class itself (``temporal_*`` on a concrete type, ``set_*`` on a
@@ -252,12 +257,12 @@ def _strip_class_token(fn_name: str, cls: str, prefix: str = "") -> str:
 
 
 def _camel(member: str) -> str:
-    """camelCase a snake member name, upper-casing whole acronym runs."""
+    """camelCase a snake member name, each acronym token spelled as `_ACRONYMS` states."""
     parts = [p for p in member.split("_") if p]
     out = []
     for i, p in enumerate(parts):
         if p in _ACRONYMS:
-            out.append(p.upper())
+            out.append(_ACRONYMS[p])
         elif i == 0:
             out.append(p)
         else:
