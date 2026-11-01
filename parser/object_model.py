@@ -68,7 +68,7 @@ _SUBTYPE_SUFFIX = [("seqset", "SeqSet", "TSequenceSet"),
 
 # Extra real prefixes for concrete collection nodes whose C prefix is not the
 # lower-cased node name (verified against the headers, not guessed).
-_COMPANION_PREFIX_ALIASES = {"GeomSet": ["geomset", "geoset"]}
+_COMPANION_PREFIX_ALIASES: dict[str, list[str]] = {}
 
 
 #: The roles whose first parameter is the value the method is called on. A
