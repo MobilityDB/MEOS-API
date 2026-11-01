@@ -35,7 +35,14 @@
       ],
       "figureEdges": "TSpatial -> {TGeo, TCbuffer, TNpoint, TPose, TRGeometry}; TGeo -> {TGeometry, TGeography, TGeomPoint, TGeogPoint}",
       "modelAdds": [
-        "TPoint (API-level intermediate under TGeo; see OM-M6)"
+        "TPoint (API-level intermediate under TGeo; see OM-M6)",
+        "TCellIndex (the temporal DGGS cell indexes, C predicate tcellindex_type and the tcellindex_* family; the figure draws no cell type)",
+        "TH3Index (a TCellIndex leaf, T_TH3INDEX)",
+        "TQuadbin (a TCellIndex leaf, T_TQUADBIN)",
+        "TS2Cell (a TCellIndex leaf, T_TS2CELL)",
+        "TPcpoint (the temporal point cloud point the figure omits, T_TPCPOINT)",
+        "TPcpatch (the temporal point cloud patch the figure omits, T_TPCPATCH)",
+        "TPoseChain (the temporal pose chain, sibling of TPose, T_TPOSECHAIN)"
       ]
     }
   },
@@ -315,6 +322,94 @@
       ],
       "conditional": "RGEO",
       "note": "Base type is T_POSE, not a geometry — base != name (see corrections). User-facing API name is `trgeometry`; internal C functions keep the `trgeo_` prefix and must NOT be normalized."
+    },
+    "TH3Index": {
+      "kind": "leaf",
+      "parent": "TCellIndex",
+      "predicate": null,
+      "prefixes": [
+        "th3index"
+      ],
+      "userFacingName": "TH3Index",
+      "temptypes": [
+        "T_TH3INDEX"
+      ],
+      "conditional": "H3"
+    },
+    "TQuadbin": {
+      "kind": "leaf",
+      "parent": "TCellIndex",
+      "predicate": null,
+      "prefixes": [
+        "tquadbin"
+      ],
+      "userFacingName": "TQuadbin",
+      "temptypes": [
+        "T_TQUADBIN"
+      ],
+      "conditional": "QUADBIN"
+    },
+    "TS2Cell": {
+      "kind": "leaf",
+      "parent": "TCellIndex",
+      "predicate": null,
+      "prefixes": [
+        "ts2cell"
+      ],
+      "userFacingName": "TS2Cell",
+      "temptypes": [
+        "T_TS2CELL"
+      ],
+      "conditional": "S2CELL"
+    },
+    "TPcpoint": {
+      "kind": "leaf",
+      "parent": "TSpatial",
+      "predicate": null,
+      "prefixes": [
+        "tpcpoint"
+      ],
+      "userFacingName": "TPcpoint",
+      "temptypes": [
+        "T_TPCPOINT"
+      ],
+      "conditional": "POINTCLOUD"
+    },
+    "TPcpatch": {
+      "kind": "leaf",
+      "parent": "TSpatial",
+      "predicate": null,
+      "prefixes": [
+        "tpcpatch"
+      ],
+      "userFacingName": "TPcpatch",
+      "temptypes": [
+        "T_TPCPATCH"
+      ],
+      "conditional": "POINTCLOUD"
+    },
+    "TPoseChain": {
+      "kind": "leaf",
+      "parent": "TSpatial",
+      "predicate": null,
+      "prefixes": [
+        "tposechain"
+      ],
+      "userFacingName": "TPoseChain",
+      "temptypes": [
+        "T_TPOSECHAIN"
+      ],
+      "conditional": "POSE"
+    },
+    "TCellIndex": {
+      "kind": "abstract",
+      "parent": "TSpatial",
+      "predicate": "tcellindex_type",
+      "prefixes": [
+        "tcellindex"
+      ],
+      "userFacingName": "TCellIndex",
+      "doc": "Temporal DGGS cell indexes, the types tcellindex_type of meos/src/temporal/tcellindex.c admits (T_TH3INDEX, T_TQUADBIN, T_TS2CELL): the tcellindex_* functions every cell family answers through its DggsCellOps."
     }
   },
   "traits": {
@@ -339,7 +434,8 @@
       "tnumber",
       "tspatial",
       "tpoint",
-      "tgeo"
+      "tgeo",
+      "tcellindex"
     ],
     "exact": [
       "tbool",
@@ -356,7 +452,13 @@
       "tnpoint",
       "tpose",
       "trgeo",
-      "trgeometry"
+      "trgeometry",
+      "th3index",
+      "tquadbin",
+      "ts2cell",
+      "tpcpoint",
+      "tpcpatch",
+      "tposechain"
     ],
     "subtype": [
       "tinstant",
@@ -579,6 +681,48 @@
           "kind": "leaf",
           "parent": "SpanSet",
           "temptype": "T_TSTZSPANSET"
+        },
+        "H3IndexSet": {
+          "kind": "leaf",
+          "parent": "SpatialSet",
+          "temptype": "T_H3INDEXSET",
+          "conditional": "H3"
+        },
+        "QuadbinSet": {
+          "kind": "leaf",
+          "parent": "SpatialSet",
+          "temptype": "T_QUADBINSET",
+          "conditional": "QUADBIN"
+        },
+        "S2CellSet": {
+          "kind": "leaf",
+          "parent": "SpatialSet",
+          "temptype": "T_S2CELLSET",
+          "conditional": "S2CELL"
+        },
+        "PcpointSet": {
+          "kind": "leaf",
+          "parent": "SpatialSet",
+          "temptype": "T_PCPOINTSET",
+          "conditional": "POINTCLOUD"
+        },
+        "PcpatchSet": {
+          "kind": "leaf",
+          "parent": "SpatialSet",
+          "temptype": "T_PCPATCHSET",
+          "conditional": "POINTCLOUD"
+        },
+        "PoseChainSet": {
+          "kind": "leaf",
+          "parent": "SpatialSet",
+          "temptype": "T_POSECHAINSET",
+          "conditional": "POSE"
+        },
+        "JsonbSet": {
+          "kind": "leaf",
+          "parent": "Set",
+          "temptype": "T_JSONBSET",
+          "conditional": "JSON"
         }
       }
     },
@@ -1117,6 +1261,14 @@
         "location": "PyMEOS pymeos/main, pymeos/temporal",
         "observed": "No abstract spatial intermediates: PyMEOS has TPoint but no TSpatial and no TGeo. Per the manual Figure 7.1 the tree is TSpatial -> TGeo -> {TGeometry, TGeography, TPoint -> {TGeomPoint, TGeogPoint}} with TCbuffer/TNpoint/TPose/TRGeometry under TSpatial; the tspatial_*/tgeo_* method groups have no home class.",
         "suggested": "Introduce TSpatial (abstract, parent of TGeo/TCbuffer/TNpoint/TPose/TRGeometry) and make TGeo the abstract parent of TGeometry/TGeography/TPoint (matching the manual + tgeo_type_all), so tspatial_*/tgeo_* bind to a class."
+      },
+      {
+        "id": "OM-P8",
+        "side": "pymeos",
+        "severity": "missing-class",
+        "location": "PyMEOS pymeos/main, pymeos/temporal",
+        "observed": "No TCellIndex intermediate and no temporal cell classes: the tcellindex_* method group (tcellindex_get_resolution, tcellindex_cell_to_parent, tcellindex_cell_to_point, ...) has no home class, and TH3Index, TQuadbin and TS2Cell, which tcellindex_type admits, have none either.",
+        "suggested": "Introduce TCellIndex (abstract, parent of TH3Index/TQuadbin/TS2Cell, under TSpatial) carrying tcellindex_* methods, generated from this model."
       }
     ]
   },

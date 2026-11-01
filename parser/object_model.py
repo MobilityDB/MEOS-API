@@ -379,11 +379,14 @@ _INTERNAL_BASETYPES = frozenset({"T_DOUBLE2", "T_DOUBLE3", "T_DOUBLE4"})
 
 def _predicate_body(cat_src: str, name: str) -> str:
     """The body of the ``name(MeosType ...)`` membership predicate."""
-    m = re.search(r"\n" + re.escape(name) + r"\(" + MEOSTYPE_PARAM + r" \w+\)\s*", cat_src)
+    # The parameter may carry an attribute macro, as `tcellindex_type(MeosType
+    # type UNUSED)` does when no cell family is compiled in.
+    m = re.search(r"\n" + re.escape(name) + r"\(" + MEOSTYPE_PARAM
+                  + r" \w+(?:\s+[A-Z_]+)?\)\s*", cat_src)
     if not m:
         raise MembershipUnavailable(
-            f"meos_catalog.c declares no `{name}` predicate — the lattice names "
-            "a membership oracle MEOS does not have")
+            f"meos/src/temporal declares no `{name}` predicate — the lattice "
+            "names a membership oracle MEOS does not have")
     i = cat_src.index("{", m.end())
     depth, j = 0, i
     while j < len(cat_src):
@@ -448,6 +451,21 @@ def release_nodes(nodes: dict, cat_src: str) -> dict:
         return nodes
     return {k: v for k, v in nodes.items()
             if v.get("kind") != "leaf" or all(t in named for t in v.get("temptypes") or ())}
+
+
+def membership_source(catalog: Path) -> str:
+    """The text a membership predicate is read from: ``meos_catalog.c`` first,
+    then every other source beside it in ``meos/src/temporal``, the directory
+    #locate_temporal_source of parser/typerelations.py resolves.  MEOS states a
+    category of types where its family lives, as ``tcellindex_type`` of
+    ``tcellindex.c`` states the temporal cell indexes, and #predicate_types
+    reads the first definition of the name it is given, so the catalog's own
+    predicates keep precedence."""
+    parts = [catalog.read_text(errors="ignore")]
+    for path in sorted(catalog.parent.glob("*.c")):
+        if path != catalog:
+            parts.append(path.read_text(errors="ignore"))
+    return "\n".join(parts)
 
 
 def derive_membership(nodes: dict, cat_src: str, basetypes: dict) -> None:
@@ -554,8 +572,9 @@ def attach_object_model(idl: dict, path: Path,
         cat_src = catalog.read_text(errors="ignore")
         basetypes = temptype_basetypes(cat_src)
         lattice_nodes = release_nodes(lattice_nodes, cat_src)
-        derive_membership(lattice_nodes, cat_src, basetypes)
-        derive_membership(trait_nodes, cat_src, basetypes)
+        pred_src = membership_source(catalog)
+        derive_membership(lattice_nodes, pred_src, basetypes)
+        derive_membership(trait_nodes, pred_src, basetypes)
         membership = {"status": "derived", "source": str(catalog)}
     else:
         # Say so rather than publish an empty membership: a class naming no
