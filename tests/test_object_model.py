@@ -225,7 +225,8 @@ class AttachTests(unittest.TestCase):
             {"name": n} for n in (
                 "temporal_as_hexwkb", "tspatial_as_hexewkb", "tspatial_as_ewkb",
                 "temporal_as_wkb", "tspatial_as_ewkt", "temporal_as_mfjson",
-                "geo_as_geojson", "geom_from_geojson", "tspatial_set_srid")
+                "geo_as_geojson", "geom_from_geojson", "tspatial_set_srid",
+                "tpoint_as_mvtgeom")
         ]}, MODEL, None)["objectModel"]
         names = {m["function"]: m["ooName"]
                  for s in om["classes"].values() for m in s["methods"]}
@@ -238,6 +239,7 @@ class AttachTests(unittest.TestCase):
         self.assertEqual(names["geo_as_geojson"], "asGeoJSON")
         self.assertEqual(names["geom_from_geojson"], "fromGeoJSON")
         self.assertEqual(names["tspatial_set_srid"], "setSRID")
+        self.assertEqual(names["tpoint_as_mvtgeom"], "asMVTGeom")
 
     def test_the_spatial_sets_carry_their_own_functions(self):
         # `spatialset_*` takes every set spatialset_type admits and `geoset_*`

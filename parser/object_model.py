@@ -212,7 +212,8 @@ def _role(fn_name: str) -> str:
 # tokens no SQL name carries are upper-case, as PostGIS's ``ST_AsGML``.
 _ACRONYMS = {"wkb": "WKB", "ewkb": "EWKB", "hexwkb": "HexWKB",
              "hexewkb": "HexEWKB", "wkt": "WKT", "ewkt": "EWKT",
-             "mfjson": "MFJSON", "mvt": "MVT", "geojson": "GeoJSON",
+             "mfjson": "MFJSON", "mvt": "MVT", "mvtgeom": "MVTGeom",
+             "geojson": "GeoJSON",
              "gml": "GML", "kml": "KML", "srid": "SRID", "srs": "SRS"}
 
 # Generic superclass / companion tokens a method may carry when its scope is
