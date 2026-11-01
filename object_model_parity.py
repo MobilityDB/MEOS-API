@@ -134,8 +134,13 @@ def build_parity(catalog: dict, oracle) -> dict:
                         "TBool", "TInt", "TFloat", "TText"}
     for n, s in sorted(lat.items()):
         if s["kind"] in ("root", "abstract") and n not in pymeos_abstracts:
-            cid = {"TAlpha": "OM-P2", "TSpatial": "OM-P7",
-                   "TGeo": "OM-P7"}.get(n)
+            # The correction naming the class, as the concrete matrix above
+            # finds its own (OM-P2 names TAlpha, OM-P7 TSpatial and TGeo).
+            cid = next((i for i, c in known.items()
+                        if c["side"] == "pymeos"
+                        and "missing-class" in c["severity"]
+                        and re.search(r"\b" + re.escape(n) + r"\b", c["observed"])),
+                       None)
             add("abstract-missing-in-pymeos",
                 f"{n} ({s.get('predicate')}) is a real MEOS grouping with "
                 f"no PyMEOS abstract class",

@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 
 from parser.typerelations import bbox_types, temptype_basetypes
 from parser.object_model import (MembershipUnavailable, byreference_basetypes,
-                                  derive_membership, predicate_temptypes,
+                                  derive_membership, membership_source,
+                                  predicate_temptypes,
                                   release_nodes)
 from parser.object_model import (
     _scan_errors, attach_object_model, find_mobilitydb_src)
@@ -40,11 +41,7 @@ _INTERNAL = {"T_TDOUBLE2", "T_TDOUBLE3", "T_TDOUBLE4"}  # not public classes
 #: global grid — and whether they sit under a shared abstract parent, the way
 #: TPoint groups TGeomPoint and TGeogPoint, is a taxonomy decision the model
 #: owner makes. The other three have obvious homes beside their siblings.
-_UNMODELLED = {
-    "T_TH3INDEX", "T_TQUADBIN", "T_TS2CELL",   # cell-index grouping undecided
-    "T_TPOSECHAIN",                            # sibling of TPose
-    "T_TPCPOINT", "T_TPCPATCH",                # the point-cloud pair
-}
+_UNMODELLED: set = set()
 
 
 def _nodes(d):
@@ -118,13 +115,15 @@ class ModelFileTests(unittest.TestCase):
     def test_matches_manual_figure_7_1(self):
         # The MobilityDB manual Ch.7 Figure 7.1 is authoritative for the
         # conceptual spatial tree. The model must contain exactly the
-        # figure's spatial nodes plus the single API-level addition TPoint
-        # (documented as OM-M6), and the figure's parent edges must hold.
+        # figure's spatial nodes plus the additions `modelAdds` records, each
+        # named by its first word (TPoint, OM-M6; the types the figure draws
+        # no node for), and the figure's parent edges must hold.
         man = self.d["provenance"]["manual"]
         spatial = {n for n in self.lat
                    if n == "TSpatial" or self._under(n, "TSpatial")}
-        self.assertEqual(spatial,
-                         set(man["figureNodes"]) | {"TPoint"})
+        adds = {a.split()[0] for a in man["modelAdds"]}
+        self.assertIn("TPoint", adds)
+        self.assertEqual(spatial, set(man["figureNodes"]) | adds)
         # TGeo -> {TGeometry, TGeography, TGeomPoint, TGeogPoint} (via TPoint)
         for child in ("TGeometry", "TGeography"):
             self.assertEqual(self.lat[child]["parent"], "TGeo")
@@ -267,7 +266,49 @@ class AttachTests(unittest.TestCase):
         for leaf in ("NpointSet", "PoseSet", "CbufferSet"):
             self.assertEqual(nodes[leaf]["parent"], "SpatialSet")
         self.assertEqual(sorted(nodes["SpatialSet"]["children"]),
-                         ["CbufferSet", "GeoSet", "NpointSet", "PoseSet"])
+                         ["CbufferSet", "GeoSet", "H3IndexSet", "NpointSet",
+                          "PcpatchSet", "PcpointSet", "PoseChainSet", "PoseSet",
+                          "QuadbinSet", "S2CellSet"])
+
+    def test_every_pointer_held_type_has_its_class(self):
+        # Each temporal type tspatial_type admits and each set spatialset_type
+        # admits is a class under TSpatial or SpatialSet, the jsonb set one under
+        # Set, so a binding reaches its functions; the class and member read as
+        # in #test_the_spatial_sets_carry_their_own_functions.
+        om = attach_object_model({"functions": [
+            {"name": n, "api": "public",
+             "params": [{"name": "x", "cType": "const Temporal *"}]}
+            for n in ("th3index_in", "tquadbin_in", "ts2cell_in", "tpcpoint_in",
+                      "tpcpatch_in", "tposechain_in")
+        ] + [
+            {"name": n, "api": "public",
+             "params": [{"name": "s", "cType": "const Set *"}]}
+            for n in ("h3indexset_in", "quadbinset_in", "s2cellset_in",
+                      "pcpointset_in", "pcpatchset_in", "posechainset_in",
+                      "jsonbset_in")
+        ]}, MODEL, None)["objectModel"]
+        owner = {m["function"]: cls
+                 for cls, s in om["classes"].items() for m in s["methods"]}
+        for fn, cls in (("th3index_in", "TH3Index"), ("tquadbin_in", "TQuadbin"),
+                        ("ts2cell_in", "TS2Cell"), ("tpcpoint_in", "TPcpoint"),
+                        ("tpcpatch_in", "TPcpatch"), ("tposechain_in", "TPoseChain"),
+                        ("h3indexset_in", "H3IndexSet"), ("quadbinset_in", "QuadbinSet"),
+                        ("s2cellset_in", "S2CellSet"), ("pcpointset_in", "PcpointSet"),
+                        ("pcpatchset_in", "PcpatchSet"),
+                        ("posechainset_in", "PoseChainSet"), ("jsonbset_in", "JsonbSet")):
+            self.assertEqual(owner[fn], cls)
+        nodes = om["companions"]["Collection"]["nodes"]
+        for leaf in ("H3IndexSet", "QuadbinSet", "S2CellSet", "PcpointSet",
+                     "PcpatchSet", "PoseChainSet"):
+            self.assertEqual(nodes[leaf]["parent"], "SpatialSet")
+        self.assertEqual(nodes["JsonbSet"]["parent"], "Set")
+        for leaf in ("TPcpoint", "TPcpatch", "TPoseChain"):
+            self.assertEqual(om["lattice"][leaf]["parent"], "TSpatial")
+        # The cell indexes share TCellIndex, the class of the tcellindex_*
+        # functions every cell family answers.
+        for leaf in ("TH3Index", "TQuadbin", "TS2Cell"):
+            self.assertEqual(om["lattice"][leaf]["parent"], "TCellIndex")
+        self.assertEqual(om["lattice"]["TCellIndex"]["parent"], "TSpatial")
 
     def test_a_class_nothing_is_called_on_takes_what_it_makes(self):
         # Nothing is called ON a point-cloud schema — every accessor takes one
@@ -427,7 +468,7 @@ def _brace_body(text: str, start: int) -> str:
 
 
 def _predicate_temptypes(cat_src: str, name: str) -> set:
-    m = re.search(r"\n" + name + r"\(MeosType \w+\)\s*", cat_src)
+    m = re.search(r"\n" + name + r"\(MeosType \w+(?:\s+[A-Z_]+)?\)\s*", cat_src)
     body = _brace_body(cat_src, m.end())
     return {t for t in re.findall(r"\bT_T[A-Z0-9_]+\b", body)}
 
@@ -622,6 +663,9 @@ class DriftGate(unittest.TestCase):
     def setUpClass(cls):
         cls.d = json.loads(MODEL.read_text())
         cls.cat = _CAT_C.read_text(errors="ignore")
+        # A predicate may live beside the catalog (`tcellindex_type` in
+        # tcellindex.c), so membership reads the sources the model reads.
+        cls.pred_src = membership_source(_CAT_C)
         cls.attached = attach_object_model(
             {"functions": []}, MODEL, _SRC)["objectModel"]
         cls.lat = _nodes(cls.attached["lattice"])
@@ -643,7 +687,7 @@ class DriftGate(unittest.TestCase):
             pred = spec.get("predicate")
             if not pred:
                 continue
-            derived = set(_predicate_temptypes(self.cat, pred)) - _INTERNAL
+            derived = set(_predicate_temptypes(self.pred_src, pred)) - _INTERNAL
             self.assertEqual(set(spec["temptypes"]), derived,
                              f"{node} ({pred}) does not answer its predicate")
             checked += 1
@@ -653,7 +697,7 @@ class DriftGate(unittest.TestCase):
         traits = _nodes(self.attached["traits"])
         self.assertTrue(traits, "no trait attached")
         for name, t in traits.items():
-            derived = set(_predicate_temptypes(self.cat, t["predicate"]))
+            derived = set(_predicate_temptypes(self.pred_src, t["predicate"]))
             self.assertEqual(set(t["temptypes"]), derived - _INTERNAL, name)
 
     def test_every_temporal_type_has_a_leaf_class(self):
