@@ -486,31 +486,47 @@
           "parent": "Set",
           "temptype": "T_TSTZSET"
         },
+        "SpatialSet": {
+          "kind": "abstract",
+          "parent": "Set",
+          "prefixes": [
+            "spatialset"
+          ],
+          "doc": "Set of spatial values, the types MEOS's spatialset_type admits: its SRID, its bounding box and its spatial text and binary forms."
+        },
+        "GeoSet": {
+          "kind": "abstract",
+          "parent": "SpatialSet",
+          "prefixes": [
+            "geoset"
+          ],
+          "doc": "Set of geometries or geographies, the types MEOS's geoset_type admits."
+        },
         "GeomSet": {
           "kind": "leaf",
-          "parent": "Set",
+          "parent": "GeoSet",
           "temptype": "T_GEOMSET"
         },
         "GeogSet": {
           "kind": "leaf",
-          "parent": "Set",
+          "parent": "GeoSet",
           "temptype": "T_GEOGSET"
         },
         "NpointSet": {
           "kind": "leaf",
-          "parent": "Set",
+          "parent": "SpatialSet",
           "temptype": "T_NPOINTSET",
           "conditional": "NPOINT"
         },
         "PoseSet": {
           "kind": "leaf",
-          "parent": "Set",
+          "parent": "SpatialSet",
           "temptype": "T_POSESET",
           "conditional": "POSE"
         },
         "CbufferSet": {
           "kind": "leaf",
-          "parent": "Set",
+          "parent": "SpatialSet",
           "temptype": "T_CBUFFERSET",
           "conditional": "CBUFFER"
         },

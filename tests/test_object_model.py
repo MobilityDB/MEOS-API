@@ -203,9 +203,8 @@ class AttachTests(unittest.TestCase):
 
     def test_ooname_drops_the_prefix_the_classifier_matched(self):
         # A class reached by a prefix that is not its lower-cased name —
-        # `geom_*` for Geometry, `geog_*` for Geography, `geoset_*` for
-        # GeomSet — otherwise keeps that prefix in the member name, so the
-        # method reads `geometry.geomBuffer()`.
+        # `geom_*` for Geometry, `geog_*` for Geography — otherwise keeps that
+        # prefix in the member name, so the method reads `geometry.geomBuffer()`.
         om = attach_object_model({"functions": [
             {"name": "geom_from_hexewkb"}, {"name": "geog_from_hexewkb"},
             {"name": "geoset_start_value"}, {"name": "set_set_subspan"},
@@ -217,6 +216,35 @@ class AttachTests(unittest.TestCase):
         self.assertEqual(names["geoset_start_value"], "startValue")
         # One token is dropped, not every repetition of it.
         self.assertEqual(names["set_set_subspan"], "setSubspan")
+
+    def test_the_spatial_sets_carry_their_own_functions(self):
+        # `spatialset_*` takes every set spatialset_type admits and `geoset_*`
+        # those geoset_type admits, so each is a method of the class standing
+        # for those sets, and a geometry or geography set reaches both through
+        # its ancestors, as a temporal geometry reaches `tspatial_*`; the class
+        # and member read as in #test_ooname_drops_the_prefix_the_classifier_matched.
+        om = attach_object_model({"functions": [
+            {"name": n, "api": "public",
+             "params": [{"name": "s", "cType": "const Set *"}]}
+            for n in ("spatialset_as_text", "spatialset_as_ewkt", "spatialset_srid",
+                      "geoset_start_value", "set_as_wkb")
+        ]}, MODEL, None)["objectModel"]
+        owner = {m["function"]: (cls, m["ooName"])
+                 for cls, s in om["classes"].items() for m in s["methods"]}
+        self.assertEqual(owner["spatialset_as_text"], ("SpatialSet", "asText"))
+        self.assertEqual(owner["spatialset_as_ewkt"], ("SpatialSet", "asEWKT"))
+        self.assertEqual(owner["spatialset_srid"], ("SpatialSet", "SRID"))
+        self.assertEqual(owner["geoset_start_value"], ("GeoSet", "startValue"))
+        self.assertEqual(owner["set_as_wkb"], ("Set", "asWKB"))
+        nodes = om["companions"]["Collection"]["nodes"]
+        self.assertEqual(nodes["GeomSet"]["ancestors"],
+                         ["GeoSet", "SpatialSet", "Set", "Collection"])
+        self.assertEqual(nodes["GeogSet"]["ancestors"],
+                         ["GeoSet", "SpatialSet", "Set", "Collection"])
+        for leaf in ("NpointSet", "PoseSet", "CbufferSet"):
+            self.assertEqual(nodes[leaf]["parent"], "SpatialSet")
+        self.assertEqual(sorted(nodes["SpatialSet"]["children"]),
+                         ["CbufferSet", "GeoSet", "NpointSet", "PoseSet"])
 
     def test_a_class_nothing_is_called_on_takes_what_it_makes(self):
         # Nothing is called ON a point-cloud schema — every accessor takes one
