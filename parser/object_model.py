@@ -533,10 +533,13 @@ def _class_ctypes(classes: dict, functions: dict, parents: dict,
     def resolve(cls, walked=frozenset()):
         if cls in resolved:
             return resolved[cls]
-        if cls in own:
-            resolved[cls] = own[cls]
-        elif cls in subtype_classes:
+        if cls in subtype_classes:
+            # A concrete class is a value of its subtype whatever its own
+            # methods take first: trgeometryseqset_make_gaps takes the
+            # reference geometry, and its class is a TSequenceSet all the same.
             resolved[cls] = resolve(subtype_classes[cls], walked | {cls})
+        elif cls in own:
+            resolved[cls] = own[cls]
         elif cls in made:
             # No method takes one, so what the class MAKES says what it is —
             # a type MEOS only ever hands over, never calls a method on, is
