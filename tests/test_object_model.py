@@ -390,6 +390,20 @@ class AttachTests(unittest.TestCase):
         ]}, MODEL, None)["objectModel"]
         self.assertEqual(om["classes"]["TFloatInst"]["cType"], "TInstant")
 
+    def test_a_concrete_class_is_its_subtype_whatever_its_methods_take(self):
+        # `trgeometryseqset_make_gaps` is filed as an accessor and takes the
+        # reference geometry first, which would read the class as a geometry;
+        # the concrete class is a value of its subtype all the same, as
+        # #test_a_constructor_only_class_takes_its_subtypes_ctype states it.
+        om = attach_object_model({"functions": [
+            {"name": "trgeometryseqset_make_gaps",
+             "params": [{"name": "geom", "cType": "const GSERIALIZED *"},
+                        {"name": "instants", "cType": "TInstant **"}]},
+            {"name": "tsequenceset_num_sequences",
+             "params": [{"name": "ss", "cType": "const TSequenceSet *"}]},
+        ]}, MODEL, None)["objectModel"]
+        self.assertEqual(om["classes"]["TRGeometrySeqSet"]["cType"], "TSequenceSet")
+
     def test_a_class_with_no_receiver_takes_its_parents_ctype(self):
         # A collection leaf whose only method builds a set out of geographies
         # says nothing about itself either, and it is no product of a subtype;
