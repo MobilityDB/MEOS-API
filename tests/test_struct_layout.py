@@ -88,6 +88,22 @@ class StructLayoutTests(unittest.TestCase):
         self.assertEqual(sizes, {"Span": 24, "TBox": 56, "STBox": 80,
                                  "Npoint": 16, "Nsegment": 24})
 
+    def test_a_fixed_size_value_states_the_alignment_clang_gives_it(self):
+        """The alignment beside #test_a_fixed_size_value_states_the_bytes_clang_lays_it_in:
+        a structure holding a Datum or a double aligns at 8, one of int32 alone at 4."""
+        aligns = {n: self.by_name[n].get("alignBytes")
+                  for n in ("Span", "TBox", "STBox", "Npoint", "Nsegment")}
+        self.assertEqual(aligns, {"Span": 8, "TBox": 8, "STBox": 8,
+                                  "Npoint": 8, "Nsegment": 8})
+
+    def test_a_defined_structure_states_its_alignment_and_an_opaque_one_none(self):
+        """As #test_a_defined_structure_states_its_size_and_an_opaque_one_none reads the
+        size; the size is a multiple of the alignment, as C requires."""
+        bad = [s["name"] for s in self.by_name.values()
+               if ("alignBytes" in s) != bool(s["fields"])
+               or ("alignBytes" in s and s["sizeBytes"] % s["alignBytes"])]
+        self.assertEqual(bad, [])
+
     def test_a_defined_structure_states_its_size_and_an_opaque_one_none(self):
         """Over every structure, as #test_core_structs_have_real_offsets reads every
         field: one with fields is defined and sized, one without only declared."""
