@@ -76,6 +76,26 @@ class StaticFunctionTests(unittest.TestCase):
         self.assertEqual(names, ["exported_fn"])
 
 
+class VariadicFunctionTests(unittest.TestCase):
+    """A function whose prototype ends in `...` states `variadic`, so a binding declares the
+    arguments the C ABI passes after the named ones (`meos_error(level, code, format, ...)`);
+    a fixed-arity function states none. The checkout stub is #StaticFunctionTests's."""
+
+    setUp = StaticFunctionTests.setUp
+    tearDown = StaticFunctionTests.tearDown
+
+    def test_a_trailing_ellipsis_is_stated(self):
+        include = self.root / "include"
+        include.mkdir()
+        (include / "meos.h").write_text(
+            "extern void report(int level, const char *format, ...);\n"
+            "extern int fixed_fn(int x);\n")
+        fns = {f["name"]: f for f in parse_all_headers(include)["functions"]}
+        self.assertIs(fns["report"].get("variadic"), True)
+        self.assertEqual([p["name"] for p in fns["report"]["params"]], ["level", "format"])
+        self.assertNotIn("variadic", fns["fixed_fn"])
+
+
 class CatalogEnumNameTests(unittest.TestCase):
     def setUp(self):
         if not IDL.exists():

@@ -238,6 +238,10 @@ def _is_vendored(loc_path: str) -> bool:
 
 
 def extract_function(node) -> dict:
+    """A function, its result and its named parameters. A function whose prototype ends in
+    `...` (`meos_error`) states `variadic`, so a binding declares the trailing arguments
+    the C ABI passes; a fixed-arity function states none, as #extract_struct states a
+    `sizeBytes` only where the unit lays the record out."""
     return {
         "name": node.spelling,
         "file": Path(node.location.file.name).name,
@@ -255,6 +259,7 @@ def extract_function(node) -> dict:
             }
             for i, arg in enumerate(node.get_arguments())
         ],
+        **({"variadic": True} if node.type.is_function_variadic() else {}),
     }
 
 
