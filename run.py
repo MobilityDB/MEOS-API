@@ -13,7 +13,7 @@ from parser.typerecover import (recover_collapsed_types, normalize_canonical,
 from parser.header_types import reconcile
 from parser.shapeinfer import (infer_shapes, attach_struct_input_arrays,
                                attach_counted_array_returns)
-from parser.nullable import merge_nullable, extract_param_docs
+from parser.nullable import merge_nullable, extract_param_docs, attach_function_docs
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
 from parser.boundargs import (attach_call_literals, attach_null_default_binds,
@@ -166,6 +166,8 @@ def main():
     idl, nn = merge_nullable(idl, _doxy_root)
     print(f"      nullable params from Doxygen `@nullable`: {nn}",
           file=sys.stderr)
+    idl, ndoc = attach_function_docs(idl, _doxy_root)
+    print(f"      function docs from Doxygen `@brief`: {ndoc}", file=sys.stderr)
     idl, nsa = attach_struct_input_arrays(idl, extract_param_docs(_doxy_root))
     print(f"      input arrays of structs from Doxygen `Array of`: {nsa}",
           file=sys.stderr)
