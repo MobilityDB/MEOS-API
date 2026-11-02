@@ -87,17 +87,21 @@ def _public_pgtypes_headers() -> tuple[Path, ...]:
     """MobilityDB's vendored PostgreSQL base-type headers, when they sit outside HEADERS_DIR.
 
     MobilityDB keeps the PostgreSQL 18 base types in a `pgtypes/` library at the repo root and
-    installs `pgtypes.h` and the `pg_*.h` set into the include prefix, so they are as public as
-    `meos.h`. Reading an INSTALLED prefix therefore already covers them and this adds nothing;
-    reading the source tree points at `meos/include`, which does not contain them, and without
-    this the catalog silently loses the whole base-type surface (`interval_make`, the base I/O
-    functions, …) — the same ref then yields two different catalogs depending on the header root.
+    installs the `pg_*.h` set into the include prefix, so they are as public as `meos.h`.
+    Reading an INSTALLED prefix therefore already covers them and this adds nothing; reading
+    the source tree points at `meos/include`, which does not contain them, and without this the
+    catalog silently loses the whole base-type surface (`interval_make`, the base I/O
+    functions, …) — the same ref then yields two different catalogs depending on the header
+    root. The internal umbrella `pgtypes.h` is not installed and is not read: it declares the
+    `pg_`-prefixed twins (`pg_date_in` beside the public `date_in`) through which the
+    PostgreSQL extension build reaches the names PostgreSQL also owns, and the helpers only
+    pgtypes and MEOS call, none of them reachable from an installed MEOS.
     """
     root = Path(os.environ.get("MDB_SRC_ROOT", "./_mobilitydb")) / "pgtypes"
     if not root.is_dir():
         return ()
     seen = {p.name for p in HEADERS_DIR.glob("**/*.h")}
-    candidates = sorted(root.glob("pg_*.h")) + [root / "pgtypes.h"]
+    candidates = sorted(root.glob("pg_*.h"))
     headers = [h for h in candidates
                # pg_config*.h carry PostgreSQL's build configuration, not API; the
                # install set leaves them behind and so does the catalog.

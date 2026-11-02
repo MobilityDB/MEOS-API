@@ -374,7 +374,7 @@ def sql_signature(sqlname, argdecls, ret, retset, vocab, composites):
 def _meos_definition_files(meos_src):
     """Every C file that defines a public MEOS function: meos/src, and the pgtypes library beside
     it at the repository root, whose base-type functions (jsonb_to_text, interval_make, ...) the
-    public headers declare and run.py's #_public_pgtypes_headers parses. The tags of a function
+    public pg_*.h headers declare and run.py's #_public_pgtypes_headers parses. The tags of a function
     sit on its definition, so a reader of tags walks wherever a definition can be."""
     src = Path(meos_src)
     for root in (src, src.parent.parent / "pgtypes"):
