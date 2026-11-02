@@ -183,6 +183,10 @@ def parse_meos(entry: Path, include_dir: Path,
             continue
 
         if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+            # A `static` (or `static inline`) function a header defines has no
+            # external symbol: the library exports nothing a binding could call.
+            if node.storage_class == clang.cindex.StorageClass.STATIC:
+                continue
             functions.append(extract_function(node))
 
         elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.spelling:

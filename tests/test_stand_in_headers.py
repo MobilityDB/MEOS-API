@@ -12,12 +12,14 @@ The catalog half mirrors #StructLayoutTests of tests/test_struct_layout.py: it r
 generated IDL and skips where there is none; run ``python run.py`` first.
 """
 import json
+import os
 import re
 import tempfile
 import unittest
 from pathlib import Path
 
-from parser.parser import meos_headers, build_entry_point
+from parser.families import all_families
+from parser.parser import meos_headers, build_entry_point, parse_all_headers
 
 IDL = Path(__file__).resolve().parents[1] / "output" / "meos-idl.json"
 C_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -40,6 +42,38 @@ class StandInHeaderTests(unittest.TestCase):
             (root / "geo").mkdir()
             (root / "geo" / "geos-none.h").write_text("")
             self.assertEqual([h.name for h in meos_headers(root)], ["geos-none.h"])
+
+
+class StaticFunctionTests(unittest.TestCase):
+    """A `static inline` function a header defines has no external symbol, so the catalog
+    leaves it out: pgPointCloud's `hashtable.h` defines `indexFor` so, and a binding that
+    declared it as an extern failed to link. The checkout stub mirrors #_checkout of
+    tests/test_families.py."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        (self.root / "CMakeLists.txt").write_text(
+            "if(ALL)\n  foreach(_family CBUFFER)\n  endforeach()\nendif()\n")
+        self.saved = os.environ.get("MDB_SRC_ROOT")
+        os.environ["MDB_SRC_ROOT"] = str(self.root)
+        all_families.cache_clear()
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("MDB_SRC_ROOT", None)
+        else:
+            os.environ["MDB_SRC_ROOT"] = self.saved
+        all_families.cache_clear()
+
+    def test_a_static_inline_definition_is_not_a_catalog_function(self):
+        include = self.root / "include"
+        include.mkdir()
+        (include / "meos.h").write_text(
+            "static inline unsigned int index_for(unsigned int n, unsigned int h)"
+            " { return h % n; }\n"
+            "extern int exported_fn(int x);\n")
+        names = [f["name"] for f in parse_all_headers(include)["functions"]]
+        self.assertEqual(names, ["exported_fn"])
 
 
 class CatalogEnumNameTests(unittest.TestCase):
