@@ -236,11 +236,11 @@ class TypeRecoverTests(unittest.TestCase):
             p = next(p for p in self.by_name[name]["params"] if p["name"] == pname)
             return p["canonical"]
         # TimeADT is PostgreSQL's `time`, as DateADT is its `date`.
-        self.assertEqual(canon("pg_time_out", "time"), "TimeADT")
+        self.assertEqual(canon("time_out", "time"), "TimeADT")
         self.assertEqual(canon("date_to_timestamp", "date"), "DateADT")
-        self.assertEqual(self.by_name["pg_time_in"]["returnType"]["canonical"], "TimeADT")
+        self.assertEqual(self.by_name["time_in"]["returnType"]["canonical"], "TimeADT")
         # a width name reaches the C standard type PostgreSQL 18 defines it as
-        self.assertEqual(canon("pg_time_in", "typmod"), "int32_t")
+        self.assertEqual(canon("time_in", "typmod"), "int32_t")
         self.assertEqual(canon("set_as_wkb", "variant"), "uint8_t")
 
     def test_a_type_of_its_own_keeps_its_name_beside_its_width(self):
