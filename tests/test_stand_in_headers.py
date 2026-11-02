@@ -96,6 +96,35 @@ class VariadicFunctionTests(unittest.TestCase):
         self.assertNotIn("variadic", fns["fixed_fn"])
 
 
+class CallbackTests(unittest.TestCase):
+    """A typedef naming a function through a pointer is a catalog callback, with its result
+    and parameters spelled as the header writes them; any other typedef is none. The
+    checkout stub is #StaticFunctionTests's."""
+
+    setUp = StaticFunctionTests.setUp
+    tearDown = StaticFunctionTests.tearDown
+
+    def test_a_function_pointer_typedef_is_a_callback(self):
+        include = self.root / "include"
+        include.mkdir()
+        (include / "meos.h").write_text(
+            "#include <stddef.h>\n"
+            "typedef unsigned long Datum;\n"
+            "typedef void (*interrupt_handler_fn)(void);\n"
+            "typedef Datum (*datum_func2)(Datum, Datum);\n"
+            "typedef void *(*malloc_fn)(size_t size);\n"
+            "typedef int plain_int;\n"
+            "extern void install(interrupt_handler_fn handler);\n")
+        cbs = {c["name"]: c for c in parse_all_headers(include)["callbacks"]}
+        self.assertEqual(sorted(cbs), ["datum_func2", "interrupt_handler_fn", "malloc_fn"])
+        self.assertEqual(cbs["interrupt_handler_fn"]["params"], [])
+        self.assertEqual(cbs["datum_func2"]["returnType"]["c"], "Datum")
+        self.assertEqual([p["cType"] for p in cbs["datum_func2"]["params"]],
+                         ["Datum", "Datum"])
+        self.assertEqual([(p["name"], p["cType"]) for p in cbs["malloc_fn"]["params"]],
+                         [("size", "size_t")])
+
+
 class CatalogEnumNameTests(unittest.TestCase):
     def setUp(self):
         if not IDL.exists():

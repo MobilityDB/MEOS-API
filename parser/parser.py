@@ -8,6 +8,8 @@ from pathlib import Path
 
 from parser.families import all_families
 from parser.extractors import (
+    callback_proto,
+    extract_callback,
     extract_function,
     extract_struct,
     extract_enum,
@@ -169,7 +171,7 @@ def parse_meos(entry: Path, include_dir: Path,
             if m:
                 typedef_map[m.group(1)] = node.spelling
 
-    functions, structs, enums, macros = [], [], [], []
+    functions, structs, enums, macros, callbacks = [], [], [], [], []
 
     for node in tu.cursor.walk_preorder():
         loc = node.location.file
@@ -204,6 +206,11 @@ def parse_meos(entry: Path, include_dir: Path,
         elif node.kind == clang.cindex.CursorKind.ENUM_DECL and node.spelling:
             enums.append(extract_enum(node))
 
+        elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+            proto = callback_proto(node)
+            if proto is not None:
+                callbacks.append(extract_callback(node, proto))
+
 
     # Deduplicate by name (keep first occurrence)
     def _dedup(items: list) -> list:
@@ -235,10 +242,11 @@ def parse_meos(entry: Path, include_dir: Path,
     structs   = _dedup_structs(structs)
     enums     = _dedup(enums)
     macros    = _dedup(macros)
+    callbacks = _dedup(callbacks)
 
     # `_typedefs` serves the type passes of run.py and leaves the catalog with them.
     idl = {"functions": functions, "structs": structs, "enums": enums,
-           "macros": macros, "_typedefs": typedefs}
+           "macros": macros, "callbacks": callbacks, "_typedefs": typedefs}
 
     # Resolve types if the mappings file exists
     mappings_path = Path("./meta/type-mappings.json")
