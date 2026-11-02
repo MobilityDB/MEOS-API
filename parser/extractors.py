@@ -263,6 +263,62 @@ def extract_function(node) -> dict:
     }
 
 
+def callback_proto(node):
+    """The function type a typedef names through one pointer (`typedef void
+    (*error_handler_fn)(int, int, const char *)`), or None for any other typedef."""
+    target = node.underlying_typedef_type.get_canonical()
+    if target.kind != clang.cindex.TypeKind.POINTER:
+        return None
+    proto = target.get_pointee()
+    if proto.kind not in (clang.cindex.TypeKind.FUNCTIONPROTO,
+                          clang.cindex.TypeKind.FUNCTIONNOPROTO):
+        return None
+    return proto
+
+
+def extract_callback(node, proto) -> dict:
+    """A function-pointer typedef, as #extract_function states a function: its result
+    and its parameters, named where the typedef names them, and `variadic` where its
+    prototype ends in `...`. A binding declares the callback a function takes or a
+    caller installs (`meos_initialize_interrupt_handler(interrupt_handler_fn)`) as a
+    typed function pointer, not as an opaque record."""
+    # The spellings come from the declaration, as #extract_function reads them from its
+    # cursors, so a `Datum` or a `size_t` keeps its name; the canonical function type
+    # #callback_proto returns has resolved them to the host's integers.
+    parms = [c for c in node.get_children()
+             if c.kind == clang.cindex.CursorKind.PARM_DECL]
+    args = list(proto.argument_types()) if \
+        proto.kind == clang.cindex.TypeKind.FUNCTIONPROTO else []
+    types = [c.type for c in parms] if len(parms) == len(args) else args
+    declared = node.underlying_typedef_type
+    pointee = declared.get_pointee() if declared.kind == clang.cindex.TypeKind.POINTER \
+        else None
+    result = pointee.get_result() if pointee is not None and pointee.kind in (
+        clang.cindex.TypeKind.FUNCTIONPROTO, clang.cindex.TypeKind.FUNCTIONNOPROTO) \
+        else proto.get_result()
+    return {
+        "name": node.spelling,
+        "file": Path(node.location.file.name).name,
+        "family": _family_of(node.location.file.name, node.location.line),
+        "vendored": _is_vendored(node.location.file.name),
+        "returnType": {
+            "c": _c_spelling(result),
+            "canonical": _canonical_c_spelling(result),
+        },
+        "params": [
+            {
+                "name": (parms[i].spelling if i < len(parms) and parms[i].spelling
+                         else f"arg{i}"),
+                "cType": _c_spelling(t),
+                "canonical": _canonical_c_spelling(t),
+            }
+            for i, t in enumerate(types)
+        ],
+        **({"variadic": True} if proto.kind == clang.cindex.TypeKind.FUNCTIONPROTO
+           and proto.is_function_variadic() else {}),
+    }
+
+
 def extract_struct(node) -> dict:
     """A structure, its fields at the offset clang lays each at and, when the unit
     defines it, the bytes clang lays the whole record in (`sizeBytes`), the trailing
