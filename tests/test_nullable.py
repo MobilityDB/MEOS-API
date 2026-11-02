@@ -11,7 +11,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parser.nullable import extract_nullable, extract_param_docs, merge_nullable
+from parser.nullable import (attach_function_docs, extract_briefs, extract_nullable,
+                             extract_param_docs, merge_nullable)
 
 SAMPLE = '''
 /**
@@ -123,6 +124,26 @@ class NullableTests(unittest.TestCase):
         self.assertEqual(idl["functions"][0]["shape"]["nullable"], ["srs"])
         # maxt absent from the IDL params -> not added
         self.assertNotIn("shape", idl["functions"][1])
+        self.assertEqual(n, 1)
+
+    def test_briefs_read_the_brief_of_each_block(self):
+        """The @brief of the blocks #test_param_docs_leave_out_the_tag reads, one per
+        function, ending before the first @param."""
+        briefs = extract_briefs(self.tmp.name)
+        self.assertEqual(briefs["temporal_as_mfjson"], "Return the MF-JSON representation")
+        self.assertEqual(briefs["jsonb_set_lax"], "Replace a value at a path")
+        self.assertEqual(len(briefs), 4)
+
+    def test_function_docs_keep_a_doc_the_meta_states(self):
+        idl = {"functions": [
+            {"name": "temporal_as_mfjson", "params": []},
+            {"name": "geom_dissolve", "params": [], "doc": "From the meta"},
+            {"name": "not_in_the_sources", "params": []},
+        ]}
+        idl, n = attach_function_docs(idl, self.tmp.name)
+        self.assertEqual(idl["functions"][0]["doc"], "Return the MF-JSON representation")
+        self.assertEqual(idl["functions"][1]["doc"], "From the meta")
+        self.assertNotIn("doc", idl["functions"][2])
         self.assertEqual(n, 1)
 
 

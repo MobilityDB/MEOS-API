@@ -84,3 +84,41 @@ def merge_nullable(idl: dict, meos_root: str | Path) -> tuple[dict, int]:
             func.setdefault("shape", {})["nullable"] = keep
             n += len(keep)
     return idl, n
+
+
+# The @brief of a Doxygen block: its text runs to the next line opening a command, to a
+# blank comment line, or to the end of the block, as #_PARAM reads a @param entry.
+_BRIEF = re.compile(r'@brief\s+(?P<text>.*?)(?=\n\s*\*\s*@|\n\s*\*\s*\n|\*/|\Z)', re.S)
+
+
+def extract_briefs(meos_root: str | Path) -> dict[str, str]:
+    """Return ``{function: brief}`` from the MEOS C Doxygen, the ``@brief`` of the block
+    #extract_param_docs reads, whitespace collapsed and the leading ``*`` of each line
+    removed, over the same files; a function documented twice keeps its first brief."""
+    out: dict[str, str] = {}
+    for f in doxygen_sources(meos_root):
+        txt = Path(f).read_text(errors="ignore")
+        for m in _FUNC.finditer(txt):
+            bm = _BRIEF.search(m.group("doc"))
+            if not bm:
+                continue
+            text = " ".join(ln.strip().lstrip("*").strip()
+                            for ln in bm.group("text").splitlines())
+            text = " ".join(text.split())
+            if text:
+                out.setdefault(m.group("name"), text)
+    return out
+
+
+def attach_function_docs(idl: dict, meos_root: str | Path) -> tuple[dict, int]:
+    """Give each catalog function the ``doc`` its Doxygen ``@brief`` states
+    (#extract_briefs), as #merge_nullable folds its ``@nullable`` tags; a function the
+    meta already documents keeps that ``doc``."""
+    briefs = extract_briefs(meos_root)
+    n = 0
+    for func in idl["functions"]:
+        brief = briefs.get(func["name"])
+        if brief and not func.get("doc"):
+            func["doc"] = brief
+            n += 1
+    return idl, n
