@@ -263,13 +263,15 @@ def build_type_encodings(functions: list, structs: set,
     first arg a char-like string). An *encoder* turns an object into a wire
     string (returns ``char *``, first arg ``const struct T *``). Trailing
     *formatting* scalars are allowed and defaulted (see ``_aux_specs``); a
-    non-defaultable trailing arg disqualifies the helper. Only declared
-    structs qualify, so primitives never register by accident.
+    non-defaultable trailing arg disqualifies the helper, an out-parameter the
+    function's ``shape.outParams`` lists, as the ``size_t *size_out`` of a string
+    writer, being no input. Only declared structs qualify, so primitives never
+    register by accident.
 
     A name in ``values`` is a type passed by value, as PostgreSQL passes its
     ``TimestampTz`` and ``DateADT``: its decoder returns it and its encoder takes it
     without a pointer (``TimestampTz timestamptz_in(const char *, int32_t)``,
-    ``char *timestamptz_out(TimestampTz)``).
+    ``char *timestamptz_out(TimestampTz, size_t *)``).
     """
     enc: dict[str, dict] = {}
 
@@ -286,7 +288,11 @@ def build_type_encodings(functions: list, structs: set,
         p0 = params[0]["canonical"]
         rb, rd = _base(ret), _ptr_depth(ret)
         pb, pd = _base(p0), _ptr_depth(p0)
-        aux = _aux_specs(params[1:])     # None => non-defaultable trailing arg
+        # None => non-defaultable trailing arg; the out-parameters, a string
+        # writer's size_out among them, are set aside as #_trailing of
+        # parser/codecs.py sets them aside
+        out = set((fn.get("shape") or {}).get("outParams") or ())
+        aux = _aux_specs([p for p in params[1:] if p["name"] not in out])
 
         # Decoder: const char* (+ defaultable scalar aux) -> opaque struct
         if (aux is not None and (rd >= 1 or rb in values) and rb in structs
@@ -415,6 +421,24 @@ def classify_category(fn: dict) -> str:
 # human-authored tag and cannot drift.
 
 
+def _string_size(fn: dict):
+    """The name of the ``size_t *`` through which ``char *f(.., size_t *size_out)``
+    writes the size of the string it returns, its terminating null character
+    included, when its ``shape.outParams`` lists it as its last parameter; else None.
+    The size is set aside as the presence flag of #_outparam is: no input, it is read
+    back with the result."""
+    ps = fn.get("params", [])
+    ret = fn["returnType"]["canonical"]
+    if not ps or _base(ret) != "char" or _ptr_depth(ret) != 1 or "const" in ret:
+        return None
+    last = ps[-1]
+    out = set((fn.get("shape") or {}).get("outParams") or ())
+    if (last["name"] in out and _base(last["canonical"]) == "size_t"
+            and _ptr_depth(last["canonical"]) == 1):
+        return last["name"]
+    return None
+
+
 def _outparam(fn: dict, enums: set, type_encodings: dict):
     """A MEOS accessor of the form ``bool f(.., T *result)`` returns its
     value through a trailing out-parameter, with the ``bool``/``int`` return
@@ -534,6 +558,9 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
 
     out_lead, out_p, out_mode = _outparam(fn, enums, type_encodings)
     eff = out_lead if out_p is not None else fn.get("params", [])
+    size_out = _string_size(fn)
+    if size_out is not None:
+        eff = eff[:-1]
     arr_i, count_i = _array_param(eff, type_encodings)
     ret_count_name, ret_elem = _array_return(fn, type_encodings)
     ret_count_i = (next((i for i, p in enumerate(eff)
@@ -641,7 +668,8 @@ def assess(fn: dict, type_encodings: dict, enums: set) -> tuple:
     if scalar == "handled":
         pass
     elif scalar is not None:
-        wire_result = scalar
+        wire_result = (scalar if size_out is None
+                       else {**scalar, "size_outparam": size_out})
     elif _is_scalar_pointer(ret, enums):
         reasons.append(f"unsupported-return:{ret}")
         wire_result = {"kind": "unsupported"}

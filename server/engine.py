@@ -60,6 +60,11 @@ class Engine:
         """``Elem **f(.., int *count)`` — return a list of element handles."""
         raise NotImplementedError
 
+    def invoke_string(self, fn_name: str, args: list):
+        """``char *f(.., size_t *size_out)`` — return the string, read for the
+        size the function writes, as #invoke_array reads its trailing count."""
+        raise NotImplementedError
+
     def invoke_counted_array(self, fn_name: str, args: list, count: int):
         """``Elem **f(Elem **arr, int count, ..)`` — return the ``count`` element
         handles of an array as long as an array argument."""
@@ -87,6 +92,10 @@ class StubEngine(Engine):
 
     def encode(self, fn_name, handle, aux=(), outparams=()):
         return f"<stub:{fn_name}>"
+
+    def invoke_string(self, fn_name, args):
+        # the placeholder string #invoke answers for a "str" result
+        return ""
 
     def invoke_outparam(self, fn_name, args, out_ctype, presence):
         return True, 0
@@ -291,6 +300,26 @@ class CtypesEngine(Engine):
             return []
         arr = ct.cast(ret, ct.POINTER(ct.c_void_p))
         return [arr[i] for i in range(count)]
+
+    def invoke_string(self, fn_name, args):
+        # char *f(leading..., size_t *size_out): MEOS writes the size of the
+        # string, its terminating NUL included, through the trailing byref
+        # size, as #invoke_array reads its count; the string is read for
+        # that many bytes rather than scanned for its terminator.
+        self._last_error = None
+        f = self._sym(fn_name)
+        ct = self._ct
+        n = ct.c_size_t()
+        f.argtypes = [self._argmap[t] for t, _ in args] + [
+            ct.POINTER(ct.c_size_t)]
+        f.restype = ct.c_void_p
+        cargs = [v.encode() if t == "str" and isinstance(v, str) else v
+                 for t, v in args]
+        ret = f(*cargs, ct.byref(n))
+        self._raise_if_error()
+        if not ret:
+            return None
+        return ct.string_at(ret, n.value - 1).decode()
 
     def invoke_counted_array(self, fn_name, args, count):
         # Elem **f(Elem **arr, int count, ...): MEOS allocates an array as long

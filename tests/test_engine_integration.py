@@ -49,22 +49,31 @@ def _aux(specs):
 class CtypesIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        from server.app import writer_outparams
         cls.eng = CtypesEngine(_LIB)
-        te = (json.loads(_CATALOG.read_text()).get("typeEncodings", {})
-              if _CATALOG.exists() else {})
+        catalog = json.loads(_CATALOG.read_text()) if _CATALOG.exists() else {}
+        cls.outs = writer_outparams(catalog)
+        cls.catalog = catalog
+        te = catalog.get("typeEncodings", {})
         t = te.get("Temporal", {})
         cls.readers = (t.get("readers") or {}).get("text", {})
         cls.reader_aux = (t.get("readerAux") or {}).get("text", {})
         cls.writers = (t.get("writers") or {}).get("text", {})
         cls.writer_aux = (t.get("writerAux") or {}).get("text", {})
 
+    def encode(self, writer, handle, aux=()):
+        """``writer`` called through #CtypesEngine.encode with the out-parameters the
+        catalog states for it, as the routes of server/app.py call it
+        (#writer_outparams): a string writer writes its size through one."""
+        return self.eng.encode(writer, handle, aux, self.outs.get(writer, []))
+
     def read(self, sqltype, literal):
         return self.eng.decode(self.readers[sqltype], literal,
                                _aux(self.reader_aux[sqltype]))
 
     def write(self, sqltype, handle):
-        return self.eng.encode(self.writers[sqltype], handle,
-                               _aux(self.writer_aux[sqltype]))
+        return self.encode(self.writers[sqltype], handle,
+                           _aux(self.writer_aux[sqltype]))
 
     def test_each_type_states_its_own_reader_and_writer(self):
         for sqltype in _LITERAL_BY_TYPE:
@@ -116,7 +125,7 @@ class CtypesIntegrationTests(unittest.TestCase):
         # that junk is negative — measured failing 4 runs in 6, with a
         # different value each time, and passing 6 in 6 once maxdd is supplied.
         self.assertIn("POINT",
-                      self.eng.encode("geo_as_ewkt", ptr, [("int", 15)]).upper())
+                      self.encode("geo_as_ewkt", ptr, [("int", 15)]).upper())
 
     def test_input_array_builder_round_trip(self):
         # Temporal *temporal_merge_array(Temporal **temparr, int count):
@@ -138,7 +147,7 @@ class CtypesIntegrationTests(unittest.TestCase):
             "tbool_in", "{[t@2000-01-01, f@2000-01-03], [t@2000-01-05]}")
         ptrs = self.eng.invoke_array("temporal_sequences", [("ptr", h)])
         self.assertEqual(len(ptrs), 2)          # two composing sequences
-        outs = [self.eng.encode("tsequence_out", p, [("int", 15)])
+        outs = [self.encode("tsequence_out", p, [("int", 15)])
                 for p in ptrs]
         self.assertTrue(all("@" in o for o in outs))
 
@@ -150,7 +159,7 @@ class CtypesIntegrationTests(unittest.TestCase):
         ptrs = self.eng.invoke_counted_array(
             "temparr_round", [("ptrarray", [h1, h2]), ("int", 2), ("int", 2)], 2)
         self.assertEqual(len(ptrs), 2)
-        outs = [self.eng.encode("tfloat_out", p, [("int", 15)]) for p in ptrs]
+        outs = [self.encode("tfloat_out", p, [("int", 15)]) for p in ptrs]
         self.assertIn("1.23@", outs[0])
         self.assertIn("7.65@", outs[1])
 
@@ -184,8 +193,7 @@ class CtypesIntegrationTests(unittest.TestCase):
         #CtypesEngine.encode, with the out-parameters the catalog states
         (#writer_outparams of server/app.py), read back to the value, as
         #test_each_type_round_trips_through_its_own_writer round-trips the text."""
-        from server.app import writer_outparams
-        outs = writer_outparams(json.loads(_CATALOG.read_text()))
+        outs = self.outs
         for reader, literal, writer, back, out in (
                 ("intset_in", "{1, 2, 3}", "set_as_hexwkb", "set_from_hexwkb",
                  "intset_out"),
@@ -195,11 +203,27 @@ class CtypesIntegrationTests(unittest.TestCase):
                  "temporal_from_hexwkb", "tint_out")):
             self.assertEqual(outs[writer], [(2, "size_t *")], writer)
             h = self.eng.decode(reader, literal)
-            hexwkb = self.eng.encode(writer, h, [("int", 0)], outs[writer])
+            hexwkb = self.encode(writer, h, [("int", 0)])
             self.assertRegex(hexwkb, r"^(?:[0-9A-F]{2})+$", writer)
             aux = [("int", 15)] if out == "tint_out" else []
-            again = self.eng.encode(out, self.eng.decode(back, hexwkb), aux)
-            self.assertEqual(again, self.eng.encode(out, h, aux), writer)
+            again = self.encode(out, self.eng.decode(back, hexwkb), aux)
+            self.assertEqual(again, self.encode(out, h, aux), writer)
+
+    def test_a_string_route_reads_the_size_meos_writes(self):
+        """``tfloat_out(temp, maxdd, size_out)`` served as its route, the size an
+        out-parameter of its result (#_string_size of parser/enrich.py), answers the
+        string #test_each_type_round_trips_through_its_own_writer writes."""
+        from server.app import _dispatch, build_routes
+        route = build_routes(self.catalog)["/tfloat_out"]
+        self.assertEqual([p["name"] for p in route["params"]], ["temp", "maxdd"])
+        self.assertEqual(route["result"]["size_outparam"], "size_out")
+        # the value crosses the wire as a client sends it: written by the out of its
+        # class, which the route's decode reads back
+        t = self.catalog["typeEncodings"]["Temporal"]
+        h = self.read("tfloat", _TFLOAT)
+        wire = self.encode(t["out"], h, _aux(t["out_aux"]))
+        got = _dispatch({"temp": wire, "maxdd": 15}, route, self.eng, {})
+        self.assertEqual(got["result"], self.write("tfloat", h))
 
     def test_bad_input_raises_not_exits(self):
         with self.assertRaises(MeosError):

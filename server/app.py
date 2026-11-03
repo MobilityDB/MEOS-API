@@ -98,7 +98,8 @@ def build_routes(catalog: dict) -> dict:
                        "presence_return": r.get("presence_return", False),
                        "element": _with_outparams(r.get("element"), outs),
                        "count_outparam": r.get("count_outparam"),
-                       "count_param": r.get("count_param")},
+                       "count_param": r.get("count_param"),
+                       "size_outparam": r.get("size_outparam")},
         }
     return routes
 
@@ -208,6 +209,10 @@ def _dispatch(body: dict, route: dict, engine: Engine, enums: dict):
                                          _aux_args(el.get("encode_aux", [])),
                                          el.get("encode_outparams", []))
                            for p in ptrs]}
+
+    if res.get("size_outparam"):
+        # char *f(.., size_t *size_out): the string read for the size MEOS writes.
+        return {"result": engine.invoke_string(route["name"], args)}
 
     rtag = "void" if res["kind"] == "void" else (
         "ptr" if res["kind"] == "serialized"
