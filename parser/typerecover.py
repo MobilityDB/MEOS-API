@@ -197,6 +197,87 @@ def recover_collapsed_types(idl, headers_dir):
     return idl, fixed
 
 
+def type_names(spelling):
+    """The names a type spelling uses, a function type's parameters and result
+    included: ``(name, tagged)`` for each identifier no C keyword is, ``tagged`` when
+    ``struct``, ``union`` or ``enum`` precedes it.
+
+        'const Temporal *'                  -> [('Temporal', False)]
+        'struct json_object *'              -> [('json_object', True)]
+        'int (*)(const void *, Datum)'      -> [('Datum', False)]
+    """
+    out, tag = [], False
+    for word in re.findall(r"[A-Za-z_]\w*", spelling or ""):
+        if word in ("struct", "union", "enum"):
+            tag = True
+        elif word not in _C_KEYWORDS:
+            out.append((word, tag))
+            tag = False
+    return out
+
+
+def state_type_names(idl, typedefs, pg_names):
+    """The definition of every name a slot's ``canonical`` keeps that no structure,
+    enumeration or callback of the catalog states: ``[{"name", "canonical"}]``, the
+    definition spelled as #normalize_canonical spells a slot.
+
+    A name PostgreSQL declares keeps its name in a slot (``TimestampTz``, ``Datum``),
+    as do ``text``, ``Jsonb`` and ``JsonPath``; this states what each is, read from the
+    typedef the parsed unit declares one step down: ``TimestampTz`` is ``int64_t``,
+    ``DateADT`` ``int32_t``, ``Datum`` ``uintptr_t``, ``Oid`` ``unsigned int``, ``text``
+    and ``Jsonb`` ``struct varlena``. A definition naming another such type
+    (``Timestamp``) is stated in turn, so a binding resolves every name from the
+    catalog alone, as #test_every_name_a_slot_uses_is_stated holds."""
+    own = ({s.get("name") for s in idl.get("structs", [])}
+           | {e.get("name") for e in idl.get("enums", [])}
+           | {c.get("name") for c in idl.get("callbacks", [])})
+    pending = []
+
+    def visit(o):
+        if isinstance(o, dict):
+            if isinstance(o.get("canonical"), str):
+                pending.extend(n for n, tagged in type_names(o["canonical"])
+                               if not tagged)
+            for v in o.values():
+                visit(v)
+        elif isinstance(o, list):
+            for v in o:
+                visit(v)
+
+    visit({k: v for k, v in idl.items() if k != "typedefs"})
+    stated = {}
+    while pending:
+        name = pending.pop()
+        if (name in stated or name in own or name in _C_LIBRARY
+                or _C_STANDARD.match(name) or name not in typedefs):
+            continue
+        under = " ".join(re.sub(r"\b(?:const|volatile)\b", " ", typedefs[name]).split())
+        base = _base_name(under)
+        if base in _C_SCALARS or _C_STANDARD.match(base):
+            spelled = base
+        elif base in typedefs and not re.match(r"(?:struct|union|enum)\b", under):
+            spelled = scalar_spelling(base, typedefs, pg_names) or base
+        else:
+            spelled = base
+        stars = "".join(c for c in under if c == "*")
+        tag = re.match(r"(?:struct|union|enum)\b", under)
+        definition = (f"{tag.group(0)} " if tag else "") + spelled + (
+            f" {stars}" if stars else "")
+        stated[name] = definition
+        pending.extend(n for n, tagged in type_names(definition) if not tagged)
+    return [{"name": n, "canonical": stated[n]} for n in sorted(stated)]
+
+
+# The C library's types a slot names by their own name, beside #_C_STANDARD's widths.
+_C_LIBRARY = {"va_list"}
+
+# The words of a type spelling that name no type of their own (#type_names).
+_C_KEYWORDS = {
+    "const", "volatile", "restrict", "signed", "unsigned", "char", "short", "int",
+    "long", "float", "double", "void", "_Bool", "bool",
+}
+
+
 # Strip const/struct qualifiers and pointer stars to the bare base name.
 _BASE_RE = re.compile(r"\b(?:const|struct|volatile)\b|\*")
 
@@ -309,15 +390,26 @@ def normalize_canonical(idl, pg_names=frozenset()):
         reached = scalar_spelling(name, typedefs, pg_names)
         return name if reached and _C_STANDARD.match(reached) else None
 
+    callbacks = {cb.get("name") for cb in idl.get("callbacks", [])}
+
     def want(ctype):
+        # an array field (`uint8_t[3]`) is stated as its element, its bounds kept, as
+        # the const and the stars below are kept around the base #_base_name reads
+        dims = re.search(r"(?:\[\d*\])+$", ctype)
+        bounds = dims.group(0) if dims else ""
+        ctype = ctype[:dims.start()].strip() if dims else ctype
         base = _base_name(ctype)
-        mapped = (scalar_spelling(base, typedefs, pg_names) if base in typedefs
-                  else None) or _TYPE_MAP.get(base)
+        # a callback the catalog states, and <stdarg.h>'s va_list, keep their name as
+        # #_TYPE_MAP keeps Jsonb's: libclang spells them as the function type
+        # (`void *(*)(unsigned long)`) and as the platform's `struct __va_list_tag[1]`
+        mapped = (base if base in callbacks or base in _C_LIBRARY else None) or (
+            scalar_spelling(base, typedefs, pg_names) if base in typedefs
+            else None) or _TYPE_MAP.get(base)
         if not mapped:
             return None
         const = "const " if re.search(r"\bconst\b", ctype) else ""
         stars = "".join(c for c in ctype if c == "*")
-        return f"{const}{mapped}{(' ' + stars) if stars else ''}"
+        return f"{const}{mapped}{(' ' + stars) if stars else ''}{bounds}"
 
     def fix(slot):
         nonlocal fixed
@@ -342,4 +434,5 @@ def normalize_canonical(idl, pg_names=frozenset()):
                 walk(v)
 
     walk(idl)
+    idl["typedefs"] = state_type_names(idl, typedefs, pg_names)
     return idl, fixed

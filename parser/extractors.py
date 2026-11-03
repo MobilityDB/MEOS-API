@@ -339,6 +339,8 @@ def extract_struct(node) -> dict:
             {
                 "name": f.spelling,
                 "cType": _c_spelling(f.type),
+                # spelled as #extract_callback spells a parameter's
+                "canonical": _canonical_c_spelling(f.type),
                 "offset_bits": node.type.get_offset(f.spelling),
             }
             for f in node.get_children()

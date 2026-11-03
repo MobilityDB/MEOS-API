@@ -255,6 +255,74 @@ class TypeRecoverTests(unittest.TestCase):
                                  ("S2CellId", "uint64_t")})
         self.assertEqual(self.by_name["h3index_in"]["returnType"]["typedef"], "H3Index")
 
+    # ---- the class: every name a slot uses is stated in the catalog ------------
+
+    def test_every_name_a_slot_uses_is_stated(self):
+        # A binding resolves each type from the catalog alone: every name a slot's
+        # `canonical` uses (a function's parameters and result, a callback's, a
+        # structure's fields, a function type's parts) is a C type, a structure, an
+        # enumeration, a callback or a `typedefs` entry; a name only `struct` names
+        # and no structure states is a pointer to a record the catalog does not lay
+        # out. The assertion runs over every slot, so a new name is held to it
+        # without being named here.
+        from parser.typerecover import type_names, _C_STANDARD, _C_LIBRARY
+        idl = json.loads(IDL.read_text())
+        stated = ({s["name"] for s in idl["structs"]} | {e["name"] for e in idl["enums"]}
+                  | {c["name"] for c in idl["callbacks"]}
+                  | {t["name"] for t in idl["typedefs"]} | _C_LIBRARY)
+        unstated = set()
+
+        def visit(o):
+            if isinstance(o, dict):
+                if isinstance(o.get("canonical"), str):
+                    unstated.update(n for n, tagged in type_names(o["canonical"])
+                                    if not tagged and n not in stated
+                                    and not _C_STANDARD.match(n))
+                for v in o.values():
+                    visit(v)
+            elif isinstance(o, list):
+                for v in o:
+                    visit(v)
+
+        visit(idl)
+        self.assertEqual(sorted(unstated), [])
+        fields = [f for s in idl["structs"] for f in s.get("fields", [])]
+        self.assertTrue(fields and all("canonical" in f for f in fields))
+
+    def test_a_kept_name_states_its_definition(self):
+        idl = json.loads(IDL.read_text())
+        typedefs = {t["name"]: t["canonical"] for t in idl["typedefs"]}
+        self.assertEqual(typedefs["TimestampTz"], "int64_t")
+        self.assertEqual(typedefs["DateADT"], "int32_t")
+        self.assertEqual(typedefs["Datum"], "uintptr_t")
+        self.assertEqual(typedefs["text"], "struct varlena")
+        # a width name is stated by the slot itself, never kept as a name
+        self.assertNotIn("int32", typedefs)
+        self.assertNotIn("float4", typedefs)
+
+    def test_a_callback_slot_names_its_callback(self):
+        # as a structure slot names its structure, not libclang's function type
+        # spelled with the platform's widths (`void *(*)(unsigned long)`)
+        params = {p["name"]: p["canonical"]
+                  for p in self.by_name["meos_initialize_allocator"]["params"]}
+        self.assertEqual(set(params.values()),
+                         {"meos_malloc_fn", "meos_realloc_fn", "meos_free_fn"})
+        idl = json.loads(IDL.read_text())
+        handler = next(c for c in idl["callbacks"] if c["name"] == "pc_message_handler")
+        self.assertEqual([p["canonical"] for p in handler["params"]],
+                         ["const char *", "va_list"])
+
+    def test_a_field_states_its_width(self):
+        # as #test_no_typedef_reads_as_a_platform_integer holds a parameter
+        idl = json.loads(IDL.read_text())
+        fields = {(s["name"], f["name"]): f for s in idl["structs"]
+                  for f in s.get("fields", [])}
+        self.assertEqual(fields[("LWGEOM", "flags")]["canonical"], "uint16_t")
+        # liblwgeom's flags are a type of their own over that width, as a cell id is
+        self.assertEqual(fields[("LWGEOM", "flags")]["typedef"], "lwflags_t")
+        arrays = {f["canonical"] for f in fields.values() if f["cType"] == "uint8_t[3]"}
+        self.assertEqual(arrays, {"uint8_t[3]"})
+
 
 # C's own integer names: what a typedef must never be stated as.
 _C_INTEGERS = {
@@ -349,6 +417,30 @@ class ScalarSpellingTests(unittest.TestCase):
                          ["int32_t", "const uint64_t *"])
         self.assertEqual(fixed, 3)
         self.assertNotIn("_typedefs", idl)
+        # the name the slot keeps is stated through its chain, the one below it too
+        self.assertEqual(idl["typedefs"], [{"name": "TimeADT", "canonical": "int64_t"}])
+
+    def test_a_kept_name_names_the_kept_name_below_it(self):
+        # #state_type_names over chains as #test_normalize_states_a_slot_by_its_chain
+        # reads them
+        from parser.typerecover import state_type_names
+        typedefs = dict(self.TYPEDEFS, Stamp="TimeADT", text="struct varlena")
+        idl = {"functions": [{"name": "f", "returnType": {"c": "Stamp", "canonical": "Stamp"},
+                              "params": [{"name": "t", "cType": "const text *",
+                                          "canonical": "const text *"}]}],
+               "structs": [{"name": "varlena", "fields": []}]}
+        self.assertEqual(state_type_names(idl, typedefs, self.PG | {"Stamp"}),
+                         [{"name": "Stamp", "canonical": "TimeADT"},
+                          {"name": "TimeADT", "canonical": "int64_t"},
+                          {"name": "text", "canonical": "struct varlena"}])
+
+    def test_type_names_reads_a_function_type(self):
+        # #type_names, the reader #test_every_name_a_slot_uses_is_stated applies
+        from parser.typerecover import type_names
+        self.assertEqual(type_names("unsigned int (*)(const void *, Datum)"),
+                         [("Datum", False)])
+        self.assertEqual(type_names("const struct json_object *"),
+                         [("json_object", True)])
 
 
 if __name__ == "__main__":
