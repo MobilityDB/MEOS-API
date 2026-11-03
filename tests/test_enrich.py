@@ -179,6 +179,20 @@ class TypeEncodingTests(unittest.TestCase):
         # Weird gets no decoder at all.
         self.assertNotIn("Weird", self.te)
 
+    def test_a_size_out_parameter_is_no_input(self):
+        """A string writer stating its size through a ``size_t *`` its
+        ``shape.outParams`` lists is an encoder as #test_struct_prefix_stripped_and_round_trip
+        reads one; the same parameter left unlisted is a pointer input and disqualifies it."""
+        listed = dict(fn("temporal_out", "char *", (T, "temp"), ("int", "maxdd"),
+                         ("size_t *", "size_out")), shape={"outParams": ["size_out"]})
+        te = build_type_encodings([FUNCTIONS[0], listed], {"Temporal"})
+        self.assertEqual(te["Temporal"]["out"], "temporal_out")
+        self.assertEqual(te["Temporal"]["out_aux"],
+                         [{"name": "maxdd", "kind": "integer", "default": 15}])
+        unlisted = fn("temporal_out", "char *", (T, "temp"), ("size_t *", "size_out"))
+        te = build_type_encodings([FUNCTIONS[0], unlisted], {"Temporal"})
+        self.assertIsNone(te["Temporal"]["out"])
+
     def test_byte_codec_beside_the_wire_encodings(self):
         # the byte-codec twin of #test_struct_prefix_stripped_and_round_trip
         self.assertEqual(self.te["Temporal"]["bytes"],
@@ -240,6 +254,28 @@ class ExposabilityTests(unittest.TestCase):
         self.assertIn("array-or-out-param:size_out", r)
         r2 = self.n("tjsonb_value_at_timestamptz")["reason"]
         self.assertIn("array-or-out-param:value", r2)
+
+    def test_a_string_result_reads_its_size(self):
+        """``char *f(.., size_t *size_out)`` whose ``shape.outParams`` lists the size is
+        exposable, the size no input and stated on the result, as
+        #test_array_return_as_long_as_an_array_argument states its count; the same
+        size left unlisted is refused as #test_out_param_not_exposable refuses one."""
+        listed = dict(fn("geom_relate", "char *", ("const struct Jsonb *", "js"),
+                         ("int", "maxdd"), ("size_t *", "size_out")),
+                      shape={"outParams": ["size_out"]})
+        unlisted = fn("geom_relate2", "char *", ("const struct Jsonb *", "js"),
+                      ("size_t *", "size_out"))
+        fns = by_name(enrich_idl({
+            "functions": [listed, unlisted,
+                          fn("jsonb_in", "struct Jsonb *", ("const char *", "str"))],
+            "structs": [{"name": "Jsonb", "fields": []}], "enums": []}))
+        f = fns["geom_relate"]
+        self.assertTrue(f["network"]["exposable"])
+        self.assertEqual([p["name"] for p in f["wire"]["params"]], ["js", "maxdd"])
+        self.assertEqual(f["wire"]["result"],
+                         {"kind": "json", "json": "string", "size_outparam": "size_out"})
+        self.assertIn("array-or-out-param:size_out",
+                      fns["geom_relate2"]["network"]["reason"])
 
     def test_array_param_and_missing_encoder(self):
         r = self.n("tsequence_make")["reason"]

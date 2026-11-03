@@ -82,7 +82,11 @@ literals are in the catalog.
   **encoder** — a public `T (+ aux) → char *` (`*_out`, `*_as_text`, `*_as_ewkt`,
   `*_as_mfjson`, `*_as_hexwkb`, `*_as_hexewkb`), or `T (+ aux) → uint8_t *` in `wkb` and
   `ewkb`. A size the function writes back is an out-parameter, stated in its
-  `shape.outParams` as for any other function.
+  `shape.outParams` as for any other function. Every public function returning a
+  `char *` writes the size of its string, the terminating null character included,
+  through a `size_t *` its `shape.outParams` lists, so a binding copies the string
+  with that size rather than scanning it for its terminator
+  (`tests/test_string_size.py`).
 - **A PostgreSQL type passed by value** (`TimestampTz`, `Timestamp`, `TimeADT`,
   `DateADT`) is a class like a pointer type, its decoder returning it and its
   encoder taking it without a pointer (`timestamptz_in` / `timestamptz_out`).
@@ -228,6 +232,13 @@ Otherwise `exposable` is `false` and `reason` lists the blockers
 > wire result, the function is `exposable`, and a false presence return
 > maps to *no value* (HTTP 204). This recovers the public `*_value_n`,
 > box-bound, and `*_value_at`/geo-accessor families.
+
+> **String results.** A function `char *f(.., size_t *size_out)` whose
+> `shape.outParams` lists its trailing `size_t *` writes through it the size
+> of the string it returns, the terminating null character included. The
+> size is no wire param: the result is the JSON string, with
+> `size_outparam` naming the size the string is read for (`tfloat_out`,
+> `geo_as_text`, `geom_relate`).
 
 > **Input-array builders.** A builder taking `(Elem **arr, int count)`
 > becomes one wire param of `kind: "array"` (element = the serialized
