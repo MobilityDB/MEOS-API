@@ -200,12 +200,23 @@ are in (`parser/enrich.py` `restate_wire`): a `Temporal` reads through
 | `void`       | no return value                                      | `204` |
 | `unsupported`| cannot be represented in a stateless request/response| — |
 
-> **Canonical spellings.** libclang emits canonical C, not source aliases:
-> `struct Temporal *` (not `Temporal *`), `unsigned char` (not `uint8_t`),
-> `long` (not `int64_t`), and MEOS uses `int` for booleans. The heuristics
-> match canonical spellings; `struct`/`union`/`enum` qualifiers are stripped
-> so `typeEncodings` keys are clean (`Temporal`, not `struct Temporal`).
-> `enum` parameters are scalars; only declared structs become `serialized`.
+> **Canonical spellings.** A slot's `canonical` (a function's parameters and
+> result, a callback's, a structure's fields) states its type as MEOS declares
+> it, never as the platform resolves it: a width name reads as its C standard
+> type (`int32` as `int32_t`, `uint8` as `uint8_t`, `float4` as `float`), a
+> boolean as `bool`, a structure by its name (`const Temporal *`), a callback
+> by its name (`meos_malloc_fn`), and a cell id as `uint64_t` with its name in
+> `typedef` (`H3Index`). A type PostgreSQL declares keeps its name
+> (`TimestampTz`, `DateADT`, `Datum`), as do `text`, `Jsonb` and `JsonPath`;
+> the top-level `typedefs` list states what each such name is (`TimestampTz`
+> is `int64_t`, `Datum` `uintptr_t`, `text` `struct varlena`). Every name a
+> `canonical` uses is a C type, a `structs`, `enums`, `callbacks` or
+> `typedefs` entry, or a structure only `struct` names, which the catalog does
+> not lay out (`struct json_object *`), so a binding maps each type from the
+> catalog alone (`tests/test_typerecover.py`). The heuristics strip
+> `struct`/`union`/`enum` qualifiers so `typeEncodings` keys are clean
+> (`Temporal`, not `struct Temporal`). `enum` parameters are scalars; only
+> declared structs become `serialized`.
 
 ### Exposability
 

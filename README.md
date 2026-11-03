@@ -126,7 +126,10 @@ python object_model_parity.py   # -> output/meos-object-model-parity.json
 
 ## Output format
 
-`meos-api.json` contains 3 top-level arrays: `functions`, `structs`, and `enums`.
+`meos-idl.json` states the C surface in the top-level arrays `functions`,
+`structs`, `enums`, `macros`, `callbacks` and `typedefs`; every name a type
+spelling in them uses is stated by one of them or is a C type
+([docs/enrichment.md](docs/enrichment.md), *Canonical spellings*).
 
 A typical function entry looks like this:
 
@@ -159,9 +162,9 @@ Each function gains a `category`, a `network` verdict, and a `wire` mapping:
 ```json
 {
   "name": "temporal_eq",
-  "returnType": { "c": "bool", "canonical": "int" },
-  "params": [ { "name": "temp1", "canonical": "const struct Temporal *" },
-              { "name": "temp2", "canonical": "const struct Temporal *" } ],
+  "returnType": { "c": "bool", "canonical": "bool" },
+  "params": [ { "name": "temp1", "canonical": "const Temporal *" },
+              { "name": "temp2", "canonical": "const Temporal *" } ],
   "category": "predicate",
   "network": { "exposable": true, "method": "POST", "reason": null },
   "wire": {
@@ -176,8 +179,8 @@ Each function gains a `category`, a `network` verdict, and a `wire` mapping:
 }
 ```
 
-(MEOS predicates return `int`, and libclang emits canonical spellings such as
-`const struct Temporal *` — the enrichment matches those.)
+(A slot's `canonical` states its type as MEOS declares it, `bool` and
+`const Temporal *` here; [docs/enrichment.md](docs/enrichment.md) states the rule.)
 
 ```text
 Live coverage (MobilityDB master): 2161 public + 511 internal functions.
