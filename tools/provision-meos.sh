@@ -106,7 +106,6 @@ if [ "$BUILD_LIBMEOS" = 1 ]; then
   cfg=(-DCMAKE_BUILD_TYPE=Release -DMEOS=ON -DCMAKE_INSTALL_PREFIX="$PARSE_PREFIX" $FAMILIES)
   [ -e "${H3_LIBRARY:=/usr/lib/x86_64-linux-gnu/libh3.so}" ] && cfg+=(-DH3_LIBRARY="$H3_LIBRARY")
   [ -e "${H3_INCLUDE_DIR:=/usr/include/h3}" ]                && cfg+=(-DH3_INCLUDE_DIR="$H3_INCLUDE_DIR")
-  [ -x "${PG_CONFIG:=/usr/lib/postgresql/17/bin/pg_config}" ] && cfg+=(-DPOSTGRESQL_PG_CONFIG="$PG_CONFIG")
 
   cmake -S "$MDB_SRC" -B "$MDB_SRC/build" "${cfg[@]}"
   cmake --build "$MDB_SRC/build" -j "${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"

@@ -17,13 +17,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Name git's default branch
+        run: git config --global init.defaultBranch main
+
+      - uses: actions/checkout@v5
 
       # Run the script from this checkout rather than through the action, which
       # would fetch master: a pull request must be checked by the rules it
       # carries, or a change to them is not exercised until after it merges.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 

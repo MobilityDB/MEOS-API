@@ -19,7 +19,10 @@ jobs:
     name: Build libmeos + regenerate catalog + pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Name git's default branch
+        run: git config --global init.defaultBranch main
+
+      - uses: actions/checkout@v5
 
       # Build + install all-families libmeos and derive the catalog from the
       # installed headers — the exact step a native/FFI binding runs.
@@ -44,7 +47,7 @@ jobs:
       # factory.py and degrades to `oracle-unavailable` without it, so the two
       # parity gates assert nothing until it is on disk.
       - name: Check out the PyMEOS oracle
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: MobilityDB/PyMEOS
           path: _pymeos
@@ -210,7 +213,7 @@ jobs:
 
       - name: Upload meos-idl.json as artefact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: meos-idl
           path: output/meos-idl.json
