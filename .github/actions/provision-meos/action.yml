@@ -41,18 +41,24 @@ outputs:
 runs:
   using: composite
   steps:
+    # git names the branch a repository it initialises starts on, so the checkout below prints
+    # no hint about an unset default.
+    - name: Name git's default branch
+      shell: bash
+      run: git config --global init.defaultBranch main
+
     # The MEOS headers + C sources the catalog is derived from. The whole
     # repository is fetched (not just headers) so run.py can read meos/src,
     # mobilitydb/src and mobilitydb/sql for the @sqlfn/@ingroup maps, and so
     # the optional libmeos build below can configure it.
     - name: Checkout MobilityDB @ ref
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: MobilityDB/MobilityDB
         ref: ${{ inputs.mobilitydb-ref }}
         path: _mobilitydb_src
 
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       with:
         python-version: "3.11"
 
@@ -81,7 +87,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - name: Restore the downloaded libclang sysroot packages
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/apt-sysroot-archives
         key: ${{ steps.sysroot-keys.outputs.deb-key }}
@@ -135,6 +141,9 @@ runs:
       shell: bash
       run: |
         sudo service postgresql stop || true
+        # The runner image ships PostgreSQL without its man pages, so the psql.1.gz alternative
+        # points at nothing and the package removal would repair it with a warning; it goes first.
+        sudo update-alternatives --remove-all psql.1.gz 2>/dev/null || true
         bash "$GITHUB_ACTION_PATH/apt-get.sh" --purge remove postgresql* -y || true
         sudo rm -rf /var/lib/postgresql/ /etc/postgresql/ /var/log/postgresql/ || true
 
@@ -177,7 +186,7 @@ runs:
 
     - name: Restore the downloaded packages
       if: inputs.build-libmeos == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/apt-archives
         key: ${{ steps.keys.outputs.deb-key }}
@@ -186,7 +195,7 @@ runs:
     - name: Restore the derived libmeos prefix and catalog
       id: build-cache
       if: inputs.build-libmeos == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ${{ runner.temp }}/meos-headers
@@ -211,7 +220,7 @@ runs:
     - name: Restore the GDAL build
       id: gdal-cache
       if: inputs.build-libmeos == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/gdal-prefix
         key: ${{ steps.keys.outputs.gdal-key }}

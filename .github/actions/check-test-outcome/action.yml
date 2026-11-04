@@ -26,8 +26,14 @@ inputs:
 runs:
   using: composite
   steps:
+    # git names the branch a repository it initialises starts on, so the checkout below prints
+    # no hint about an unset default.
+    - name: Name git's default branch
+      shell: bash
+      run: git config --global init.defaultBranch main
+
     - name: Check out the rules
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: MobilityDB/MEOS-API
         ref: master

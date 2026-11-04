@@ -32,23 +32,36 @@ curl -fsSL --retry 3 --max-time 600 -o "$WORK/gdal.tar.gz" "$URL"
 echo "$SHA256  $WORK/gdal.tar.gz" | sha256sum -c -
 tar xzf "$WORK/gdal.tar.gz" -C "$WORK"
 
+# GDAL's CheckCXXCompilerFlag passes backslashes to a macro, which CMake 4 reports unless
+# CMP0219 is set; the policy is set inside the project, where CMake reads it.
+cat > "$WORK/policies.cmake" <<'EOF'
+if(POLICY CMP0219)
+  cmake_policy(SET CMP0219 NEW)
+endif()
+EOF
+
 cmake -S "$WORK/gdal-$VERSION" -B "$WORK/build" \
+  -DCMAKE_PROJECT_INCLUDE_BEFORE="$WORK/policies.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=ON \
   -DBUILD_APPS=OFF \
   -DBUILD_TESTING=OFF \
-  -DBUILD_DOCS=OFF \
   -DBUILD_PYTHON_BINDINGS=OFF \
   -DBUILD_JAVA_BINDINGS=OFF \
   -DBUILD_CSHARP_BINDINGS=OFF \
   -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF \
   -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+  -DGDAL_ENABLE_DRIVER_GTIFF=ON \
+  -DGDAL_ENABLE_DRIVER_VRT=ON \
+  -DOGR_ENABLE_DRIVER_GEOJSON=ON \
+  -DOGR_ENABLE_DRIVER_SHAPE=ON \
   -DGDAL_USE_EXTERNAL_LIBS=OFF \
   -DGDAL_USE_INTERNAL_LIBS=ON \
   -DGDAL_USE_PROJ=ON \
   -DGDAL_USE_GEOS=OFF \
   -DGDAL_USE_SQLITE3=ON \
-  -DGDAL_USE_ZLIB=ON
+  -DGDAL_USE_ZLIB=ON \
+  -DGDAL_USE_ZLIB_INTERNAL=OFF
 cmake --build "$WORK/build" -j "${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
 cmake --install "$WORK/build"
