@@ -1846,6 +1846,70 @@ CREATE FUNCTION valueCount(rast raster, searchvalues float[],
         self.assertNotIn("boundArgs", idl["functions"][0]["sqlSignatures"][0])
 
 
+class TestLiteralOfOneBranch(unittest.TestCase):
+    """A literal one branch passes for the calls that give no value binds no signature that
+    gives it (#_guarded_default, #_keep_guarded_alone): the operators of `tjsonbPathExists`
+    take no variables, and the function does. The fixtures read as those of the class above."""
+
+    HELPER = r"""
+Datum
+Tjsonb_path_exists_common(FunctionCallInfo fcinfo, bool tz)
+{
+  Temporal *temp = PG_GETARG_TEMPORAL_P(0);
+  JsonPath *jp = PG_GETARG_JSONPATH_P(1);
+  Jsonb *vars = NULL;
+  bool silent = true;
+  if (PG_NARGS() == 4)
+  {
+    vars = PG_GETARG_JSONB_P(2);
+    silent = PG_GETARG_BOOL(3);
+  }
+  Temporal *result = vars ?
+    tjsonb_path_exists(temp, jp, vars, silent, tz) :
+    tjsonb_path_exists_intl(temp, jp, NULL, silent, tz);
+  PG_RETURN_TEMPORAL_P(result);
+}
+
+Datum
+Tjsonb_path_exists(PG_FUNCTION_ARGS)
+{
+  return Tjsonb_path_exists_common(fcinfo, false);
+}
+"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "src").mkdir()
+        (root / "src" / "tjsonb.c").write_text(self.HELPER)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _idl(self, args):
+        def func(name):
+            return {"name": name, "mdbC": "Tjsonb_path_exists", "sqlfn": "tjsonbPathExists",
+                    "params": [{"name": n} for n in ("temp", "jp", "vars", "silent", "tz")],
+                    "sqlSignatures": [{"sqlName": "tjsonbPathExists", "args": args, "ret": "tbool"}]}
+        return {"functions": [func("tjsonb_path_exists"), func("tjsonb_path_exists_intl")]}
+
+    def _bound(self, func):
+        bound = dict((func.get("shape") or {}).get("boundArgs") or {})
+        bound.update(func["sqlSignatures"][0].get("boundArgs") or {})
+        return bound
+
+    def test_the_signature_stating_the_value_takes_it_from_its_caller(self):
+        idl, _, _ = merge_boundargs(self._idl(["tjsonb", "jsonpath", "jsonb", "boolean"]),
+                                    self.tmp.name)
+        for f in idl["functions"]:
+            self.assertEqual(self._bound(f), {"tz": "false"}, f["name"])
+
+    def test_a_signature_leaving_the_value_out_reads_the_literal(self):
+        idl, _, _ = merge_boundargs(self._idl(["tjsonb", "jsonpath"]), self.tmp.name)
+        for f in idl["functions"]:
+            self.assertEqual(self._bound(f), {"tz": "false", "vars": "NULL", "silent": "true"},
+                             f["name"])
+
 
 SET_VALUES_WRAPPER = r"""
 Datum
