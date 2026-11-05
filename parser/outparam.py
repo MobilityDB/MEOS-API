@@ -28,11 +28,22 @@ def doxygen_sources(meos_root: str | Path) -> list[str]:
     ``meos/`` and documents them on its ``.c`` definitions (mirrors doxygroup/run.py
     pgtypes). Every ``@param`` reader, here and in #extract_nullable, scans this one
     list, so a function documented in ``pgtypes/`` states its parameters to all of them
-    alike."""
+    alike.
+
+    The list is in one order on every machine: each tree sorted, with a ``<name>_meos.c``
+    file before every other file of its tree. A function defined both in the file the
+    PostgreSQL extension compiles (``ways.c``) and in its MEOS twin (``ways_meos.c``) is
+    then documented by the twin MEOS compiles, and every reader keeping the first block
+    it meets (#extract_briefs among them) reads that block."""
     root = Path(meos_root)
-    files = glob.glob(str(root / "src/**/*.c"), recursive=True)
-    files += glob.glob(str(root / "include/**/*.h"), recursive=True)
-    files += glob.glob(str(root.parent / "pgtypes/**/*.c"), recursive=True)
+
+    def tree(pattern: str) -> list[str]:
+        found = glob.glob(pattern, recursive=True)
+        return sorted(found, key=lambda f: (not f.endswith("_meos.c"), f))
+
+    files = tree(str(root / "src/**/*.c"))
+    files += tree(str(root / "include/**/*.h"))
+    files += tree(str(root.parent / "pgtypes/**/*.c"))
     return files
 
 
