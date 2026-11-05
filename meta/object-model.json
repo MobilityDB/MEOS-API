@@ -1001,7 +1001,7 @@
       {
         "name": "MEOS_ERR_VALUE_OUT_OF_RANGE",
         "value": 3,
-        "meaning": "Internal out of range error"
+        "meaning": "Numeric value out of range"
       },
       {
         "name": "MEOS_ERR_DIVISION_BY_ZERO",
@@ -1117,6 +1117,11 @@
         "name": "MEOS_ERR_INVALID_REGULAR_EXPRESSION",
         "value": 29,
         "meaning": "Regular expression error"
+      },
+      {
+        "name": "MEOS_ERR_DATETIME_OUT_OF_RANGE",
+        "value": 30,
+        "meaning": "Date or time value out of range"
       }
     ],
     "derivation": {
