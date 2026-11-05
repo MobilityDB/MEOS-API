@@ -63,9 +63,10 @@ runs:
         python-version: "3.11"
 
     # libclang (Python wheel) needs the system C headers MEOS depends on so
-    # types like size_t / json_object * / GSERIALIZED * resolve to their real
-    # names instead of degrading to int / int *. Same install set as the
-    # pytest / OpenAPI-validate regenerate paths so every path agrees.
+    # types like size_t / json_object * / GSERIALIZED * / H3Index resolve to
+    # their real names instead of degrading to int / int * / uint64_t. Same
+    # install set as the OpenAPI-validate regenerate path, and the build path
+    # below installs the same headers, so every path derives the same catalog.
     # Every path installs them, so their .deb files are kept as the build path keeps its
     # own (see "Key the provision caches"): a run that restores them installs without
     # downloading, and a stalled mirror costs it only the index update.
@@ -74,7 +75,7 @@ runs:
       shell: bash
       env:
         PACKAGES: >-
-          clang libclang-dev libjson-c-dev libproj-dev
+          clang libclang-dev libjson-c-dev libproj-dev libh3-dev
       run: |
         # The PostgreSQL server headers are those of the PostgreSQL the image ships.
         packages="$PACKAGES $(bash "$GITHUB_ACTION_PATH/server-dev-package.sh")"
