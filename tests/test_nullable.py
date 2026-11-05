@@ -7,9 +7,11 @@ prose states nothing.
 
 Plain unittest, no pytest dependency; writes a tiny synthetic source tree.
 """
+import glob
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from parser.nullable import (attach_function_docs, extract_briefs, extract_nullable,
                              extract_param_docs, merge_nullable)
@@ -105,6 +107,24 @@ class NullableTests(unittest.TestCase):
         # A line opening with @nullable qualifies no entry
         self.assertNotIn("create", nul["jsonb_set_lax"])
         self.assertNotIn("jb", nul["jsonb_set_lax"])
+
+    def test_the_meos_twin_documents_a_function_defined_twice(self):
+        """A function defined in the file the extension compiles and in its MEOS
+        twin keeps the twin's brief, whichever file the filesystem lists first, as
+        #test_briefs_read_the_brief_of_each_block reads the brief of one block."""
+        src = Path(self.tmp.name) / "src"
+        block = "/**\n * @brief {}\n */\nbool\nroute_exists(int64 rid)\n{{\n}}\n"
+        (src / "ways.c").write_text(
+            block.format("Return true if the edge table contains a route"))
+        (src / "ways_meos.c").write_text(
+            block.format("Return true if the ways cache contains a route"))
+        real_glob = glob.glob
+        for listed in (sorted, lambda files: sorted(files, reverse=True)):
+            with self.subTest(listed=listed), mock.patch(
+                    "parser.outparam.glob.glob",
+                    lambda pattern, **kw: listed(real_glob(pattern, **kw))):
+                self.assertEqual(extract_briefs(self.tmp.name)["route_exists"],
+                                 "Return true if the ways cache contains a route")
 
     def test_param_docs_leave_out_the_tag(self):
         """The description #test_extracts_only_tagged_params reads, without the
