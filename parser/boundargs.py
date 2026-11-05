@@ -753,6 +753,16 @@ def _wrapper_bound(body: str, func: dict, drift: list,
     return bound
 
 
+def _keep_guarded_alone(bound: dict[str, str], guarded: dict) -> None:
+    """Drop from ``bound`` the parameters ``guarded`` holds. A wrapper whose branch for the
+    calls that give no value passes a literal where another branch passes the local
+    (#_guarded_default) binds that literal to those calls alone, and ``guarded`` states it
+    for them: `Tjsonb_path_exists_common` passes `vars` to `tjsonb_path_exists` and NULL to
+    `tjsonb_path_exists_intl`, and the signature stating `vars` takes it from its caller."""
+    for param in guarded:
+        bound.pop(param, None)
+
+
 def _group_bound(body: str, group: list, helpers: dict, drift: list,
                  documented: dict[str, set], generics: dict | None = None):
     """``(bound, guarded)``: the literals wrapper ``body`` binds, keyed by parameter name,
@@ -775,6 +785,7 @@ def _group_bound(body: str, group: list, helpers: dict, drift: list,
         for k, v in _wrapper_bound(body, func, drift, documented,
                                    guarded=guarded).items():
             bound.setdefault(k, v)
+    _keep_guarded_alone(bound, guarded)
     if bound or guarded:
         return bound, guarded
     # The wrapper names no MEOS call of its own: it delegates, and the literal it binds
@@ -785,6 +796,7 @@ def _group_bound(body: str, group: list, helpers: dict, drift: list,
             for k, v in _wrapper_bound(hbody, func, drift, documented, subst,
                                        guarded, gsubst).items():
                 bound.setdefault(k, v)
+        _keep_guarded_alone(bound, guarded)
         if not (bound or guarded) and generics:
             member_params = {p.get("name") for f in group for p in f.get("params", [])}
             names = {f["name"] for f in group}
