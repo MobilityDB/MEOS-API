@@ -73,14 +73,21 @@ def _clang_extra_args() -> list[str]:
     """
     args: list[str] = []
 
-    for d in _compiler_system_includes():
+    system = _compiler_system_includes()
+    for d in system:
         args.append(f"-isystem{d}")
     if args:
         args += ["-include", "stddef.h"]
 
-    for d in ("/usr/include/h3", "/usr/include/gdal", "/usr/include/proj"):
-        if os.path.isdir(d):
-            args.append(f"-isystem{d}")
+    # The external families install their headers in a directory of their own below a system
+    # directory, /usr/include for a package and /usr/local/include for a source build, which a
+    # MEOS header names bare (`#include <h3api.h>`): unseen, H3Index parses as the integer it
+    # stands for and loses its typedef
+    for base in dict.fromkeys(system + ["/usr/include"]):
+        for sub in ("h3", "gdal", "proj"):
+            d = os.path.join(base, sub)
+            if os.path.isdir(d):
+                args.append(f"-isystem{d}")
 
     return args
 
