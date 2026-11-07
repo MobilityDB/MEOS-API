@@ -180,6 +180,80 @@ def _classify(fn_name: str, candidates: list):
     return None, None
 
 
+def _operator_receiver(param: dict, cls: str, ctypes: dict) -> bool:
+    """Whether a parameter is a value of the class: a single pointer to the C
+    type the class's instances are (see #_class_ctypes)."""
+    return bool(ctypes.get(cls)) and _pointee(param.get("cType", "")) == ctypes[cls]
+
+
+def _classify_operator(fn: dict, candidates: list, ctypes: dict):
+    """The class and entry of an operator the prefix rule does not reach.
+
+    MEOS names an operator ``<op>_<left>_<right>`` (``ever_eq_tfloat_float``,
+    ``left_stbox_stbox``, ``union_span_span``) or ``<op>_<operand>``
+    (``tnot_tbool``), each type token the prefix of a class or a base type, so no
+    class prefix starts the name and #_classify leaves it out. The receiver is the
+    type of the FIRST parameter and the member is the leading verb, the name cut
+    at its first type token (``ever_eq_tfloat_float`` -> ``everEq``), as #_ooname
+    camelCases a member: the receiver-typed rule, so a class's operator is the
+    value its first parameter is. The type tokens are read with the same
+    candidates #_classify reads, and the parameter must really be a value of that
+    class, so a conversion such as ``timestamptz_to_stbox``, whose first
+    parameter is a timestamp, stays unclassified.
+
+    Where the first operand is no class value (``sub_float_tfloat``, a float
+    minus a temporal float) the call is the operation REFLECTED onto the right
+    operand, and its member is ``r<op>`` (``rsub``), the spelling the MEOS.js and
+    PyMEOS hand layers give it (``radd``, ``rsub``), so it never shares a name with
+    ``sub_tfloat_float``, which computes the other difference.
+
+    The entry states which operand the receiver is and the other operand's type
+    token, so a binding without overloading can tell the members of one name
+    apart by what they take.
+    """
+    name = fn["name"]
+    params = fn.get("params") or []
+    parts = name.split("_")
+    for i in range(1, len(parts)):
+        op, tail = "_".join(parts[:i]), "_".join(parts[i:])
+        pref, tgt = _classify(tail, candidates)
+        if tgt is None:
+            continue
+        other = tail[len(pref) + 1:]
+        if other and len(params) < 2:
+            continue
+        if not other and len(params) != 1:
+            continue
+        if params and _operator_receiver(params[0], tgt["class"], ctypes):
+            return tgt["class"], _operator_entry(fn, op, "left", other)
+    # Reflected: the class token is the LAST type token and its value the
+    # second parameter, the first being no class value.
+    if len(params) == 2 and not any(
+            _operator_receiver(params[0], c, ctypes) for c in ctypes):
+        for j in range(len(parts) - 1, 1, -1):
+            tail = "_".join(parts[j:])
+            pref, tgt = _classify(tail, candidates)
+            if tgt is None or pref != tail:
+                continue
+            if not _operator_receiver(params[1], tgt["class"], ctypes):
+                continue
+            op, other = "_".join(parts[:j - 1]), parts[j - 1]
+            return tgt["class"], _operator_entry(fn, "r" + op, "right", other)
+    return None
+
+
+def _operator_entry(fn: dict, op: str, receiver: str, other: str) -> dict:
+    """One operator of a class: the method the receiver-typed rule names."""
+    entry = {"function": fn["name"], "role": "operator", "scope": "operator",
+             "backing": fn["name"], "ooName": _camel(op),
+             "receiver": receiver}
+    if other:
+        entry["other"] = other
+    if fn.get("api") != "public":
+        entry["ooExclude"] = True
+    return entry
+
+
 def _role(fn_name: str) -> str:
     n = fn_name
     if n.endswith("_make") or "_from_base" in n or "_from_mfjson" in n \
@@ -650,6 +724,21 @@ def attach_object_model(idl: dict, path: Path,
     for cls, ctype in ctypes.items():
         if ctype:
             classes[cls]["cType"] = ctype
+
+    # The operators no prefix reaches, now that each class states its C type.
+    by_name = {f["name"]: f for f in functions}
+    still = []
+    for name in unclassified:
+        op = _classify_operator(by_name[name], candidates, ctypes)
+        if op is None:
+            still.append(name)
+            continue
+        cls, entry = op
+        classes[cls].setdefault("operators", []).append(entry)
+        function_to_class[name] = {
+            "class": cls, "scope": "operator", "axis": "operator",
+            "via": "operator", "backing": name}
+    unclassified = still
 
     # Error contract
     errors = dict(model["errors"])

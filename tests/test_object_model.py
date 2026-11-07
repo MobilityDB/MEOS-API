@@ -187,6 +187,80 @@ class AttachTests(unittest.TestCase):
         self.assertIsNone(ftc["add_int_int"]["class"])
         self.assertIn("no-prefix-match", ftc["add_int_int"]["reason"])
 
+    @staticmethod
+    def _fn(name, *ctypes):
+        """A public function with typed parameters, built as
+        #test_a_raster_is_a_class_its_functions_are_methods_of builds its."""
+        return {"name": name, "api": "public",
+                "params": [{"name": f"p{i}", "cType": c}
+                           for i, c in enumerate(ctypes)]}
+
+    def _operators(self, *fns):
+        """The model over `fns`, beside a receiver-role method per class so each
+        class states its cType, as #test_classification attaches its cases;
+        answers the model and each operator's (class, entry)."""
+        idl = attach_object_model({"functions": [
+            self._fn("tfloat_min_value", "const Temporal *"),
+            self._fn("stbox_xmin", "const STBox *"),
+            self._fn("span_lower", "const Span *"),
+            *fns]}, MODEL, None)
+        om = idl["objectModel"]
+        return om, {o["function"]: (cls, o) for cls, spec in om["classes"].items()
+                    for o in spec.get("operators", [])}
+
+    def test_an_operator_is_a_member_of_its_first_operand(self):
+        # The receiver-typed rule of #_classify_operator, beside the prefix
+        # rule #test_classification covers.
+        om, ops = self._operators(
+            self._fn("ever_eq_tfloat_float", "const Temporal *", "double"),
+            self._fn("nad_tfloat_tbox", "const Temporal *", "const TBox *"),
+            self._fn("left_stbox_stbox", "const STBox *", "const STBox *"),
+            self._fn("union_span_span", "const Span *", "const Span *"))
+        got = {f: (c, o["ooName"], o["receiver"], o.get("other"))
+               for f, (c, o) in ops.items()}
+        self.assertEqual(got, {
+            "ever_eq_tfloat_float": ("TFloat", "everEq", "left", "float"),
+            "nad_tfloat_tbox": ("TFloat", "nad", "left", "tbox"),
+            "left_stbox_stbox": ("STBox", "left", "left", "stbox"),
+            "union_span_span": ("Span", "union", "left", "span")})
+        ftc = om["functionToClass"]["left_stbox_stbox"]
+        self.assertEqual((ftc["class"], ftc["via"]), ("STBox", "operator"))
+        # Operators never enter `methods`, where one name cannot repeat.
+        for spec in om["classes"].values():
+            self.assertFalse(any(m["role"] == "operator" for m in spec["methods"]))
+
+    def test_a_reflected_operator_is_named_apart_from_its_mirror(self):
+        # Same harness as #test_an_operator_is_a_member_of_its_first_operand.
+        _om, ops = self._operators(
+            self._fn("sub_tfloat_float", "const Temporal *", "double"),
+            self._fn("sub_float_tfloat", "double", "const Temporal *"))
+        self.assertEqual(ops["sub_tfloat_float"][1]["ooName"], "sub")
+        self.assertEqual(
+            (ops["sub_float_tfloat"][0], ops["sub_float_tfloat"][1]["ooName"],
+             ops["sub_float_tfloat"][1]["receiver"]), ("TFloat", "rsub", "right"))
+
+    def test_a_unary_operator_takes_its_one_operand(self):
+        # Same harness as #test_an_operator_is_a_member_of_its_first_operand.
+        _om, ops = self._operators(self._fn("tnot_tfloat", "const Temporal *"))
+        cls, op = ops["tnot_tfloat"]
+        self.assertEqual((cls, op["ooName"], op["receiver"]), ("TFloat", "tnot", "left"))
+        self.assertNotIn("other", op)
+
+    def test_a_conversion_from_a_base_value_is_no_operator(self):
+        # The class token names what is BUILT, and the first parameter is a
+        # timestamp, so the function has no receiver and stays unclassified,
+        # the honest answer #test_classification asserts for add_int_int.
+        om, ops = self._operators(self._fn("timestamptz_to_stbox", "TimestampTz"))
+        self.assertNotIn("timestamptz_to_stbox", ops)
+        self.assertIsNone(om["functionToClass"]["timestamptz_to_stbox"]["class"])
+
+    def test_an_internal_operator_is_excluded(self):
+        # The operator twin of #test_internal_api_methods_are_excluded.
+        fn = self._fn("left_stbox_stbox", "const STBox *", "const STBox *")
+        fn["api"] = "internal"
+        _om, ops = self._operators(fn)
+        self.assertTrue(ops["left_stbox_stbox"][1]["ooExclude"])
+
     def test_internal_api_methods_are_excluded(self):
         # A function the catalog marks internal is classified to its class (so
         # the reverse index stays complete) but flagged ooExclude, so a binding
