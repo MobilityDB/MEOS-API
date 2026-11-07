@@ -28,6 +28,7 @@ from pathlib import Path
 # A row is `[T_X] = "x"`, or `[T_X] = { "x", "X" }` where the table also holds the CamelCase
 # name of the type; the name is the first string of the row in both forms.
 _NAME_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*\{?\s*"([^"]+)"')
+_CAMEL_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*\{\s*"[^"]+"\s*,\s*"([^"]+)"')
 _ROW_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*\{(.*?)\}', re.S)
 _FIELD_RE = re.compile(r'\.\s*(\w+)\s*=\s*(T_\w+)')
 # A release line older than the type-indexed catalog (stable-1.3) states each relation as
@@ -56,6 +57,15 @@ def type_names(text: str) -> dict:
     """The ``MeosType`` enum-name to public-name map from ``MEOS_TYPE_NAMES``."""
     m = re.search(r'MEOS_TYPE_NAMES\s*\[\]\s*=\s*\{(.*?)\};', text, re.S)
     return dict(_NAME_RE.findall(m.group(1))) if m else {}
+
+
+def type_camel_names(text: str) -> dict:
+    """The ``MeosType`` enum-name to CamelCase-name map from ``MEOS_TYPE_NAMES``, the name a
+    binding gives the class of the type, as #type_names reads the name: the second string of
+    a row. A type no binding names (`NULL`), and a catalog whose rows hold the name alone,
+    give none."""
+    m = re.search(r'MEOS_TYPE_NAMES\s*\[\]\s*=\s*\{(.*?)\};', text, re.S)
+    return dict(_CAMEL_RE.findall(m.group(1))) if m else {}
 
 
 def catalog_rows(text: str, array: str) -> list:

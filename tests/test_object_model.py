@@ -19,8 +19,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.typerelations import bbox_types, temptype_basetypes
+from parser.typerelations import bbox_types, temptype_basetypes, type_camel_names
 from parser.object_model import (MembershipUnavailable, byreference_basetypes,
+                                  check_class_names,
                                   derive_membership, membership_source,
                                   predicate_temptypes,
                                   release_nodes)
@@ -131,8 +132,8 @@ class ModelFileTests(unittest.TestCase):
             self.assertEqual(self.lat[pt]["parent"], "TPoint")
         self.assertEqual(self.lat["TPoint"]["parent"], "TGeo")
         self.assertEqual(self.lat["TGeo"]["parent"], "TSpatial")
-        # TSpatial -> {TGeo, TCbuffer, TNpoint, TPose, TRGeometry}
-        for leaf in ("TCbuffer", "TNpoint", "TPose", "TRGeometry"):
+        # TSpatial -> {TGeo, TCBuffer, TNPoint, TPose, TRGeometry}
+        for leaf in ("TCBuffer", "TNPoint", "TPose", "TRGeometry"):
             self.assertEqual(self.lat[leaf]["parent"], "TSpatial")
         # the broad TGeo == tgeo_type_all (manual), not the narrow predicate
         self.assertEqual(self.lat["TGeo"]["predicate"], "tgeo_type_all")
@@ -166,7 +167,7 @@ class AttachTests(unittest.TestCase):
         "trgeoinst_make": ("TRGeometryInst", "constructor"),
         "trgeo_affine": ("TRGeometry", "exact"),
         "tsequenceset_make": ("TSequenceSet", "subtype"),
-        "tcbuffer_make": ("TCbuffer", "exact"),
+        "tcbuffer_make": ("TCBuffer", "exact"),
         "span_lower": ("Span", "companion"),
         "intset_make": ("IntSet", "companion"),
         "stbox_expand": ("STBox", "companion"),
@@ -429,7 +430,7 @@ class AttachTests(unittest.TestCase):
             self._sql("acontains_geo_tcbuffer", ("const GSERIALIZED *", "const Temporal *"),
                       ("geometry", "tcbuffer")))
         self.assertEqual(ops["acontains_geo_tgeo"][1]["otherClass"], "TGeo")
-        self.assertEqual(ops["acontains_geo_tcbuffer"][1]["otherClass"], "TCbuffer")
+        self.assertEqual(ops["acontains_geo_tcbuffer"][1]["otherClass"], "TCBuffer")
 
     def test_an_operator_without_sql_names_its_other_operand_by_its_token(self):
         # Same harness as #test_the_other_operand_is_instantiated_too, for an
@@ -460,7 +461,7 @@ class AttachTests(unittest.TestCase):
         cls, op = ops["contains_tnumber_numspan"]
         self.assertEqual((cls, op["otherClass"]), ("TNumber", "Span"))
         self.assertEqual(op["instantiations"], [
-            {"receiverClass": "TBigint", "otherClass": "BigIntSpan"},
+            {"receiverClass": "TBigInt", "otherClass": "BigIntSpan"},
             {"receiverClass": "TFloat", "otherClass": "FloatSpan"},
             {"receiverClass": "TInt", "otherClass": "IntSpan"}])
         self.assertNotIn("instantiations", ops["contains_set_int"][1])
@@ -543,11 +544,11 @@ class AttachTests(unittest.TestCase):
                          ["GeoSet", "SpatialSet", "Set", "Collection"])
         self.assertEqual(nodes["GeogSet"]["ancestors"],
                          ["GeoSet", "SpatialSet", "Set", "Collection"])
-        for leaf in ("NpointSet", "PoseSet", "CbufferSet"):
+        for leaf in ("NPointSet", "PoseSet", "CBufferSet"):
             self.assertEqual(nodes[leaf]["parent"], "SpatialSet")
         self.assertEqual(sorted(nodes["SpatialSet"]["children"]),
-                         ["CbufferSet", "GeoSet", "H3IndexSet", "NpointSet",
-                          "PcpatchSet", "PcpointSet", "PoseChainSet", "PoseSet",
+                         ["CBufferSet", "GeoSet", "H3IndexSet", "NPointSet",
+                          "PCPatchSet", "PCPointSet", "PoseChainSet", "PoseSet",
                           "QuadbinSet", "S2CellSet"])
 
     def test_every_pointer_held_type_has_its_class(self):
@@ -570,19 +571,19 @@ class AttachTests(unittest.TestCase):
         owner = {m["function"]: cls
                  for cls, s in om["classes"].items() for m in s["methods"]}
         for fn, cls in (("th3index_in", "TH3Index"), ("tquadbin_in", "TQuadbin"),
-                        ("ts2cell_in", "TS2Cell"), ("tpcpoint_in", "TPcpoint"),
-                        ("tpcpatch_in", "TPcpatch"), ("tposechain_in", "TPoseChain"),
+                        ("ts2cell_in", "TS2Cell"), ("tpcpoint_in", "TPCPoint"),
+                        ("tpcpatch_in", "TPCPatch"), ("tposechain_in", "TPoseChain"),
                         ("h3indexset_in", "H3IndexSet"), ("quadbinset_in", "QuadbinSet"),
-                        ("s2cellset_in", "S2CellSet"), ("pcpointset_in", "PcpointSet"),
-                        ("pcpatchset_in", "PcpatchSet"),
+                        ("s2cellset_in", "S2CellSet"), ("pcpointset_in", "PCPointSet"),
+                        ("pcpatchset_in", "PCPatchSet"),
                         ("posechainset_in", "PoseChainSet"), ("jsonbset_in", "JsonbSet")):
             self.assertEqual(owner[fn], cls)
         nodes = om["companions"]["Collection"]["nodes"]
-        for leaf in ("H3IndexSet", "QuadbinSet", "S2CellSet", "PcpointSet",
-                     "PcpatchSet", "PoseChainSet"):
+        for leaf in ("H3IndexSet", "QuadbinSet", "S2CellSet", "PCPointSet",
+                     "PCPatchSet", "PoseChainSet"):
             self.assertEqual(nodes[leaf]["parent"], "SpatialSet")
         self.assertEqual(nodes["JsonbSet"]["parent"], "Set")
-        for leaf in ("TPcpoint", "TPcpatch", "TPoseChain"):
+        for leaf in ("TPCPoint", "TPCPatch", "TPoseChain"):
             self.assertEqual(om["lattice"][leaf]["parent"], "TSpatial")
         # The cell indexes share TCellIndex, the class of the tcellindex_*
         # functions every cell family answers.
@@ -640,7 +641,7 @@ class AttachTests(unittest.TestCase):
                          {"serialize"})
 
     def test_a_raster_is_a_class_its_functions_are_methods_of(self):
-        # MEOS registers no MeosType for a raster, its tile Raquet being the type the
+        # MEOS registers no MeosType for a raster, its tile RaQuet being the type the
         # temporal raster values carry, while every raster function takes one first.
         om = attach_object_model({"functions": [
             {"name": n, "api": "public",
@@ -674,7 +675,7 @@ class AttachTests(unittest.TestCase):
             {"name": "geom_to_geog",
              "params": [{"name": "geo", "cType": "const GSERIALIZED *"}]},
         ]}, MODEL, None)["objectModel"]
-        self.assertEqual(om["classes"]["Cbuffer"]["cType"], "Cbuffer")
+        self.assertEqual(om["classes"]["CBuffer"]["cType"], "Cbuffer")
         self.assertEqual(om["classes"]["Geometry"]["cType"], "GSERIALIZED")
 
     def test_a_constructor_only_class_takes_its_subtypes_ctype(self):
@@ -965,6 +966,47 @@ class MembershipDerivationTest(unittest.TestCase):
         self.assertIn("T_TPOSECHAIN", om["lattice"]["Temporal"]["temptypes"])
 
 
+class ClassNameTest(unittest.TestCase):
+    """The class of a type is named as the catalog's MEOS_TYPE_NAMES names it."""
+
+    _CAMEL = ('static const struct\n{\n  const char *name;\n  const char *camel;\n'
+              '} MEOS_TYPE_NAMES[] =\n{\n'
+              '  [T_TBIGINT] = { "tbigint", "TBigInt" },\n'
+              '  [T_NPOINT] = { "npoint", "NPoint" },\n'
+              '  [T_INT4RANGE] = { "int4range", NULL },\n};\n')
+
+    @staticmethod
+    def _model(leaf, value):
+        return {"lattice": {leaf: {"kind": "leaf", "temptypes": ["T_TBIGINT"]},
+                            "TNumber": {"kind": "abstract", "temptypes": ["T_TBIGINT"]}},
+                "companions": {"Value": {"nodes": {value: {"kind": "leaf",
+                                                           "temptype": "T_NPOINT"}}}}}
+
+    def test_a_class_named_otherwise_raises(self):
+        # #release_nodes reads the names of the same table: a leaf whose name is not
+        # the CamelCase name of its type is a disagreement, for a lattice leaf and a
+        # companion leaf alike
+        with self.assertRaises(ValueError) as e:
+            check_class_names(self._model("TBigint", "Npoint"), self._CAMEL)
+        self.assertIn("TBigint models T_TBIGINT, which MEOS_TYPE_NAMES names TBigInt",
+                      str(e.exception))
+        self.assertIn("Npoint models T_NPOINT", str(e.exception))
+
+    def test_the_names_of_the_catalog_pass(self):
+        # An abstract class admitting the type is not its class, and a type no binding
+        # names (NULL) names no class
+        check_class_names(self._model("TBigInt", "NPoint"), self._CAMEL)
+        self.assertEqual(type_camel_names(self._CAMEL),
+                         {"T_TBIGINT": "TBigInt", "T_NPOINT": "NPoint"})
+
+    def test_a_catalog_of_names_alone_compares_nothing(self):
+        # A release line whose rows hold the name alone (stable-1.3) names no class
+        names = ('static const char *MEOS_TYPE_NAMES[] =\n{\n'
+                 '  [T_TBIGINT] = "tbigint",\n};\n')
+        self.assertEqual(type_camel_names(names), {})
+        check_class_names(self._model("TBigint", "Npoint"), names)
+
+
 @unittest.skipUnless(_CAT_C and _CAT_C.exists(),
                      "MobilityDB sources not available (run setup.py)")
 class DriftGate(unittest.TestCase):
@@ -985,6 +1027,11 @@ class DriftGate(unittest.TestCase):
         cls.attached = attach_object_model(
             {"functions": []}, MODEL, _SRC)["objectModel"]
         cls.lat = _nodes(cls.attached["lattice"])
+
+    def test_the_model_file_names_its_classes_as_the_catalog(self):
+        # #test_a_class_named_otherwise_raises over the model file and the catalog of the
+        # source root, when that catalog holds the CamelCase names
+        check_class_names(self.d, self.cat)
 
     def test_the_model_file_states_no_membership_of_its_own(self):
         # The property the derivation exists for: a copy is what drifts, so
