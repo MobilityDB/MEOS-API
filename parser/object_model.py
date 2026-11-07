@@ -293,12 +293,19 @@ def _sql_classes_at(fn: dict, at: int, sql_classes: dict) -> set | None:
     """The classes the SQL signatures of a function name for its parameter `at`,
     or None where a signature names none or a type no class stands for: the
     lookup #_sql_receiver_class makes for the receiver."""
+    found = _sql_classes_by_signature(fn, at, sql_classes)
+    return set(found) if found is not None else None
+
+
+def _sql_classes_by_signature(fn: dict, at: int, sql_classes: dict) -> list | None:
+    """The class each SQL signature of a function names for its parameter `at`,
+    in the order of the signatures, or None as #_sql_classes_at answers it."""
     params = fn.get("params") or []
     sigs = fn.get("sqlSignatures") or []
     if len(params) <= at or not sigs:
         return None
     pname = params[at]["name"]
-    found = set()
+    found = []
     for sig in sigs:
         args = sig.get("args") or []
         order = sig.get("sqlArgParams") or [p["name"] for p in params][:len(args)]
@@ -308,8 +315,31 @@ def _sql_classes_at(fn: dict, at: int, sql_classes: dict) -> set | None:
         cls = sql_classes.get(sqltype)
         if cls is None:
             return None
-        found.add(cls)
+        found.append(cls)
     return found
+
+
+def _sql_instantiations(fn: dict, entry: dict, sql_classes: dict) -> list | None:
+    """The pairs of classes the SQL signatures of an operator instantiate its two
+    operands to, where they name more than one pair.
+
+    #_sql_receiver_class and #_sql_other_class each answer the nearest class
+    common to what the signatures name for ONE operand, so the pairing between
+    the two is lost: ``contains_tnumber_numspan`` is declared for ``(tint,
+    intspan)``, ``(tbigint, bigintspan)`` and ``(tfloat, floatspan)``, and its entry
+    states TNumber and Span, which also admits a TFloat with an IntSpan. Each
+    pair is a member a binding with overloading can emit on its receiver class,
+    calling the same C function (``TFloat.contains(FloatSpan)``), and an
+    overload a binding without overloading can tell apart by both arguments."""
+    at = 1 if entry.get("receiver") == "right" else 0
+    receivers = _sql_classes_by_signature(fn, at, sql_classes)
+    others = _sql_classes_by_signature(fn, 1 - at, sql_classes)
+    if receivers is None or others is None:
+        return None
+    pairs = sorted(set(zip(receivers, others)))
+    if len(pairs) < 2:
+        return None
+    return [{"receiverClass": r, "otherClass": o} for r, o in pairs]
 
 
 def _sql_other_class(fn: dict, entry: dict, sql_classes: dict, parents: dict) -> str | None:
@@ -325,6 +355,28 @@ def _sql_other_class(fn: dict, entry: dict, sql_classes: dict, parents: dict) ->
     at = 0 if entry.get("receiver") == "right" else 1
     found = _sql_classes_at(fn, at, sql_classes)
     return _nearest_common(found, parents) if found else None
+
+
+def _token_other_class(fn: dict, entry: dict, candidates: list, ctypes: dict) -> str | None:
+    """The class the other operand's type token names, for an operator that has
+    no SQL signature to instantiate it from (#_sql_other_class).
+
+    ``teq_th3index_th3index`` is declared in ``meos_h3.h`` and nowhere in SQL, so
+    its signatures name nothing and its other operand, a ``const Temporal *``,
+    reads as any Temporal, although its name says a TH3Index. The token is read
+    as #_classify_operator reads the receiver's: it must be a class prefix
+    exactly, and the operand must really be a value of that class."""
+    token = entry.get("other")
+    if not token or fn.get("sqlSignatures"):
+        return None
+    pref, tgt = _classify(token, candidates)
+    if tgt is None or pref != token:
+        return None
+    params = fn.get("params") or []
+    at = 0 if entry.get("receiver") == "right" else 1
+    if len(params) <= at or not _operator_receiver(params[at], tgt["class"], ctypes):
+        return None
+    return tgt["class"]
 
 
 def _ancestors_of(cls: str, parents: dict) -> list:
@@ -877,9 +929,13 @@ def attach_object_model(idl: dict, path: Path,
         if refined and refined != cls and cls in _ancestors_of(refined, parents):
             entry["refinedFrom"] = cls
             cls = refined
-        other = _sql_other_class(by_name[name], entry, sql_classes, parents)
+        other = (_sql_other_class(by_name[name], entry, sql_classes, parents)
+                 or _token_other_class(by_name[name], entry, candidates, ctypes))
         if other:
             entry["otherClass"] = other
+        pairs = _sql_instantiations(by_name[name], entry, sql_classes)
+        if pairs:
+            entry["instantiations"] = pairs
         classes.setdefault(cls, {"methods": []}).setdefault("operators", []).append(entry)
         function_to_class[name] = {
             "class": cls, "scope": "operator", "axis": "operator",
