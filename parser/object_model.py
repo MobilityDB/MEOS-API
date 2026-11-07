@@ -953,9 +953,36 @@ def attach_object_model(idl: dict, path: Path,
         if ctype:
             classes[cls]["cType"] = ctype
 
-    # The operators no prefix reaches, now that each class states its C type.
     by_name = {f["name"]: f for f in functions}
     sql_classes = _sql_type_classes(model)
+
+    # The constructors MEOS names from what they are built of (`float_to_tbox`),
+    # before the operators: a name `<base>_to_<type>` answering a value of the
+    # class `<type>` names is that class's constructor, whatever token it starts
+    # with, so `numspan_tstzspan_to_tbox` is TBox.fromNumspanTstzspan and never
+    # an operator of TsTzSpan, whose prefix only its second operand carries.
+    still = []
+    for name in unclassified:
+        made = _classify_from_base(by_name[name], candidates, ctypes)
+        if made is None:
+            still.append(name)
+            continue
+        cls, entry = made
+        refined = _sql_return_class(by_name[name], sql_classes, parents)
+        if refined and refined != cls and cls in _ancestors_of(refined, parents):
+            entry["refinedFrom"] = cls
+            cls = refined
+        spec = classes.setdefault(cls, {"methods": []})
+        if any(m["ooName"] == entry["ooName"] for m in spec["methods"]):
+            still.append(name)
+            continue
+        spec["methods"].append(entry)
+        function_to_class[name] = {
+            "class": cls, "scope": "fromBase", "axis": "fromBase",
+            "via": "fromBase", "backing": name}
+    unclassified = still
+
+    # The operators no prefix reaches, now that each class states its C type.
     still = []
     for name in unclassified:
         op = _classify_operator(by_name[name], candidates, ctypes)
@@ -978,28 +1005,6 @@ def attach_object_model(idl: dict, path: Path,
         function_to_class[name] = {
             "class": cls, "scope": "operator", "axis": "operator",
             "via": "operator", "backing": name}
-    unclassified = still
-
-    # The constructors MEOS names from what they are built of (`float_to_tbox`).
-    still = []
-    for name in unclassified:
-        made = _classify_from_base(by_name[name], candidates, ctypes)
-        if made is None:
-            still.append(name)
-            continue
-        cls, entry = made
-        refined = _sql_return_class(by_name[name], sql_classes, parents)
-        if refined and refined != cls and cls in _ancestors_of(refined, parents):
-            entry["refinedFrom"] = cls
-            cls = refined
-        spec = classes.setdefault(cls, {"methods": []})
-        if any(m["ooName"] == entry["ooName"] for m in spec["methods"]):
-            still.append(name)
-            continue
-        spec["methods"].append(entry)
-        function_to_class[name] = {
-            "class": cls, "scope": "fromBase", "axis": "fromBase",
-            "via": "fromBase", "backing": name}
     unclassified = still
 
     # What a member called on a value answers, where its C return type names

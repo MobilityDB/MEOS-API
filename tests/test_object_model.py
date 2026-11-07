@@ -343,6 +343,18 @@ class AttachTests(unittest.TestCase):
         # The last token of h3_cell_to_children is no class.
         self.assertIsNone(om["functionToClass"]["h3_cell_to_children"]["class"])
 
+    def test_a_constructor_whose_first_token_is_no_class_is_no_operator(self):
+        # Same harness as #test_a_constructor_from_a_base_value_is_named_from_it.
+        # numspan_tstzspan_to_tbox takes two Span *, and the operator pass reads
+        # `numspan` as a verb and `tstzspan` as the receiver's class; the
+        # constructor pass runs first and makes it TBox.fromNumspanTstzspan.
+        fn = self._fn("numspan_tstzspan_to_tbox", "const Span *", "const Span *")
+        fn["returnType"] = {"c": "TBox *"}
+        om, got = self._made(self._fn("tstzspan_lower", "const Span *"), fn)
+        self.assertEqual((got["numspan_tstzspan_to_tbox"][0], got["numspan_tstzspan_to_tbox"][1]["ooName"]),
+                         ("TBox", "fromNumspanTstzspan"))
+        self.assertEqual(om["functionToClass"]["numspan_tstzspan_to_tbox"]["via"], "fromBase")
+
     def test_a_constructor_of_a_template_builds_its_instantiation(self):
         # Same harness as #test_a_constructor_from_a_base_value_is_named_from_it;
         # the SQL return type says which set int_to_set builds (#_sql_return_class).
