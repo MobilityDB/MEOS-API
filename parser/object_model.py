@@ -242,6 +242,100 @@ def _classify_operator(fn: dict, candidates: list, ctypes: dict):
     return None
 
 
+def _sql_type_classes(model: dict) -> dict:
+    """``{SQL type: class}`` for every class that stands for ONE MEOS type: its
+    SQL type is that type's name, the constant without its ``T_`` lower-cased, as
+    ``meos_catalog.c`` writes it (``T_INTSET`` is ``intset``)."""
+    out = {}
+    lat = {k: v for k, v in model["lattice"].items() if not k.startswith("_")}
+    for name, spec in lat.items():
+        tts = spec.get("temptypes") or []
+        if spec.get("kind") == "leaf" and len(tts) == 1:
+            out[tts[0][2:].lower()] = name
+    for fam in _companion_families(model):
+        for name, spec in model["companions"][fam]["nodes"].items():
+            if not name.startswith("_") and spec.get("temptype"):
+                out[spec["temptype"][2:].lower()] = name
+    return out
+
+
+def _sql_receiver_class(fn: dict, entry: dict, sql_classes: dict,
+                        parents: dict) -> str | None:
+    """The nearest class common to every type the SQL signatures of an operator
+    call it on, or None.
+
+    The receiver-typed rule reads the receiver from the C parameter, and a C
+    collection is generic: ``contains_set_int`` and ``contains_set_float`` both take
+    a ``Set *`` and a number, so both land on Set and no argument tells them apart.
+    The SQL signatures say which set each is for (``intset``, ``floatset``). The
+    receiver is the parameter #_classify_operator named; ``sqlArgParams`` puts a
+    signature's arguments in its own order (``distance_set_float`` is also
+    ``distance(float, floatset)``). Every MEOS type has the same spelling in
+    PostgreSQL, so the SQL type names the class once its type modifier is dropped
+    (``geometry(Point)`` is ``geometry``).
+
+    This is the template instantiated: Set, Span, SpanSet and Temporal stand for
+    the types they are templates of, and the signatures name which of those an
+    operator is for. Signatures naming several instantiations answer the nearest
+    class common to them: ``contains_set_geo`` over ``geomset`` and ``geogset`` is
+    GeoSet, and ``contains_span_span`` over every span type stays on Span."""
+    found = _sql_classes_at(fn, 1 if entry.get("receiver") == "right" else 0, sql_classes)
+    return _nearest_common(found, parents) if found else None
+
+
+def _nearest_common(classes: set, parents: dict) -> str | None:
+    """The nearest class every one of `classes` is or descends from."""
+    chains = [[c, *_ancestors_of(c, parents)] for c in sorted(classes)]
+    return next((c for c in chains[0] if all(c in ch for ch in chains[1:])), None)
+
+
+def _sql_classes_at(fn: dict, at: int, sql_classes: dict) -> set | None:
+    """The classes the SQL signatures of a function name for its parameter `at`,
+    or None where a signature names none or a type no class stands for: the
+    lookup #_sql_receiver_class makes for the receiver."""
+    params = fn.get("params") or []
+    sigs = fn.get("sqlSignatures") or []
+    if len(params) <= at or not sigs:
+        return None
+    pname = params[at]["name"]
+    found = set()
+    for sig in sigs:
+        args = sig.get("args") or []
+        order = sig.get("sqlArgParams") or [p["name"] for p in params][:len(args)]
+        if pname not in order or order.index(pname) >= len(args):
+            return None
+        sqltype = re.sub(r"\s*\(.*\)$", "", args[order.index(pname)].strip())
+        cls = sql_classes.get(sqltype)
+        if cls is None:
+            return None
+        found.add(cls)
+    return found
+
+
+def _sql_other_class(fn: dict, entry: dict, sql_classes: dict, parents: dict) -> str | None:
+    """The class the other operand of an operator is, instantiated as
+    #_sql_receiver_class instantiates the receiver: the nearest class common to
+    the types its SQL signatures name there (``tgeometry`` and ``tgeompoint`` are
+    TGeo, every number span is Span, ``tstzspan`` is TsTzSpan).
+
+    A C parameter on a template is generic too: ``acontains_geo_tgeo``,
+    ``acontains_geo_tcbuffer`` and ``acontains_geo_trgeometry`` all take a
+    ``Temporal *``, so a binding typing the argument from the C type cannot tell
+    the three apart, while the classes they are for differ."""
+    at = 0 if entry.get("receiver") == "right" else 1
+    found = _sql_classes_at(fn, at, sql_classes)
+    return _nearest_common(found, parents) if found else None
+
+
+def _ancestors_of(cls: str, parents: dict) -> list:
+    """The parent chain of a class, nearest first, as #_tree walks it."""
+    chain, p = [], parents.get(cls)
+    while p:
+        chain.append(p)
+        p = parents.get(p)
+    return chain
+
+
 def _operator_entry(fn: dict, op: str, receiver: str, other: str) -> dict:
     """One operator of a class: the method the receiver-typed rule names."""
     entry = {"function": fn["name"], "role": "operator", "scope": "operator",
@@ -727,6 +821,7 @@ def attach_object_model(idl: dict, path: Path,
 
     # The operators no prefix reaches, now that each class states its C type.
     by_name = {f["name"]: f for f in functions}
+    sql_classes = _sql_type_classes(model)
     still = []
     for name in unclassified:
         op = _classify_operator(by_name[name], candidates, ctypes)
@@ -734,7 +829,14 @@ def attach_object_model(idl: dict, path: Path,
             still.append(name)
             continue
         cls, entry = op
-        classes[cls].setdefault("operators", []).append(entry)
+        refined = _sql_receiver_class(by_name[name], entry, sql_classes, parents)
+        if refined and refined != cls and cls in _ancestors_of(refined, parents):
+            entry["refinedFrom"] = cls
+            cls = refined
+        other = _sql_other_class(by_name[name], entry, sql_classes, parents)
+        if other:
+            entry["otherClass"] = other
+        classes.setdefault(cls, {"methods": []}).setdefault("operators", []).append(entry)
         function_to_class[name] = {
             "class": cls, "scope": "operator", "axis": "operator",
             "via": "operator", "backing": name}
