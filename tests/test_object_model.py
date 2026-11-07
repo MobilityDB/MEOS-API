@@ -343,6 +343,24 @@ class AttachTests(unittest.TestCase):
         # The last token of h3_cell_to_children is no class.
         self.assertIsNone(om["functionToClass"]["h3_cell_to_children"]["class"])
 
+    def test_a_member_of_a_leafs_box_is_named_with_its_value_type(self):
+        # The algebra's bbox relation (TNumber -> TBox) makes tintbox_ and
+        # tfloatbox_ prefixes of TBox (#_candidates), the member named with the
+        # leaf's value type (#_value_box_suffix), as
+        # #test_classification checks a prefix.
+        idl = attach_object_model({"functions": [
+            self._fn("tbox_xmin", "const TBox *"),
+            self._fn("tintbox_expand", "const TBox *", "int"),
+            self._fn("tfloatbox_expand", "const TBox *", "double"),
+            self._fn("tfloatbox_shift_scale", "const TBox *", "double", "double", "bool", "bool"),
+        ]}, MODEL, None)
+        om = idl["objectModel"]
+        names = {m["function"]: m["ooName"] for m in om["classes"]["TBox"]["methods"]}
+        self.assertEqual({k: v for k, v in names.items() if "box_" in k and not k.startswith("tbox_")}, {
+            "tintbox_expand": "expandInt", "tfloatbox_expand": "expandFloat",
+            "tfloatbox_shift_scale": "shiftScaleFloat"})
+        self.assertEqual(om["functionToClass"]["tintbox_expand"]["class"], "TBox")
+
     def test_a_constructor_whose_first_token_is_no_class_is_no_operator(self):
         # Same harness as #test_a_constructor_from_a_base_value_is_named_from_it.
         # numspan_tstzspan_to_tbox takes two Span *, and the operator pass reads

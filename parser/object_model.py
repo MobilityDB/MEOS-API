@@ -169,8 +169,39 @@ def _candidates(model: dict) -> list:
             for pref in prefs:
                 out.append((pref, {"class": name, "scope": "companion",
                                    "axis": fam.lower()}))
+    # The bounding box of a leaf's values: a `bbox` relation of the algebra
+    # (TNumber -> TBox) makes `<leaf prefix>box` a prefix of the box class for
+    # each leaf below its source, so `tintbox_expand` is a TBox member, named
+    # with the leaf's value type (#_value_box_suffix).
+    for rel in model.get("algebra", {}).get("relations", []):
+        if rel.get("relation") != "bbox":
+            continue
+        for name, spec in lat.items():
+            if spec["kind"] != "leaf" or rel["from"] not in _lattice_ancestors(name, lat):
+                continue
+            for pref in spec.get("prefixes", []):
+                out.append((pref + "box", {"class": rel["to"], "scope": "companion",
+                                           "axis": "valueBox", "valueOf": name}))
     out.sort(key=lambda kv: len(kv[0]), reverse=True)
     return out
+
+
+def _lattice_ancestors(name: str, lat: dict) -> list:
+    """The parent chain of a lattice class, nearest first, as #_ancestors_of walks
+    a class's parents."""
+    chain, p = [], lat[name].get("parent")
+    while p:
+        chain.append(p)
+        p = lat[p].get("parent")
+    return chain
+
+
+def _value_box_suffix(leaf: str) -> str:
+    """The value type a member of a leaf's box names: the leaf's class without its
+    `T` (TInt is Int), so tintbox_expand and tfloatbox_expand are TBox.expandInt
+    and TBox.expandFloat, apart in a binding without overloading, as the member
+    names #_ooname derives stay apart."""
+    return leaf[1:] if leaf.startswith("T") else leaf
 
 
 def _classify(fn_name: str, candidates: list):
@@ -915,7 +946,8 @@ def attach_object_model(idl: dict, path: Path,
         role = _role(name)
         method = {"function": name, "role": role,
                   "scope": tgt["scope"], "backing": name,
-                  "ooName": _ooname(name, cls, pref)}
+                  "ooName": _ooname(name, cls, pref)
+                            + (_value_box_suffix(tgt["valueOf"]) if tgt.get("valueOf") else "")}
         if _oo_excluded(fn, role):
             method["ooExclude"] = True
         sugar = []
