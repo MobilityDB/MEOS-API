@@ -369,6 +369,24 @@ class AttachTests(unittest.TestCase):
         self.assertTrue(meths["span_expand"].get("answersReceiver"))
         self.assertNotIn("answersReceiver", meths["span_width"])
 
+    def test_a_member_answering_another_template_states_what_each_receiver_gets(self):
+        # #_sql_return_instantiations, beside #test_a_member_answering_its_receivers_type_says_so:
+        # span(intspanset) answers an intspan, span(floatspanset) a floatspan.
+        span = self._fn("spanset_span", "const SpanSet *")
+        span["returnType"] = {"c": "Span *"}
+        span["sqlSignatures"] = [{"args": ["intspanset"], "ret": "intspan"},
+                                 {"args": ["floatspanset"], "ret": "floatspan"}]
+        width = self._fn("spanset_width", "const SpanSet *")
+        width["returnType"] = {"c": "double"}
+        width["sqlSignatures"] = [{"args": ["floatspanset"], "ret": "float"}]
+        idl = attach_object_model({"functions": [self._fn("spanset_lower", "const SpanSet *"), span, width]},
+                                  MODEL, None)
+        meths = {m["function"]: m for m in idl["objectModel"]["classes"]["SpanSet"]["methods"]}
+        self.assertEqual(meths["spanset_span"]["returnInstantiations"], [
+            {"receiverClass": "FloatSpanSet", "returnClass": "FloatSpan"},
+            {"receiverClass": "IntSpanSet", "returnClass": "IntSpan"}])
+        self.assertNotIn("returnInstantiations", meths["spanset_width"])
+
     def test_the_other_operand_is_instantiated_too(self):
         # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation;
         # #_sql_other_class names the nearest class common to the other

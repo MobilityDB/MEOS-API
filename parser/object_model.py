@@ -315,6 +315,26 @@ def _answers_receiver(fn: dict, at: int, sql_classes: dict) -> bool:
     return True
 
 
+def _sql_return_instantiations(fn: dict, at: int, sql_classes: dict) -> list | None:
+    """The class each SQL signature of a member answers for the class it is
+    called on, where its C return names a template: ``spanset_span`` returns a
+    ``Span *`` in C, and ``span(intspanset)`` answers an intspan,
+    ``span(floatspanset)`` a floatspan. One ``{receiverClass, returnClass}`` pair
+    per distinct pair, sorted, read as #_answers_receiver reads the receiver
+    (#_sql_classes_by_signature) and #_sql_return_class the answer; None where a
+    signature answers a type no class stands for."""
+    receivers = _sql_classes_by_signature(fn, at, sql_classes)
+    if not receivers:
+        return None
+    pairs = set()
+    for sig, cls in zip(fn.get("sqlSignatures") or [], receivers):
+        ret = sql_classes.get(re.sub(r"\s*\(.*\)$", "", (sig.get("ret") or "").strip()))
+        if ret is None:
+            return None
+        pairs.add((cls, ret))
+    return [{"receiverClass": r, "returnClass": t} for r, t in sorted(pairs)]
+
+
 def _sql_classes_by_signature(fn: dict, at: int, sql_classes: dict) -> list | None:
     """The class each SQL signature of a function names for its parameter `at`,
     in the order of the signatures, or None as #_sql_classes_at answers it."""
@@ -995,6 +1015,10 @@ def attach_object_model(idl: dict, path: Path,
                 continue
             if _answers_receiver(fn, at, sql_classes):
                 entry["answersReceiver"] = True
+                continue
+            pairs = _sql_return_instantiations(fn, at, sql_classes)
+            if pairs:
+                entry["returnInstantiations"] = pairs
 
     # Error contract
     errors = dict(model["errors"])
