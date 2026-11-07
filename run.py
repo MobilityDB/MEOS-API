@@ -12,6 +12,7 @@ from parser.typerecover import (recover_collapsed_types, normalize_canonical,
                                  postgres_scalar_names)
 from parser.header_types import reconcile
 from parser.shapeinfer import (infer_shapes, attach_struct_input_arrays,
+                               attach_documented_output_counts,
                                attach_counted_array_returns)
 from parser.nullable import merge_nullable, extract_param_docs, attach_function_docs
 from parser.nullresult import attach_null_result
@@ -168,8 +169,12 @@ def main():
           file=sys.stderr)
     idl, ndoc = attach_function_docs(idl, _doxy_root)
     print(f"      function docs from Doxygen `@brief`: {ndoc}", file=sys.stderr)
-    idl, nsa = attach_struct_input_arrays(idl, extract_param_docs(_doxy_root))
+    _param_docs = extract_param_docs(_doxy_root)
+    idl, nsa = attach_struct_input_arrays(idl, _param_docs)
     print(f"      input arrays of structs from Doxygen `Array of`: {nsa}",
+          file=sys.stderr)
+    idl, noc = attach_documented_output_counts(idl, _param_docs)
+    print(f"      output counts from Doxygen `in the output array`: {noc}",
           file=sys.stderr)
     idl, ncr = attach_counted_array_returns(idl)
     print(f"      array returns as long as an input array: {ncr}", file=sys.stderr)
