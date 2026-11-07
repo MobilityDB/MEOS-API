@@ -174,6 +174,15 @@ type the answer as the class it is called on (TypeScript's `this`) rather than
 the template its C return type names. 666 entries carry it on the catalog of
 MobilityDB 3ef02e46aa.
 
+Where the answer is another template, each receiver gets its own instantiation:
+`spanset_span` returns a `Span *`, and `span(intspanset)` answers an intspan,
+`span(floatspanset)` a floatspan. Such an entry carries `returnInstantiations`,
+one `{receiverClass, returnClass}` pair per distinct pair its SQL signatures
+name, so a binding can narrow the answer in each receiver class
+(`IntSpanSet.span` answers an IntSpan). An entry carrying `answersReceiver`
+carries none, since that flag already states it. 650 entries carry it on the
+catalog of MobilityDB 3ef02e46aa.
+
 ### Constructors from base values
 
 MEOS names a constructor from the values it is built of `<base>_to_<type>`
