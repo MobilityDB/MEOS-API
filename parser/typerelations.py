@@ -25,7 +25,9 @@ import os
 import re
 from pathlib import Path
 
-_NAME_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*"([^"]+)"')
+# A row is `[T_X] = "x"`, or `[T_X] = { "x", "X" }` where the table also holds the CamelCase
+# name of the type; the name is the first string of the row in both forms.
+_NAME_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*\{?\s*"([^"]+)"')
 _ROW_RE = re.compile(r'\[\s*(T_\w+)\s*\]\s*=\s*\{(.*?)\}', re.S)
 _FIELD_RE = re.compile(r'\.\s*(\w+)\s*=\s*(T_\w+)')
 # A release line older than the type-indexed catalog (stable-1.3) states each relation as

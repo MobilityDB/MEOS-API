@@ -33,7 +33,7 @@ import json
 import re
 from pathlib import Path
 
-from parser.typerelations import MEOSTYPE_PARAM, catalog_rows
+from parser.typerelations import MEOSTYPE_PARAM, catalog_rows, type_names
 
 # A declared scope of "*" means the function serves every overload its wrapper
 # declares — the legitimate generic case, stated rather than guessed.
@@ -41,7 +41,6 @@ EVERY_OVERLOAD = '*'
 
 _META = Path(__file__).resolve().parent.parent / 'meta' / 'type-scope.json'
 
-_TYPE_NAME = re.compile(r'\[(T_[A-Z0-9_]+)\]\s*=\s*"([a-z0-9_]+)"')
 _PREDICATE = re.compile(r'^(\w+)\(' + MEOSTYPE_PARAM + r' type\)\n\{\n(.*?)\n\}', re.S | re.M)
 _MEOS_TYPE = re.compile(r'\bT_[A-Z0-9_]+\b')
 _VALIDATE = re.compile(r'\bVALIDATE_[A-Z0-9_]+\b')
@@ -84,7 +83,7 @@ class TypeFacts:
 
     def __init__(self, meos_src: str | Path):
         src = (Path(meos_src) / 'src/temporal/meos_catalog.c').read_text(errors='ignore')
-        self.name = {e: n for e, n in _TYPE_NAME.findall(src) if n not in _NOT_A_TYPE}
+        self.name = {e: n for e, n in type_names(src).items() if n not in _NOT_A_TYPE}
         self.names = set(self.name.values())
         self.klass = {}
         for m in _PREDICATE.finditer(src):

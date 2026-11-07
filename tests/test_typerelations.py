@@ -7,6 +7,7 @@ asserts the canonical numeric mappings against the live MobilityDB tree when it
 is available (skipped, never fabricated, when it is not).
 """
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from parser.typerelations import attach_type_relations, locate_catalog
+from parser.typerelations import attach_type_relations, locate_catalog, type_names
 from parser.object_model import find_mobilitydb_src
 
 _FIXTURE = """
@@ -117,6 +118,24 @@ class TypeRelationsParseTest(unittest.TestCase):
         self.assertEqual(self._attach(_PAIR_FIXTURE), self._attach(_FIXTURE))
         self.assertEqual(self._attach(_PAIR_FIXTURE)["geometry"]["temporal"],
                          ["tgeompoint", "tgeometry"])
+
+    def test_names_beside_their_camelcase_names_resolve_as_the_names_alone_do(self):
+        # #test_pair_tables_resolve_as_the_relation_array_does over the table whose rows
+        # also hold the CamelCase name of the type, `[T_X] = { "x", "X" }`: the name is
+        # the first string of the row, so the registry is the same, and a PostgreSQL type
+        # no binding names keeps its name beside a NULL.
+        head = _FIXTURE[:_FIXTURE.index("static const reltype_catalog_struct")]
+        rows = re.sub(r'\[(T_\w+)\] = "(\w+)",',
+                      lambda m: f'[{m.group(1)}] = {{ "{m.group(2)}", '
+                                f'"{m.group(2).capitalize()}" }},', head)
+        rows = rows.replace("static const char *MEOS_TYPE_NAMES[] =",
+                            "static const struct\n{\n  const char *name;\n"
+                            "  const char *camel;\n} MEOS_TYPE_NAMES[] =")
+        rows = rows.replace("};", '  [T_INT4RANGE] = { "int4range", NULL },\n};', 1)
+        self.assertIn('{ "tgeompoint", "Tgeompoint" }', rows)
+        both = rows + _FIXTURE[_FIXTURE.index("static const reltype_catalog_struct"):]
+        self.assertEqual(self._attach(both), self._attach(_FIXTURE))
+        self.assertEqual(type_names(both)["T_INT4RANGE"], "int4range")
 
     def test_catalog_without_the_relation_array_raises(self):
         # A located catalog the parse reads no relation out of is a lost array, not a

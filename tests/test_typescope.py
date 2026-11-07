@@ -103,8 +103,9 @@ class CParamScopeTests(unittest.TestCase):
                          ({'s2cell', 's2cellset'}, 'cparam'))
 
 
-_TYPE_NAMES = ('  [T_INT4] = "int4",\n  [T_INTSET] = "intset",\n'
-               '  [T_INTSPAN] = "intspan",\n  [T_INTSPANSET] = "intspanset",\n')
+_TYPE_NAMES = ('static const char *MEOS_TYPE_NAMES[] =\n{\n'
+               '  [T_INT4] = "int4",\n  [T_INTSET] = "intset",\n'
+               '  [T_INTSPAN] = "intspan",\n  [T_INTSPANSET] = "intspanset",\n};\n')
 
 # The catalog as master states it: a designated initializer per type, predicates
 # over `MeosType`.
