@@ -183,6 +183,17 @@ name, so a binding can narrow the answer in each receiver class
 carries none, since that flag already states it. 650 entries carry it on the
 catalog of MobilityDB 3ef02e46aa.
 
+### Members of a leaf's box
+
+The algebra's `bbox` relations give the box of a family's values
+(`TNumber` → `TBox`), and MEOS names a box function of one leaf's values
+`<leaf prefix>box_<member>` (`tintbox_expand`, `tfloatbox_shift_scale`). Each
+such prefix is a prefix of the box class, and the member is named with the
+leaf's value type, its class name without the `T`: `tintbox_expand` is
+`TBox.expandInt`, `tfloatbox_expand` `TBox.expandFloat`, `tbigintbox_value_tiles`
+`TBox.valueTilesBigint`. The int, float and bigint forms all take a number, so
+the suffix is what keeps them apart in a binding without overloading.
+
 ### Constructors from base values
 
 MEOS names a constructor from the values it is built of `<base>_to_<type>`
