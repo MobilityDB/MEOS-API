@@ -297,6 +297,24 @@ def _sql_classes_at(fn: dict, at: int, sql_classes: dict) -> set | None:
     return set(found) if found is not None else None
 
 
+def _answers_receiver(fn: dict, at: int, sql_classes: dict) -> bool:
+    """Whether every SQL signature of a function answers the type of its
+    parameter `at`: ``expand(intspan, integer)`` answers an intspan and
+    ``expand(floatspan, float)`` a floatspan, so span_expand answers the class
+    of its receiver whichever span it is called on, where its C return type
+    names the template (``Span *``). The receiver's class per signature is read
+    as #_sql_classes_by_signature reads it, and the answer must be that same
+    class in every signature."""
+    receivers = _sql_classes_by_signature(fn, at, sql_classes)
+    if not receivers:
+        return False
+    for sig, cls in zip(fn.get("sqlSignatures") or [], receivers):
+        ret = re.sub(r"\s*\(.*\)$", "", (sig.get("ret") or "").strip())
+        if sql_classes.get(ret) != cls:
+            return False
+    return True
+
+
 def _sql_classes_by_signature(fn: dict, at: int, sql_classes: dict) -> list | None:
     """The class each SQL signature of a function names for its parameter `at`,
     in the order of the signatures, or None as #_sql_classes_at answers it."""
@@ -963,6 +981,20 @@ def attach_object_model(idl: dict, path: Path,
             "class": cls, "scope": "fromBase", "axis": "fromBase",
             "via": "fromBase", "backing": name}
     unclassified = still
+
+    # What a member called on a value answers, where its C return type names
+    # the template and every SQL signature answers the receiver's own type.
+    for cls, spec in classes.items():
+        for entry in spec["methods"] + spec.get("operators", []):
+            fn = by_name.get(entry["function"])
+            if fn is None:
+                continue
+            at = 1 if entry.get("receiver") == "right" else 0
+            params = fn.get("params") or []
+            if len(params) <= at or not _operator_receiver(params[at], cls, ctypes):
+                continue
+            if _answers_receiver(fn, at, sql_classes):
+                entry["answersReceiver"] = True
 
     # Error contract
     errors = dict(model["errors"])
