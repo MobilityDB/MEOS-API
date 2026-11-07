@@ -28,6 +28,7 @@ import re
 from pathlib import Path
 
 from parser.typerelations import (MEOSTYPE_PARAM, locate_catalog, temptype_basetypes,
+                                 type_camel_names,
                                   type_names)
 
 
@@ -797,6 +798,32 @@ def release_nodes(nodes: dict, cat_src: str) -> dict:
             if v.get("kind") != "leaf" or all(t in named for t in v.get("temptypes") or ())}
 
 
+def check_class_names(model: dict, cat_src: str) -> None:
+    """Every class of a MEOS type is named as ``MEOS_TYPE_NAMES`` names it.
+
+    The catalog holds the CamelCase name of each type beside its name (#type_camel_names),
+    the one table the bindings name their classes from, so a leaf of the model naming its
+    type otherwise is a disagreement, raised rather than published. A catalog whose rows
+    hold the name alone (stable-1.3) names no class, and nothing is compared.
+    """
+    camel = type_camel_names(cat_src)
+    if not camel:
+        return
+    wrong = []
+    for nodes in [model["lattice"]] + [model["companions"][fam]["nodes"]
+                                        for fam in _companion_families(model)]:
+        for name, spec in nodes.items():
+            if name.startswith("_") or spec.get("kind") != "leaf":
+                continue
+            types = list(spec.get("temptypes") or [])
+            if isinstance(spec.get("temptype"), str):
+                types.append(spec["temptype"])
+            wrong += [f"{name} models {t}, which MEOS_TYPE_NAMES names {camel[t]}"
+                      for t in types if t in camel and camel[t] != name]
+    if wrong:
+        raise ValueError("classes the catalog names otherwise: " + "; ".join(wrong))
+
+
 def membership_source(catalog: Path) -> str:
     """The text a membership predicate is read from: ``meos_catalog.c`` first,
     then every other source beside it in ``meos/src/temporal``, the directory
@@ -919,6 +946,7 @@ def attach_object_model(idl: dict, path: Path,
         cat_src = catalog.read_text(errors="ignore")
         basetypes = temptype_basetypes(cat_src)
         lattice_nodes = release_nodes(lattice_nodes, cat_src)
+        check_class_names(model, cat_src)
         pred_src = membership_source(catalog)
         derive_membership(lattice_nodes, pred_src, basetypes)
         derive_membership(trait_nodes, pred_src, basetypes)

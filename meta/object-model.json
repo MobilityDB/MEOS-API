@@ -28,20 +28,20 @@
         "TGeography",
         "TGeomPoint",
         "TGeogPoint",
-        "TCbuffer",
-        "TNpoint",
+        "TCBuffer",
+        "TNPoint",
         "TPose",
         "TRGeometry"
       ],
-      "figureEdges": "TSpatial -> {TGeo, TCbuffer, TNpoint, TPose, TRGeometry}; TGeo -> {TGeometry, TGeography, TGeomPoint, TGeogPoint}",
+      "figureEdges": "TSpatial -> {TGeo, TCBuffer, TNPoint, TPose, TRGeometry}; TGeo -> {TGeometry, TGeography, TGeomPoint, TGeogPoint}",
       "modelAdds": [
         "TPoint (API-level intermediate under TGeo; see OM-M6)",
         "TCellIndex (the temporal DGGS cell indexes, C predicate tcellindex_type and the tcellindex_* family; the figure draws no cell type)",
         "TH3Index (a TCellIndex leaf, T_TH3INDEX)",
         "TQuadbin (a TCellIndex leaf, T_TQUADBIN)",
         "TS2Cell (a TCellIndex leaf, T_TS2CELL)",
-        "TPcpoint (the temporal point cloud point the figure omits, T_TPCPOINT)",
-        "TPcpatch (the temporal point cloud patch the figure omits, T_TPCPATCH)",
+        "TPCPoint (the temporal point cloud point the figure omits, T_TPCPOINT)",
+        "TPCPatch (the temporal point cloud patch the figure omits, T_TPCPATCH)",
         "TPoseChain (the temporal pose chain, sibling of TPose, T_TPOSECHAIN)"
       ]
     }
@@ -156,7 +156,7 @@
         "T_TINT"
       ]
     },
-    "TBigint": {
+    "TBigInt": {
       "kind": "leaf",
       "parent": "TNumber",
       "predicate": null,
@@ -268,27 +268,27 @@
         "geodetic"
       ]
     },
-    "TCbuffer": {
+    "TCBuffer": {
       "kind": "leaf",
       "parent": "TSpatial",
       "predicate": null,
       "prefixes": [
         "tcbuffer"
       ],
-      "userFacingName": "TCbuffer",
+      "userFacingName": "TCBuffer",
       "temptypes": [
         "T_TCBUFFER"
       ],
       "conditional": "CBUFFER"
     },
-    "TNpoint": {
+    "TNPoint": {
       "kind": "leaf",
       "parent": "TSpatial",
       "predicate": null,
       "prefixes": [
         "tnpoint"
       ],
-      "userFacingName": "TNpoint",
+      "userFacingName": "TNPoint",
       "temptypes": [
         "T_TNPOINT"
       ],
@@ -362,27 +362,27 @@
       ],
       "conditional": "S2CELL"
     },
-    "TPcpoint": {
+    "TPCPoint": {
       "kind": "leaf",
       "parent": "TSpatial",
       "predicate": null,
       "prefixes": [
         "tpcpoint"
       ],
-      "userFacingName": "TPcpoint",
+      "userFacingName": "TPCPoint",
       "temptypes": [
         "T_TPCPOINT"
       ],
       "conditional": "POINTCLOUD"
     },
-    "TPcpatch": {
+    "TPCPatch": {
       "kind": "leaf",
       "parent": "TSpatial",
       "predicate": null,
       "prefixes": [
         "tpcpatch"
       ],
-      "userFacingName": "TPcpatch",
+      "userFacingName": "TPCPatch",
       "temptypes": [
         "T_TPCPATCH"
       ],
@@ -523,7 +523,7 @@
           ],
           "temptype": "T_TPCBOX",
           "conditional": "POINTCLOUD",
-          "doc": "Point-cloud x time box (bbox of TPcpoint and TPcpatch)."
+          "doc": "Point-cloud x time box (bbox of TPCPoint and TPCPatch)."
         }
       }
     },
@@ -614,7 +614,7 @@
           "parent": "GeoSet",
           "temptype": "T_GEOGSET"
         },
-        "NpointSet": {
+        "NPointSet": {
           "kind": "leaf",
           "parent": "SpatialSet",
           "temptype": "T_NPOINTSET",
@@ -626,7 +626,7 @@
           "temptype": "T_POSESET",
           "conditional": "POSE"
         },
-        "CbufferSet": {
+        "CBufferSet": {
           "kind": "leaf",
           "parent": "SpatialSet",
           "temptype": "T_CBUFFERSET",
@@ -700,13 +700,13 @@
           "temptype": "T_S2CELLSET",
           "conditional": "S2CELL"
         },
-        "PcpointSet": {
+        "PCPointSet": {
           "kind": "leaf",
           "parent": "SpatialSet",
           "temptype": "T_PCPOINTSET",
           "conditional": "POINTCLOUD"
         },
-        "PcpatchSet": {
+        "PCPatchSet": {
           "kind": "leaf",
           "parent": "SpatialSet",
           "temptype": "T_PCPATCHSET",
@@ -762,7 +762,7 @@
           ],
           "temptype": "T_JSONPATH",
           "conditional": "JSON",
-          "doc": "A path into a jsonb value. A MeosType no membership predicate admits, as Nsegment and Raquet are; the nine signatures naming it are what need it."
+          "doc": "A path into a jsonb value. A MeosType no membership predicate admits, as NSegment and RaQuet are; the nine signatures naming it are what need it."
         },
         "Geo": {
           "kind": "abstract",
@@ -794,7 +794,7 @@
             "geodetic"
           ]
         },
-        "Cbuffer": {
+        "CBuffer": {
           "kind": "leaf",
           "parent": "Value",
           "prefixes": [
@@ -803,7 +803,7 @@
           "temptype": "T_CBUFFER",
           "conditional": "CBUFFER"
         },
-        "Npoint": {
+        "NPoint": {
           "kind": "leaf",
           "parent": "Value",
           "prefixes": [
@@ -812,7 +812,7 @@
           "temptype": "T_NPOINT",
           "conditional": "NPOINT"
         },
-        "Nsegment": {
+        "NSegment": {
           "kind": "leaf",
           "parent": "Value",
           "prefixes": [
@@ -840,7 +840,7 @@
           "temptype": "T_POSECHAIN",
           "conditional": "POSE"
         },
-        "Pcpoint": {
+        "PCPoint": {
           "kind": "leaf",
           "parent": "Value",
           "prefixes": [
@@ -849,7 +849,7 @@
           "temptype": "T_PCPOINT",
           "conditional": "POINTCLOUD"
         },
-        "Pcpatch": {
+        "PCPatch": {
           "kind": "leaf",
           "parent": "Value",
           "prefixes": [
@@ -858,7 +858,7 @@
           "temptype": "T_PCPATCH",
           "conditional": "POINTCLOUD"
         },
-        "Raquet": {
+        "RaQuet": {
           "kind": "leaf",
           "parent": "Value",
           "prefixes": [
@@ -866,7 +866,7 @@
           ],
           "temptype": "T_RAQUET",
           "conditional": "RASTER",
-          "doc": "A raster tile. A MeosType no membership predicate admits, as Nsegment is."
+          "doc": "A raster tile. A MeosType no membership predicate admits, as NSegment is."
         },
         "Raster": {
           "kind": "leaf",
@@ -1235,7 +1235,7 @@
         "side": "pymeos",
         "severity": "missing-class",
         "location": "PyMEOS pymeos/factory.py _TemporalFactory._mapper",
-        "observed": "Only 6 leaf families x 3 subtypes (18 entries): TBool/TInt/TFloat/TText/TGeomPoint/TGeogPoint. Missing the temporal types MEOS now defines: TGeometry, TGeography, TCbuffer, TNpoint, TPose, TRGeometry (x3 subtypes = 18 missing classes).",
+        "observed": "Only 6 leaf families x 3 subtypes (18 entries): TBool/TInt/TFloat/TText/TGeomPoint/TGeogPoint. Missing the temporal types MEOS now defines: TGeometry, TGeography, TCBuffer, TNPoint, TPose, TRGeometry (x3 subtypes = 18 missing classes).",
         "suggested": "Generate the full leaf x subtype matrix from this model (codegen) so PyMEOS is a complete, drift-gated reflection of MEOS instead of a hand-maintained subset."
       },
       {
@@ -1275,7 +1275,7 @@
         "side": "pymeos",
         "severity": "missing-class",
         "location": "PyMEOS pymeos/factory.py _CollectionFactory._mapper",
-        "observed": "Collection factory lacks BigIntSet/Span/SpanSet and NpointSet/PoseSet/CbufferSet though MEOS defines those collection types.",
+        "observed": "Collection factory lacks BigIntSet/Span/SpanSet and NPointSet/PoseSet/CBufferSet though MEOS defines those collection types.",
         "suggested": "Generate the full Collection hierarchy from companions.Collection so closed-algebra returns are typeable on every binding."
       },
       {
@@ -1283,8 +1283,8 @@
         "side": "pymeos",
         "severity": "missing-class",
         "location": "PyMEOS pymeos/main, pymeos/temporal",
-        "observed": "No abstract spatial intermediates: PyMEOS has TPoint but no TSpatial and no TGeo. Per the manual Figure 7.1 the tree is TSpatial -> TGeo -> {TGeometry, TGeography, TPoint -> {TGeomPoint, TGeogPoint}} with TCbuffer/TNpoint/TPose/TRGeometry under TSpatial; the tspatial_*/tgeo_* method groups have no home class.",
-        "suggested": "Introduce TSpatial (abstract, parent of TGeo/TCbuffer/TNpoint/TPose/TRGeometry) and make TGeo the abstract parent of TGeometry/TGeography/TPoint (matching the manual + tgeo_type_all), so tspatial_*/tgeo_* bind to a class."
+        "observed": "No abstract spatial intermediates: PyMEOS has TPoint but no TSpatial and no TGeo. Per the manual Figure 7.1 the tree is TSpatial -> TGeo -> {TGeometry, TGeography, TPoint -> {TGeomPoint, TGeogPoint}} with TCBuffer/TNPoint/TPose/TRGeometry under TSpatial; the tspatial_*/tgeo_* method groups have no home class.",
+        "suggested": "Introduce TSpatial (abstract, parent of TGeo/TCBuffer/TNPoint/TPose/TRGeometry) and make TGeo the abstract parent of TGeometry/TGeography/TPoint (matching the manual + tgeo_type_all), so tspatial_*/tgeo_* bind to a class."
       },
       {
         "id": "OM-P8",

@@ -53,8 +53,8 @@ Temporal                       temporal_type      (the late-bound superclass)
    │  │  └─ TGeogPoint                             base GEOGRAPHY ·geodetic
    │  ├─ TGeometry                                 base GEOMETRY  ·geometryBased
    │  └─ TGeography                                base GEOGRAPHY ·geodetic
-   ├─ TCbuffer                                     base CBUFFER  (#if CBUFFER)
-   ├─ TNpoint                                      base NPOINT   (#if NPOINT)
+   ├─ TCBuffer                                     base CBUFFER  (#if CBUFFER)
+   ├─ TNPoint                                      base NPOINT   (#if NPOINT)
    ├─ TPose                                        base POSE     (#if POSE)
    └─ TRGeometry                                   base POSE     (#if RGEO)
 ```
@@ -93,9 +93,14 @@ reconciles to it exactly, with one documented difference:
   from both master MEOS and Figure 7.1 (`OM-M7`); they are out of the
   drift-gated source of truth and derived automatically once MEOS
   defines them — never fabricated.
-- Class names use the manual spelling (`TGeo`, `TNpoint`, `TCbuffer`,
-  `TPose`, `TRGeometry`); C prefixes (`tnpoint_`, `tcbuffer_`,
-  `trgeo_`) are unchanged.
+- The class of a type is named as MEOS names it: each row of
+  `MEOS_TYPE_NAMES` in `meos_catalog.c` holds the name of the type and its
+  CamelCase name, `[T_TNPOINT] = { "tnpoint", "TNPoint" }`, in which each
+  capital starts one word (`TRGeometry`, `TPCBox`, `BigIntSpanSet`) and a
+  type an outside project owns keeps its spelling (`Jsonb`, `Quadbin`).
+  `check_class_names` raises on a leaf named otherwise. An abstract class
+  (`TGeo`, `TNumber`) is the model's own. C prefixes (`tnpoint_`,
+  `tcbuffer_`, `trgeo_`) are unchanged.
 
 `tests/test_object_model.py::ModelFileTests::test_matches_manual_figure_7_1`
 gates this: the model's spatial node set must equal the figure's nodes
@@ -115,15 +120,15 @@ companion a temporal family yields.
 
 `Value` holds the values a method names: `Text`, `Jsonb`, `JsonPath`, `Geo` over
 `Geometry` and `Geography` (both a `GSERIALIZED`, parented exactly as
-`TGeo` parents `TGeometry` and `TGeography`), `Cbuffer`, `Npoint`,
-`Nsegment`, `Pose`, `PoseChain`, `Pcpoint`, `Pcpatch` and `Raquet`. A
+`TGeo` parents `TGeometry` and `TGeography`), `CBuffer`, `NPoint`,
+`NSegment`, `Pose`, `PoseChain`, `PCPoint`, `PCPatch` and `RaQuet`. A
 base value crosses the MEOS boundary as a pointer unless
 `basetype_byvalue()` names its type — which is why the DGGS cells, being
 a `uint64`, need no class and the ten by-reference base types do.
 `DriftGate::test_every_byreference_base_type_has_a_value_class` derives
 that set from the two predicates and fails until each has a class, so a
 base type MEOS adds reaches the model with no edit to the file.
-`Nsegment`, `Raquet` and `JsonPath` are the MeosTypes no membership
+`NSegment`, `RaQuet` and `JsonPath` are the MeosTypes no membership
 predicate admits; the model states them, and the same gate states that it
 does. `Pcschema`, `Raster`, `RTree`, `RTreeNNCursor`, `SPTree`, `SPNNCursor`,
 `MeosArray`, `Numeric` and `SkipList` go further: MEOS
@@ -260,7 +265,7 @@ method of `TGeomPoint`.
 The other operand is instantiated the same way: `otherClass` is the nearest
 class common to the types its signatures name there. `acontains_geo_tgeo`,
 `acontains_geo_tcbuffer` and `acontains_geo_trgeometry` all take a
-`Temporal *`, and their `otherClass` is TGeo, TCbuffer and TRGeometry. The
+`Temporal *`, and their `otherClass` is TGeo, TCBuffer and TRGeometry. The
 entry carries no `otherClass` where a signature names a type no class stands
 for (a base value). An operator MEOS declares and SQL does not has no
 signature to read, and its `otherClass` is the class its `other` token is the
@@ -382,8 +387,8 @@ in `objectModel.corrections` as a durable, reviewable worklist
   `TPoint`; the model is the superset and adds `TPoint` under `TGeo`.
 - **OM-M7** `tpcpoint`/`tpcpatch` are planned but absent from master
   MEOS and the figure — out of the drift-gated SoT until MEOS adds them.
-- **OM-P1/P6/P7** PyMEOS lacks the `TGeometry/TGeography/TCbuffer/
-  TNpoint/TPose/TRGeometry` leaves, the full Collection hierarchy, and
+- **OM-P1/P6/P7** PyMEOS lacks the `TGeometry/TGeography/TCBuffer/
+  TNPoint/TPose/TRGeometry` leaves, the full Collection hierarchy, and
   the `TSpatial`/`TGeo` abstract intermediates that MEOS defines.
 
 Reporting only — the fixes land as separate PRs in those repos by their
