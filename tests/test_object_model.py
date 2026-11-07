@@ -615,7 +615,29 @@ class AttachTests(unittest.TestCase):
                         if s["kind"] == "leaf" and s["temptype"] is None}
         self.assertEqual(unregistered,
                          {"Pcschema", "Raster", "RTree", "RTreeNNCursor", "SPTree",
-                          "SPNNCursor", "MeosArray"})
+                          "SPNNCursor", "MeosArray", "Numeric", "SkipList"})
+
+    def test_numeric_and_the_aggregate_state_are_classes(self):
+        # A Numeric is what jsonb_to_numeric answers, and a SkipList what every
+        # temporal aggregate's transition function takes and answers; the
+        # functions their prefixes name take one first, so each class states
+        # the C type a binding wraps, as #test_a_raster_is_a_class_its_functions_are_methods_of
+        # states Raster's.
+        om = attach_object_model({"functions": [
+            {"name": "numeric_out", "api": "public",
+             "returnType": {"c": "char *"},
+             "params": [{"name": "num", "cType": "Numeric",
+                         "canonical": "struct NumericData *"},
+                        {"name": "size_out", "cType": "size_t *"}]},
+            {"name": "taggstate_serialize", "api": "public",
+             "returnType": {"c": "uint8_t *"},
+             "params": [{"name": "state", "cType": "SkipList *"},
+                        {"name": "size_out", "cType": "size_t *"}]},
+        ]}, MODEL, None)["objectModel"]
+        self.assertEqual(om["classes"]["Numeric"]["cType"], "NumericData")
+        self.assertEqual(om["classes"]["SkipList"]["cType"], "SkipList")
+        self.assertEqual({m["ooName"] for m in om["classes"]["SkipList"]["methods"]},
+                         {"serialize"})
 
     def test_a_raster_is_a_class_its_functions_are_methods_of(self):
         # MEOS registers no MeosType for a raster, its tile Raquet being the type the
