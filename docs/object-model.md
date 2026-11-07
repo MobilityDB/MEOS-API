@@ -163,6 +163,39 @@ answer of the subtype it is a product of (`TFloatInst` → `TInstant`), and
 any other its parent's, which is the same C type by construction. All 105
 classes resolve one, over the 21 C types MEOS's own signatures name.
 
+### Operators
+
+MEOS names an operator `<op>_<left>_<right>` (`ever_eq_tfloat_float`,
+`left_stbox_stbox`, `union_span_span`) or `<op>_<operand>` (`tnot_tbool`),
+so no class prefix starts it and the prefix rule leaves it out. Once each
+class states its `cType`, a second pass assigns it by the **receiver-typed
+rule**: the receiver is the type of the first parameter, read with the same
+prefixes, and the member is the leading verb, the name cut at its first type
+token, camelCased as every member is (`ever_eq_tfloat_float` → `TFloat.everEq`,
+`nad_tfloat_tbox` → `TFloat.nad`, `left_stbox_stbox` → `STBox.left`). The first
+parameter must really be a value of that class, so a conversion such as
+`timestamptz_to_stbox`, whose first parameter is a timestamp, stays
+unclassified.
+
+Where the first operand is no class value (`sub_float_tfloat`, a float minus
+a temporal float) the call is the operation reflected onto the right operand,
+and its member is `r<op>` (`TFloat.rsub`). This is the spelling the MEOS.js
+and PyMEOS hand layers give it (`radd`, `rsub`), so it never shares a name
+with `sub_tfloat_float`, which computes the other difference.
+
+The operators sit in `classes.<Class>.operators`, beside `methods`, because
+one name there covers every overload the class has (`TFloat.nad` takes a
+float, a `TFloat` or a `TBox`), and a binding whose language has no
+overloading by argument type cannot emit a `methods` list that holds the
+same name twice. Each entry is
+`{function, role: "operator", scope: "operator", backing, ooName, receiver,
+other}`: `receiver` is `left` or `right`, the operand the method is called
+on, and `other` is the type token of the other operand. A binding groups the
+entries by `ooName` and chooses the C function by the argument's type.
+`functionToClass` records the assignment with `via: "operator"`. Base-type
+arithmetic and comparisons (`add_int32_int32`, `eq_date_timestamp`) have no
+class to belong to and stay unclassified.
+
 ## Dispatch metadata
 
 For 4 of the 6 temporal-type families the per-member argument→backing
