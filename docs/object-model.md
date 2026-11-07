@@ -163,6 +163,17 @@ answer of the subtype it is a product of (`TFloatInst` → `TInstant`), and
 any other its parent's, which is the same C type by construction. All 105
 classes resolve one, over the 21 C types MEOS's own signatures name.
 
+### Members answering their receiver's type
+
+A C function on a template answers the template: `intspan_expand` returns a
+`Span *` whichever span it expands. Its SQL signatures say more, since
+`expand(intspan, integer)` answers an intspan and `expand(datespan, integer)` a
+datespan. A method or operator called on a value carries `answersReceiver: true`
+when every SQL signature answers the SQL type of its receiver, so a binding can
+type the answer as the class it is called on (TypeScript's `this`) rather than
+the template its C return type names. 666 entries carry it on the catalog of
+MobilityDB 3ef02e46aa.
+
 ### Constructors from base values
 
 MEOS names a constructor from the values it is built of `<base>_to_<type>`

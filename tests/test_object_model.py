@@ -353,6 +353,22 @@ class AttachTests(unittest.TestCase):
         cls, m = got["int_to_set"]
         self.assertEqual((cls, m["ooName"], m["refinedFrom"]), ("IntSet", "fromInt", "Set"))
 
+    def test_a_member_answering_its_receivers_type_says_so(self):
+        # #_answers_receiver: every SQL signature answers its receiver's type,
+        # where the C return names the template; built as #_operators builds its.
+        expand = self._fn("span_expand", "const Span *", "int")
+        expand["returnType"] = {"c": "Span *"}
+        expand["sqlSignatures"] = [{"args": ["intspan", "integer"], "ret": "intspan"},
+                                   {"args": ["floatspan", "float"], "ret": "floatspan"}]
+        width = self._fn("span_width", "const Span *")
+        width["returnType"] = {"c": "double"}
+        width["sqlSignatures"] = [{"args": ["floatspan"], "ret": "float"}]
+        idl = attach_object_model({"functions": [self._fn("span_lower", "const Span *"), expand, width]},
+                                  MODEL, None)
+        meths = {m["function"]: m for m in idl["objectModel"]["classes"]["Span"]["methods"]}
+        self.assertTrue(meths["span_expand"].get("answersReceiver"))
+        self.assertNotIn("answersReceiver", meths["span_width"])
+
     def test_the_other_operand_is_instantiated_too(self):
         # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation;
         # #_sql_other_class names the nearest class common to the other
