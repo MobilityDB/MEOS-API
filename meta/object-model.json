@@ -932,6 +932,25 @@
           ],
           "temptype": null,
           "doc": "The growable array MEOS builds its own results in. MEOS registers it in no enum, so it names no temptype."
+        },
+        "Numeric": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "numeric"
+          ],
+          "temptype": null,
+          "doc": "PostgreSQL's arbitrary-precision number, the value jsonb_to_numeric and the extract functions of the time types answer and numeric_in and numeric_out read and write. MEOS registers it in no enum, so it names no temptype."
+        },
+        "SkipList": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "skiplist",
+            "taggstate"
+          ],
+          "temptype": null,
+          "doc": "The state of a temporal aggregate, the value every transition and combine function of a temporal aggregate takes and answers and taggstate_serialize and taggstate_deserialize write and read. MEOS registers it in no enum, so it names no temptype."
         }
       }
     }

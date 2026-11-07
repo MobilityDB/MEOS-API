@@ -99,6 +99,16 @@ def _pointee(c_type: str) -> str | None:
     return None
 
 
+def _slot_pointee(slot: dict) -> str | None:
+    """The type a parameter or return points at, as #_pointee reads it, from the
+    type it is declared as or, where that is a typedef naming a pointer, from
+    its canonical spelling: ``numeric_out(Numeric num, ...)`` declares a
+    ``Numeric``, which is a ``struct NumericData *``, so it points at a
+    NumericData."""
+    declared = slot.get("cType") or slot.get("c") or ""
+    return _pointee(declared) or _pointee(slot.get("canonical") or "")
+
+
 def _companion_families(model: dict) -> list:
     """The companion hierarchies the model carries, in file order.
 
@@ -214,7 +224,7 @@ def _classify(fn_name: str, candidates: list):
 def _operator_receiver(param: dict, cls: str, ctypes: dict) -> bool:
     """Whether a parameter is a value of the class: a single pointer to the C
     type the class's instances are (see #_class_ctypes)."""
-    return bool(ctypes.get(cls)) and _pointee(param.get("cType", "")) == ctypes[cls]
+    return bool(ctypes.get(cls)) and _slot_pointee(param) == ctypes[cls]
 
 
 def _classify_operator(fn: dict, candidates: list, ctypes: dict):
@@ -478,7 +488,7 @@ def _classify_from_base(fn: dict, candidates: list, ctypes: dict):
     if tgt is None or pref != tail or not head:
         return None
     cls = tgt["class"]
-    if not ctypes.get(cls) or _pointee(fn.get("returnType", {}).get("c", "")) != ctypes[cls]:
+    if not ctypes.get(cls) or _slot_pointee(fn.get("returnType", {})) != ctypes[cls]:
         return None
     entry = {"function": name, "role": "constructor", "scope": "fromBase",
              "backing": name, "ooName": _camel("from_" + head)}
@@ -845,7 +855,7 @@ def _class_ctypes(classes: dict, functions: dict, parents: dict,
             fn = functions.get(method["function"])
             if not fn:
                 continue
-            pointee = _pointee(fn.get("returnType", {}).get("c", ""))
+            pointee = _slot_pointee(fn.get("returnType", {}))
             if pointee and pointee not in _NOT_A_CLASS_POINTEE:
                 answered[pointee] = answered.get(pointee, 0) + 1
             if method["role"] not in _RECEIVER_ROLES:
@@ -853,7 +863,7 @@ def _class_ctypes(classes: dict, functions: dict, parents: dict,
             params = fn.get("params")
             if not params:
                 continue
-            pointee = _pointee(params[0]["cType"])
+            pointee = _slot_pointee(params[0])
             if pointee:
                 seen[pointee] = seen.get(pointee, 0) + 1
         for source, out in ((seen, own), (answered, made)):
