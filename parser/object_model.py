@@ -336,6 +336,50 @@ def _ancestors_of(cls: str, parents: dict) -> list:
     return chain
 
 
+def _classify_from_base(fn: dict, candidates: list, ctypes: dict):
+    """The class and entry of a constructor MEOS names ``<base>_to_<type>``.
+
+    ``float_to_tbox``, ``float_timestamptz_to_tbox`` and ``timestamptz_to_stbox``
+    build a value of the class ``<type>`` is the prefix of out of the values
+    ``<base>`` names, so no class prefix starts them and #_classify leaves them
+    out. The member reads ``<type>.from<Base>`` (``TBox.fromFloat``,
+    ``STBox.fromTimestamptz``), the shape of the readers MEOS names
+    ``<type>_from_<format>`` (``tbox_from_wkb`` is ``TBox.fromWKB``), camelCased
+    as #_ooname camelCases every member. The type token must be a class prefix
+    exactly, read with the candidates #_classify reads, and the function must
+    answer a value of that class, so ``h3_cell_to_children``, whose last token is
+    no class, stays out."""
+    name = fn["name"]
+    if "_to_" not in name:
+        return None
+    head, tail = name.rsplit("_to_", 1)
+    pref, tgt = _classify(tail, candidates)
+    if tgt is None or pref != tail or not head:
+        return None
+    cls = tgt["class"]
+    if not ctypes.get(cls) or _pointee(fn.get("returnType", {}).get("c", "")) != ctypes[cls]:
+        return None
+    entry = {"function": name, "role": "constructor", "scope": "fromBase",
+             "backing": name, "ooName": _camel("from_" + head)}
+    if fn.get("api") != "public":
+        entry["ooExclude"] = True
+    return cls, entry
+
+
+def _sql_return_class(fn: dict, sql_classes: dict, parents: dict) -> str | None:
+    """The nearest class common to the types the SQL signatures of a function
+    answer, as #_sql_receiver_class reads the receiver: ``int_to_set`` answers a
+    ``Set *`` in C and an ``intset`` in SQL, so it builds an IntSet."""
+    found = set()
+    for sig in fn.get("sqlSignatures") or []:
+        ret = re.sub(r"\s*\(.*\)$", "", (sig.get("ret") or "").strip())
+        cls = sql_classes.get(ret)
+        if cls is None:
+            return None
+        found.add(cls)
+    return _nearest_common(found, parents) if found else None
+
+
 def _operator_entry(fn: dict, op: str, receiver: str, other: str) -> dict:
     """One operator of a class: the method the receiver-typed rule names."""
     entry = {"function": fn["name"], "role": "operator", "scope": "operator",
@@ -840,6 +884,28 @@ def attach_object_model(idl: dict, path: Path,
         function_to_class[name] = {
             "class": cls, "scope": "operator", "axis": "operator",
             "via": "operator", "backing": name}
+    unclassified = still
+
+    # The constructors MEOS names from what they are built of (`float_to_tbox`).
+    still = []
+    for name in unclassified:
+        made = _classify_from_base(by_name[name], candidates, ctypes)
+        if made is None:
+            still.append(name)
+            continue
+        cls, entry = made
+        refined = _sql_return_class(by_name[name], sql_classes, parents)
+        if refined and refined != cls and cls in _ancestors_of(refined, parents):
+            entry["refinedFrom"] = cls
+            cls = refined
+        spec = classes.setdefault(cls, {"methods": []})
+        if any(m["ooName"] == entry["ooName"] for m in spec["methods"]):
+            still.append(name)
+            continue
+        spec["methods"].append(entry)
+        function_to_class[name] = {
+            "class": cls, "scope": "fromBase", "axis": "fromBase",
+            "via": "fromBase", "backing": name}
     unclassified = still
 
     # Error contract

@@ -315,6 +315,44 @@ class AttachTests(unittest.TestCase):
                       ("geometry(Point)", "tfloat")))
         self.assertEqual(ops["teq_geo_tfloat"][0], "Geometry")
 
+    def _made(self, *fns):
+        """The model over `fns` beside a receiver-role method per class, as
+        #_operators attaches its cases; answers each from-base constructor's
+        (class, entry)."""
+        idl = attach_object_model({"functions": [
+            self._fn("tbox_xmin", "const TBox *"),
+            self._fn("set_num_values", "const Set *"),
+            *fns]}, MODEL, None)
+        om = idl["objectModel"]
+        return om, {m["function"]: (cls, m) for cls, spec in om["classes"].items()
+                    for m in spec["methods"] if m.get("scope") == "fromBase"}
+
+    def test_a_constructor_from_a_base_value_is_named_from_it(self):
+        # #_classify_from_base: `<base>_to_<type>` answering a value of the class.
+        def made(name, ret, *ctypes):
+            fn = self._fn(name, *ctypes)
+            fn["returnType"] = {"c": ret}
+            return fn
+        om, got = self._made(
+            made("float_to_tbox", "TBox *", "double"),
+            made("float_timestamptz_to_tbox", "TBox *", "double", "TimestampTz"),
+            made("h3_cell_to_children", "Set *", "uint64_t", "int"))
+        self.assertEqual({f: (c, m["ooName"], m["role"]) for f, (c, m) in got.items()}, {
+            "float_to_tbox": ("TBox", "fromFloat", "constructor"),
+            "float_timestamptz_to_tbox": ("TBox", "fromFloatTimestamptz", "constructor")})
+        # The last token of h3_cell_to_children is no class.
+        self.assertIsNone(om["functionToClass"]["h3_cell_to_children"]["class"])
+
+    def test_a_constructor_of_a_template_builds_its_instantiation(self):
+        # Same harness as #test_a_constructor_from_a_base_value_is_named_from_it;
+        # the SQL return type says which set int_to_set builds (#_sql_return_class).
+        fn = self._fn("int_to_set", "int")
+        fn["returnType"] = {"c": "Set *"}
+        fn["sqlSignatures"] = [{"args": ["integer"], "ret": "intset"}]
+        _om, got = self._made(fn)
+        cls, m = got["int_to_set"]
+        self.assertEqual((cls, m["ooName"], m["refinedFrom"]), ("IntSet", "fromInt", "Set"))
+
     def test_the_other_operand_is_instantiated_too(self):
         # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation;
         # #_sql_other_class names the nearest class common to the other
