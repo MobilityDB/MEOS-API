@@ -163,6 +163,20 @@ answer of the subtype it is a product of (`TFloatInst` → `TInstant`), and
 any other its parent's, which is the same C type by construction. All 105
 classes resolve one, over the 21 C types MEOS's own signatures name.
 
+### Constructors from base values
+
+MEOS names a constructor from the values it is built of `<base>_to_<type>`
+(`float_to_tbox`, `float_timestamptz_to_tbox`, `timestamptz_to_stbox`), so no
+class prefix starts it. A pass after the operators assigns it to the class
+`<type>` is the prefix of, when the function answers a value of that class,
+under `<Type>.from<Base>` (`TBox.fromFloat`, `STBox.fromTimestamptz`), the
+shape of the readers MEOS names `<type>_from_<format>` (`tbox_from_wkb` is
+`TBox.fromWKB`). A template is instantiated from the SQL return type, so
+`int_to_set` is `IntSet.fromInt`. A name the class's methods already hold
+leaves the function unclassified, and so does one whose last token is no class
+(`h3_cell_to_children`). `functionToClass` records the assignment with
+`via: "fromBase"`.
+
 ### Operators
 
 MEOS names an operator `<op>_<left>_<right>` (`ever_eq_tfloat_float`,
