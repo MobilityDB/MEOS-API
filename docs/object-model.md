@@ -231,7 +231,24 @@ class common to the types its signatures name there. `acontains_geo_tgeo`,
 `acontains_geo_tcbuffer` and `acontains_geo_trgeometry` all take a
 `Temporal *`, and their `otherClass` is TGeo, TCbuffer and TRGeometry. The
 entry carries no `otherClass` where a signature names a type no class stands
-for (a base value). Base-type
+for (a base value). An operator MEOS declares and SQL does not has no
+signature to read, and its `otherClass` is the class its `other` token is the
+prefix of, read as the receiver is read: the token must be a class prefix
+exactly and the operand a value of that class. `teq_th3index_th3index`, in
+`meos_h3.h` alone, takes a TH3Index.
+
+Where the signatures name several pairs of classes, the nearest common
+classes lose which goes with which: `contains_tnumber_numspan` is declared for
+`(tint, intspan)`, `(tbigint, bigintspan)` and `(tfloat, floatspan)`, and its
+entry is `TNumber.contains` with `otherClass` Span. The entry then carries
+`instantiations`, one `{receiverClass, otherClass}` per pair the signatures
+name, in sorted order. A binding with overloading emits a member per pair on
+its receiver class, each calling the same C function
+(`TFloat.contains(FloatSpan)`), and a binding without it tells the overloads
+apart by both arguments. An entry whose signatures name one pair carries none:
+`refinedFrom` and `otherClass` already state it.
+
+Base-type
 arithmetic and comparisons (`add_int32_int32`, `eq_date_timestamp`) have no
 class to belong to and stay unclassified.
 

@@ -367,6 +367,40 @@ class AttachTests(unittest.TestCase):
         self.assertEqual(ops["acontains_geo_tgeo"][1]["otherClass"], "TGeo")
         self.assertEqual(ops["acontains_geo_tcbuffer"][1]["otherClass"], "TCbuffer")
 
+    def test_an_operator_without_sql_names_its_other_operand_by_its_token(self):
+        # Same harness as #test_the_other_operand_is_instantiated_too, for an
+        # operator MEOS declares and SQL does not: #_token_other_class reads the
+        # class from the other operand's type token, as the receiver is read.
+        _om, ops = self._operators(
+            self._fn("th3index_start_value", "const Temporal *"),
+            self._fn("teq_th3index_th3index", "const Temporal *", "const Temporal *"),
+            # A base-value token names no class, so the entry states none.
+            self._fn("ever_eq_tfloat_float", "const Temporal *", "double"))
+        self.assertEqual(ops["teq_th3index_th3index"][0], "TH3Index")
+        self.assertEqual(ops["teq_th3index_th3index"][1]["otherClass"], "TH3Index")
+        self.assertNotIn("otherClass", ops["ever_eq_tfloat_float"][1])
+
+    def test_the_operand_pairs_of_several_instantiations_are_stated(self):
+        # Same harness as #test_the_other_operand_is_instantiated_too; each
+        # signature pairs a temporal number with its own span type, which the
+        # nearest common classes TNumber and Span do not say
+        # (#_sql_instantiations).
+        _om, ops = self._operators(
+            self._fn("tnumber_integral", "const Temporal *"),
+            self._sql("contains_tnumber_numspan", ("const Temporal *", "const Span *"),
+                      ("tint", "intspan"), ("tbigint", "bigintspan"),
+                      ("tfloat", "floatspan")),
+            # One signature is one pair, which the entry already states.
+            self._fn("set_num_values", "const Set *"),
+            self._sql("contains_set_int", ("const Set *", "int"), ("intset", "integer")))
+        cls, op = ops["contains_tnumber_numspan"]
+        self.assertEqual((cls, op["otherClass"]), ("TNumber", "Span"))
+        self.assertEqual(op["instantiations"], [
+            {"receiverClass": "TBigint", "otherClass": "BigIntSpan"},
+            {"receiverClass": "TFloat", "otherClass": "FloatSpan"},
+            {"receiverClass": "TInt", "otherClass": "IntSpan"}])
+        self.assertNotIn("instantiations", ops["contains_set_int"][1])
+
     def test_internal_api_methods_are_excluded(self):
         # A function the catalog marks internal is classified to its class (so
         # the reverse index stays complete) but flagged ooExclude, so a binding
