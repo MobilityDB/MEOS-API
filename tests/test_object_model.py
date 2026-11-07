@@ -261,6 +261,74 @@ class AttachTests(unittest.TestCase):
         _om, ops = self._operators(fn)
         self.assertTrue(ops["left_stbox_stbox"][1]["ooExclude"])
 
+    @classmethod
+    def _sql(cls, name, ctypes, *signatures, order=None):
+        """A public function with typed parameters and SQL signatures, built as
+        #_fn builds one."""
+        fn = cls._fn(name, *ctypes)
+        fn["sqlSignatures"] = [{"args": list(s)} for s in signatures]
+        if order:
+            fn["sqlSignatures"][-1]["sqlArgParams"] = order
+        return fn
+
+    def test_an_operator_of_a_template_is_a_member_of_its_instantiation(self):
+        # Set is a template: the C parameter of both functions is a Set *, and
+        # the SQL signatures say which set each is for, so each operator is a
+        # member of that instantiation (#_sql_receiver_class), apart from the
+        # other, as #test_an_operator_is_a_member_of_its_first_operand places one.
+        _om, ops = self._operators(
+            self._fn("set_num_values", "const Set *"),
+            self._sql("contains_set_int", ("const Set *", "int"), ("intset", "integer")),
+            self._sql("contains_set_float", ("const Set *", "double"), ("floatset", "float")),
+            # Its second signature puts the set second; the receiver is still it.
+            self._sql("distance_set_float", ("const Set *", "double"),
+                      ("floatset", "float"), ("float", "floatset"), order=["p1", "p0"]))
+        got = {f: (c, o.get("refinedFrom")) for f, (c, o) in ops.items()}
+        self.assertEqual(got, {"contains_set_int": ("IntSet", "Set"),
+                               "contains_set_float": ("FloatSet", "Set"),
+                               "distance_set_float": ("FloatSet", "Set")})
+
+    def test_an_operator_over_every_instantiation_stays_on_the_template(self):
+        # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation.
+        _om, ops = self._operators(self._sql(
+            "contains_span_span", ("const Span *", "const Span *"),
+            ("intspan", "intspan"), ("floatspan", "floatspan")))
+        cls, op = ops["contains_span_span"]
+        self.assertEqual(cls, "Span")
+        self.assertNotIn("refinedFrom", op)
+
+    def test_instantiations_sharing_a_class_below_the_template_name_it(self):
+        # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation;
+        # geomset and geogset are both GeoSet, which is below Set.
+        _om, ops = self._operators(
+            self._fn("set_num_values", "const Set *"),
+            self._sql("contains_set_geo", ("const Set *", "const GSERIALIZED *"),
+                      ("geomset", "geometry"), ("geogset", "geography")))
+        self.assertEqual(ops["contains_set_geo"][0], "GeoSet")
+
+    def test_a_type_modifier_names_the_same_instantiation(self):
+        # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation;
+        # `geometry(Point)` is the geometry type with a modifier.
+        _om, ops = self._operators(
+            self._fn("geo_srid", "const GSERIALIZED *"),
+            self._sql("teq_geo_tfloat", ("const GSERIALIZED *", "const Temporal *"),
+                      ("geometry(Point)", "tfloat")))
+        self.assertEqual(ops["teq_geo_tfloat"][0], "Geometry")
+
+    def test_the_other_operand_is_instantiated_too(self):
+        # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation;
+        # #_sql_other_class names the nearest class common to the other
+        # operand's SQL types, so two Temporal * arguments for different
+        # classes are told apart.
+        _om, ops = self._operators(
+            self._fn("geo_srid", "const GSERIALIZED *"),
+            self._sql("acontains_geo_tgeo", ("const GSERIALIZED *", "const Temporal *"),
+                      ("geometry", "tgeometry"), ("geometry", "tgeompoint")),
+            self._sql("acontains_geo_tcbuffer", ("const GSERIALIZED *", "const Temporal *"),
+                      ("geometry", "tcbuffer")))
+        self.assertEqual(ops["acontains_geo_tgeo"][1]["otherClass"], "TGeo")
+        self.assertEqual(ops["acontains_geo_tcbuffer"][1]["otherClass"], "TCbuffer")
+
     def test_internal_api_methods_are_excluded(self):
         # A function the catalog marks internal is classified to its class (so
         # the reverse index stays complete) but flagged ooExclude, so a binding

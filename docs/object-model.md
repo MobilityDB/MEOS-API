@@ -192,7 +192,32 @@ same name twice. Each entry is
 other}`: `receiver` is `left` or `right`, the operand the method is called
 on, and `other` is the type token of the other operand. A binding groups the
 entries by `ooName` and chooses the C function by the argument's type.
-`functionToClass` records the assignment with `via: "operator"`. Base-type
+`functionToClass` records the assignment with `via: "operator"`.
+
+Set, Span, SpanSet and Temporal are templates, and a C operator on one takes
+the generic struct: `contains_set_int` and `contains_set_float` both take a
+`Set *` and a number, so on Set no argument tells them apart. The template
+is instantiated to the type the operator's SQL signatures name for its
+receiver, the parameter the rule above chose, read in each signature's own
+order where `sqlArgParams` gives one. Every MEOS type has the same spelling
+in PostgreSQL, so that SQL type names the class once its type modifier is
+dropped (`intset` is IntSet, `geometry(Point)` is Geometry). An operator moves
+to the nearest class common to the types its signatures name, when that class
+is below the one the rule chose, recording the template in `refinedFrom`
+(`contains_set_int` is `IntSet.contains`, `contains_set_geo` over `geomset` and
+`geogset` is `GeoSet.contains`). An operator over every instantiation stays on
+the template (`contains_span_span` over every span type), so it covers today's
+and tomorrow's. An operator SQL defines
+for one instantiation only is a member of that one: `tcontains_tgeo_geo` is
+declared for `tgeometry` alone, so it is `TGeometry.tcontains` and not a
+method of `TGeomPoint`.
+
+The other operand is instantiated the same way: `otherClass` is the nearest
+class common to the types its signatures name there. `acontains_geo_tgeo`,
+`acontains_geo_tcbuffer` and `acontains_geo_trgeometry` all take a
+`Temporal *`, and their `otherClass` is TGeo, TCbuffer and TRGeometry. The
+entry carries no `otherClass` where a signature names a type no class stands
+for (a base value). Base-type
 arithmetic and comparisons (`add_int32_int32`, `eq_date_timestamp`) have no
 class to belong to and stay unclassified.
 
