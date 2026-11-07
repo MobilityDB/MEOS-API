@@ -12,6 +12,7 @@ Plain unittest, no pytest dependency; fully synthetic IDL, no build artifacts.
 import unittest
 
 from parser.shapeinfer import (infer_shapes, attach_struct_input_arrays,
+                               attach_documented_output_counts,
                                attach_counted_array_returns)
 
 
@@ -329,6 +330,57 @@ class CountedArrayReturnTests(unittest.TestCase):
         self.assertEqual(n, 0)
         self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"]["lengthFrom"],
                          {"kind": "param", "name": "count"})
+
+    def test_an_output_array_beside_no_array_return_states_its_length(self):
+        # tpoint_as_mvtgeom answers a bool, one geometry through gsarr and
+        # `*count` timestamps through timesarr: with no array return to take a
+        # length from, the out-array states the count itself (#_shape_from_count).
+        idl = {"functions": [_fn("tpoint_as_mvtgeom", "bool",
+                                 [("temp", "const Temporal *"),
+                                  ("gsarr", "GSERIALIZED **"),
+                                  ("timesarr", "int64 **"), ("count", "int *")])]}
+        idl, _ = infer_shapes(idl)
+        shape = idl["functions"][0]["shape"]
+        self.assertNotIn("arrayReturn", shape)
+        self.assertEqual(shape["outputArrays"], [
+            {"param": "timesarr", "lengthFrom": {"kind": "param", "name": "count"}}])
+
+    def test_an_output_array_beside_an_array_return_shares_its_length(self):
+        # Same harness as #test_two_parallel_output_arrays: the array return
+        # states the length, and the out-arrays beside it take it from there.
+        idl = {"functions": [_fn("tfloat_value_split", "Temporal **",
+                                 [("temp", "const Temporal *"),
+                                  ("bins", "double **"), ("count", "int *")])]}
+        idl, _ = infer_shapes(idl)
+        self.assertEqual(idl["functions"][0]["shape"]["outputArrays"],
+                         [{"param": "bins"}])
+
+    def test_a_documented_output_count_is_the_length_of_the_array_return(self):
+        # jsonbset_exists_array answers `*rescount` booleans; its count is named
+        # otherwise than `count`, and documented as the output array's number of
+        # values (#attach_documented_output_counts).
+        idl = {"functions": [_fn("jsonbset_exists_array", "bool *",
+                                 [("set", "const Set *"), ("keys", "text **"),
+                                  ("count", "int"), ("any", "bool"),
+                                  ("rescount", "int *")])]}
+        docs = {"jsonbset_exists_array": {
+            "count": "Number of elements in the input array",
+            "rescount": "Number of values in the output array"}}
+        idl, _ = infer_shapes(idl)
+        idl, n = attach_documented_output_counts(idl, docs)
+        self.assertEqual(n, 1)
+        self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"], {
+            "lengthFrom": {"kind": "param", "name": "rescount"},
+            "element": {"c": "bool", "canonical": "bool"}})
+
+    def test_an_integer_out_parameter_documented_otherwise_is_no_count(self):
+        # Same harness as #test_a_documented_output_count_is_the_length_of_the_array_return.
+        idl = {"functions": [_fn("tbox_xmin_n", "int *",
+                                 [("box", "const TBox *"), ("result", "int *")])]}
+        docs = {"tbox_xmin_n": {"result": "Minimum X value"}}
+        idl, n = attach_documented_output_counts(idl, docs)
+        self.assertEqual(n, 0)
+        self.assertNotIn("shape", idl["functions"][0])
 
 
 if __name__ == "__main__":

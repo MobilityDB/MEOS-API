@@ -285,6 +285,83 @@ def _is_index_pair_return(func: dict, count: str) -> bool:
                and prm.get("name") == count for prm in params)
 
 
+def _shape_from_count(func: dict, count: str) -> tuple[int, int]:
+    """State the arrays an output count is the length of, and answer how many
+    array returns and output arrays were stated.
+
+    The primary pointer return takes its length from the count. Each parallel
+    written-back out-array (``TYPE **extra`` beside the count) is one array; with
+    no pointer return to take a length from, each states its own, the count,
+    so a binding reads the out-arrays of ``tpoint_as_mvtgeom``, which answers a
+    ``bool`` beside them, as it reads those beside an array return."""
+    n_arr = 0
+    shape = func.setdefault("shape", {})
+    rtype = func.get("returnType", {})
+    ret = rtype.get("c", "")
+    returns_array = ret.rstrip().endswith("*")
+    if returns_array:
+        ar = shape.setdefault("arrayReturn", {})
+        ar["lengthFrom"] = {"kind": "param", "name": count}
+        # Element type = the return with exactly one pointer level stripped,
+        # resolved canonically so every binding reads a first-class
+        # ``{c, canonical}`` type object (mirroring ``returnType``/``params``)
+        # and routes it through its EXISTING per-type marshaller — never
+        # re-parsing the return string.  ``double *`` -> ``double`` (by-value);
+        # ``struct TInstant **`` -> ``struct TInstant *`` (array of pointers).
+        ar["element"] = {
+            "c": _strip_one_ptr(ret),
+            "canonical": _strip_one_ptr(
+                rtype.get("canonical", ret)),
+        }
+        # How many elements make up ONE unit of `lengthFrom`.  Omitted when it is
+        # 1 (the ordinary case); 2 for the NxN kernels, whose count is a number
+        # of index PAIRS over a flattened `[i0, j0, i1, j1, ...]` return.  A
+        # binding multiplies `lengthFrom` by it and never re-derives the factor.
+        if _strip_one_ptr(ret).strip() == "int" and _is_index_pair_return(func, count):
+            ar["groupSize"] = 2
+        n_arr += 1
+    out = [{"param": p["name"]} for p in func["params"]
+           if p["name"] != count and _is_written_back_array(p)]
+    if not returns_array:
+        for entry in out:
+            entry["lengthFrom"] = {"kind": "param", "name": count}
+    if out:
+        shape["outputArrays"] = out
+    return n_arr, len(out)
+
+
+_OUTPUT_COUNT_DOC = re.compile(r"number of \w+ in the output array\b", re.I)
+
+
+def attach_documented_output_counts(idl: dict, docs: dict) -> tuple[dict, int]:
+    """(idl, number of counts read) once each output count the MEOS documentation
+    names states the arrays it is the length of, as #infer_shapes states those of
+    the out-parameter named ``count``.
+
+    MEOS names its output counts ``count`` almost everywhere, and #_out_count_param
+    reads that name, but the documentation is what says it: every one is an
+    ``int *`` documented ``Number of <elements> in the output array``.
+    ``jsonbset_exists_array(..., int *rescount)`` answers ``rescount`` booleans and
+    documents ``rescount`` as ``Number of values in the output array``. It runs once
+    the ``@param`` text is read (#extract_param_docs of parser/nullable.py), as
+    #attach_struct_input_arrays does, and leaves a function #infer_shapes already
+    shaped from its ``count`` as it is."""
+    n = 0
+    for func in idl["functions"]:
+        if _out_count_param(func):
+            continue
+        fdocs = docs.get(func["name"]) or {}
+        counts = [p["name"] for p in func.get("params", [])
+                  if _bare(p.get("cType")) == "int *"
+                  and _OUTPUT_COUNT_DOC.match(fdocs.get(p["name"], ""))]
+        if len(counts) != 1:
+            continue
+        arr, oa = _shape_from_count(func, counts[0])
+        if arr or oa:
+            n += 1
+    return idl, n
+
+
 def infer_shapes(idl: dict) -> tuple[dict, dict]:
     """Populate ``func['shape']`` with ``arrayReturn``/``outputArrays`` derived
     from the signatures.  Returns ``(idl, stats)``.  Idempotent and additive:
@@ -298,36 +375,8 @@ def infer_shapes(idl: dict) -> tuple[dict, dict]:
         count = _out_count_param(func)
         if not count:
             continue  # not array-returning; nothing more to infer
-        shape = func.setdefault("shape", {})
-        # The primary pointer return takes its length from the output count.
-        rtype = func.get("returnType", {})
-        ret = rtype.get("c", "")
-        if ret.rstrip().endswith("*"):
-            ar = shape.setdefault("arrayReturn", {})
-            ar["lengthFrom"] = {"kind": "param", "name": count}
-            # Element type = the return with exactly one pointer level stripped,
-            # resolved canonically so every binding reads a first-class
-            # ``{c, canonical}`` type object (mirroring ``returnType``/``params``)
-            # and routes it through its EXISTING per-type marshaller — never
-            # re-parsing the return string.  ``double *`` -> ``double`` (by-value);
-            # ``struct TInstant **`` -> ``struct TInstant *`` (array of pointers).
-            ar["element"] = {
-                "c": _strip_one_ptr(ret),
-                "canonical": _strip_one_ptr(
-                    rtype.get("canonical", ret)),
-            }
-            # How many elements make up ONE unit of `lengthFrom`.  Omitted when it is
-            # 1 (the ordinary case); 2 for the NxN kernels, whose count is a number
-            # of index PAIRS over a flattened `[i0, j0, i1, j1, ...]` return.  A
-            # binding multiplies `lengthFrom` by it and never re-derives the factor.
-            if _strip_one_ptr(ret).strip() == "int" and _is_index_pair_return(func, count):
-                ar["groupSize"] = 2
-            n_arr += 1
-        # Parallel written-back out-arrays (``TYPE **extra`` alongside count).
-        out = [{"param": p["name"]} for p in func["params"]
-               if p["name"] != count and _is_written_back_array(p)]
-        if out:
-            shape["outputArrays"] = out
-            n_oa += len(out)
+        arr, oa = _shape_from_count(func, count)
+        n_arr += arr
+        n_oa += oa
     return idl, {"arrayReturn": n_arr, "outputArrays": n_oa,
                  "inputArrays": n_ia}
