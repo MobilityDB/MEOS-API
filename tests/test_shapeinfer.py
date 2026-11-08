@@ -13,7 +13,8 @@ import unittest
 
 from parser.shapeinfer import (infer_shapes, attach_struct_input_arrays,
                                attach_documented_output_counts,
-                               attach_counted_array_returns)
+                               attach_counted_array_returns,
+                               attach_array_releases)
 
 
 def _fn(name, ret, params):
@@ -381,6 +382,46 @@ class CountedArrayReturnTests(unittest.TestCase):
         idl, n = attach_documented_output_counts(idl, docs)
         self.assertEqual(n, 0)
         self.assertNotIn("shape", idl["functions"][0])
+
+    def _releasing(self, producer_element="GeomVal *", doc="Array answered by "
+                   "#raster_dump_as_polygons()"):
+        """raster_dump_as_polygons and geomval_arr_free, shaped as the catalog
+        shapes them, with `doc` on the released array."""
+        idl = {"functions": [
+            _fn("raster_dump_as_polygons", producer_element,
+                [("rast", "const Raster *"), ("band", "int"), ("count", "int *")]),
+            _fn("geomval_arr_free", "void",
+                [("gvarr", "GeomVal *"), ("count", "int")])]}
+        docs = {"geomval_arr_free": {"gvarr": doc,
+                                     "count": "Number of elements it holds"}}
+        idl, _ = infer_shapes(idl)
+        idl, _ = attach_struct_input_arrays(idl, docs)
+        return idl, docs
+
+    def test_an_array_return_states_the_function_documented_to_release_it(self):
+        # geomval_arr_free documents its array as the one raster_dump_as_polygons
+        # answers, and reads GeomVal values as that array holds them
+        # (#attach_array_releases).
+        idl, docs = self._releasing()
+        idl, n = attach_array_releases(idl, docs)
+        self.assertEqual(n, 1)
+        self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"]["releasedBy"],
+                         {"function": "geomval_arr_free", "param": "gvarr"})
+
+    def test_a_release_of_another_element_is_no_release(self):
+        # Same harness as #test_an_array_return_states_the_function_documented_to_release_it:
+        # an array of other values than the release reads is not the one it releases.
+        idl, docs = self._releasing(producer_element="Pixel *")
+        idl, n = attach_array_releases(idl, docs)
+        self.assertEqual(n, 0)
+        self.assertNotIn("releasedBy", idl["functions"][0]["shape"]["arrayReturn"])
+
+    def test_an_array_documented_otherwise_names_no_release(self):
+        # Same harness; "Array of polygons" names no function it was answered by.
+        idl, docs = self._releasing(doc="Array of polygons")
+        idl, n = attach_array_releases(idl, docs)
+        self.assertEqual(n, 0)
+        self.assertNotIn("releasedBy", idl["functions"][0]["shape"]["arrayReturn"])
 
 
 if __name__ == "__main__":

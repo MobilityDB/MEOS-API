@@ -13,7 +13,8 @@ from parser.typerecover import (recover_collapsed_types, normalize_canonical,
 from parser.header_types import reconcile
 from parser.shapeinfer import (infer_shapes, attach_struct_input_arrays,
                                attach_documented_output_counts,
-                               attach_counted_array_returns)
+                               attach_counted_array_returns,
+                               attach_array_releases)
 from parser.nullable import merge_nullable, extract_param_docs, attach_function_docs
 from parser.nullresult import attach_null_result
 from parser.outparam import extract_param_names, merge_outparams
@@ -178,6 +179,9 @@ def main():
           file=sys.stderr)
     idl, ncr = attach_counted_array_returns(idl)
     print(f"      array returns as long as an input array: {ncr}", file=sys.stderr)
+    idl, nrel = attach_array_releases(idl, _param_docs)
+    print(f"      array returns released by a function documented for them: {nrel}",
+          file=sys.stderr)
     idl, no, out_drift = merge_outparams(idl, _doxy_root)
     print(f"      out params from Doxygen `@param[out]`: {no}", file=sys.stderr)
     if out_drift:
