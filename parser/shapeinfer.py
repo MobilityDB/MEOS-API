@@ -362,6 +362,38 @@ def attach_documented_output_counts(idl: dict, docs: dict) -> tuple[dict, int]:
     return idl, n
 
 
+_ANSWERED_BY_DOC = re.compile(r"array answered by #(?P<fn>\w+)\(\)", re.I)
+
+
+def attach_array_releases(idl: dict, docs: dict) -> tuple[dict, int]:
+    """(idl, number of releases stated) once each array return states the function
+    that releases it, as ``shape.arrayReturn.releasedBy``.
+
+    ``raster_dump_as_polygons`` answers an array of ``GeomVal``, each holding a
+    geometry, and the array is released, geometries with it, by
+    ``geomval_arr_free(GeomVal *gvarr, int count)``. The MEOS documentation is what
+    says so: the releasing function documents its array as the ``Array answered by
+    #raster_dump_as_polygons()``. That parameter is one of its input arrays
+    (#attach_struct_input_arrays), and its element is the element of the array the
+    named function returns, so the link holds in the types as well as in the words.
+    It runs once the input arrays of structs and the array returns are stated."""
+    by_name = {f["name"]: f for f in idl["functions"]}
+    n = 0
+    for func in idl["functions"]:
+        fdocs = docs.get(func["name"]) or {}
+        for arr in (func.get("shape") or {}).get("inputArrays") or ():
+            m = _ANSWERED_BY_DOC.match(fdocs.get(arr["param"], ""))
+            if not m:
+                continue
+            producer = by_name.get(m.group("fn"))
+            ret = ((producer or {}).get("shape") or {}).get("arrayReturn")
+            if not ret or _bare(ret["element"]["c"]) != _bare(arr["element"]["c"]):
+                continue
+            ret["releasedBy"] = {"function": func["name"], "param": arr["param"]}
+            n += 1
+    return idl, n
+
+
 def infer_shapes(idl: dict) -> tuple[dict, dict]:
     """Populate ``func['shape']`` with ``arrayReturn``/``outputArrays`` derived
     from the signatures.  Returns ``(idl, stats)``.  Idempotent and additive:
