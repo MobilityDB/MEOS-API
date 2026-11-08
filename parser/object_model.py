@@ -192,7 +192,8 @@ def _candidates(model: dict) -> list:
                 continue
             for pref in spec.get("prefixes", []):
                 out.append((pref + "box", {"class": rel["to"], "scope": "companion",
-                                           "axis": "valueBox", "valueOf": name}))
+                                           "axis": "valueBox", "valueOf": name,
+                                           "valueToken": pref}))
     out.sort(key=lambda kv: len(kv[0]), reverse=True)
     return out
 
@@ -207,12 +208,15 @@ def _lattice_ancestors(name: str, lat: dict) -> list:
     return chain
 
 
-def _value_box_suffix(leaf: str) -> str:
-    """The value type a member of a leaf's box names: the leaf's class without its
-    `T` (TInt is Int), so tintbox_expand and tfloatbox_expand are TBox.expandInt
-    and TBox.expandFloat, apart in a binding without overloading, as the member
-    names #_ooname derives stay apart."""
-    return leaf[1:] if leaf.startswith("T") else leaf
+def _value_box_suffix(prefix: str) -> str:
+    """The value type a member of a leaf's box names: the SQL name of the leaf's
+    type without its `t`, with only its first letter in uppercase, as a type is
+    written in every member name (`tbigint` is Bigint, never the class's BigInt),
+    so tintbox_expand, tbigintbox_expand and tfloatbox_expand are TBox.expandInt,
+    TBox.expandBigint and TBox.expandFloat, apart in a binding without
+    overloading, as the member names #_ooname derives stay apart."""
+    token = prefix[1:] if prefix.startswith("t") else prefix
+    return token[:1].upper() + token[1:]
 
 
 def _classify(fn_name: str, candidates: list):
@@ -985,7 +989,7 @@ def attach_object_model(idl: dict, path: Path,
         method = {"function": name, "role": role,
                   "scope": tgt["scope"], "backing": name,
                   "ooName": _ooname(name, cls, pref)
-                            + (_value_box_suffix(tgt["valueOf"]) if tgt.get("valueOf") else "")}
+                            + (_value_box_suffix(tgt["valueToken"]) if tgt.get("valueToken") else "")}
         if _oo_excluded(fn, role):
             method["ooExclude"] = True
         sugar = []

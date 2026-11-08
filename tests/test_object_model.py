@@ -354,12 +354,16 @@ class AttachTests(unittest.TestCase):
             self._fn("tintbox_expand", "const TBox *", "int"),
             self._fn("tfloatbox_expand", "const TBox *", "double"),
             self._fn("tfloatbox_shift_scale", "const TBox *", "double", "double", "bool", "bool"),
+            self._fn("tbigintbox_expand", "const TBox *", "int64"),
         ]}, MODEL, None)
         om = idl["objectModel"]
         names = {m["function"]: m["ooName"] for m in om["classes"]["TBox"]["methods"]}
         self.assertEqual({k: v for k, v in names.items() if "box_" in k and not k.startswith("tbox_")}, {
             "tintbox_expand": "expandInt", "tfloatbox_expand": "expandFloat",
-            "tfloatbox_shift_scale": "shiftScaleFloat"})
+            "tfloatbox_shift_scale": "shiftScaleFloat",
+            # the SQL name of the type with one capital, as in every member name,
+            # never the class TBigInt's spelling
+            "tbigintbox_expand": "expandBigint"})
         self.assertEqual(om["functionToClass"]["tintbox_expand"]["class"], "TBox")
 
     def test_a_constructor_whose_first_token_is_no_class_is_no_operator(self):
