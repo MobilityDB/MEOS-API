@@ -26,6 +26,7 @@ from parser.aggregates import attach_aggregates
 from parser.altsqlfn import attach_aggregate_alt_sql_names, attach_alt_sql_names
 from parser.compositions import attach_compositions, attach_wrapper_compositions
 from parser.indexsearch import attach_index_search
+from parser.enumtext import attach_enum_text
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
@@ -383,6 +384,12 @@ def main():
     print(f"      Attaching temporal covering from {COVERING_PATH}...",
           file=sys.stderr)
     idl = attach_temporal_covering(idl, COVERING_PATH)
+
+    # Attach the text pair of each enumeration: the functions MEOS names from it that write
+    # and read its values as text, so a binding passes them as the SQL functions do.
+    idl, n_text = attach_enum_text(idl)
+    print(f"      enumerations with a text pair: {n_text} "
+          f"({', '.join(e['name'] for e in idl['enums'] if e.get('text'))})", file=sys.stderr)
 
     # 7. Derive the explicit object model (class lattice + methods + error
     #    contract) from the implicit MEOS prefix convention.
