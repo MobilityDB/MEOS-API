@@ -26,7 +26,11 @@ already builds -- a MEOS function names its wrapper through ``@csqlfn``, and
 ``PG_ARGISNULL`` guards are EXCLUDED.  Those propagate a null ARGUMENT, which is
 a statement about the input (already carried by ``shape.nullable``) rather than
 about whether an answer exists.  Counting them would report a function as
-absence-capable because its caller may pass nothing.
+absence-capable because its caller may pass nothing.  For the same reason a
+guard reading the raw arguments (``PG_GETARG_*``) is excluded: a wrapper that
+answers NULL early, before the MEOS call, for a case the MEOS function itself
+answers with its absence states nothing new, and reading it first would hide the
+result guard below it.
 
 Adds ``shape.nullableResult`` -- the guard text -- to every function whose
 wrapper carries one.  Its ABSENCE is as meaningful as its presence: a wrapper
@@ -41,8 +45,12 @@ from parser.typescope import read_bodies
 
 _RETURN_NULL = re.compile(r"\bPG_RETURN_NULL\s*\(\s*\)")
 _IF_OPEN = re.compile(r"\bif\s*\(")
-# An argument-null guard says nothing about whether an answer exists.
-_ARGISNULL = re.compile(r"\bPG_ARGISNULL\b")
+# A guard on the arguments says nothing about whether an answer exists: an
+# argument-null guard, and a shortcut reading the raw argument datums before the
+# MEOS call, such as `if (temporal_slices_share_no_time(PG_GETARG_DATUM(0),
+# PG_GETARG_DATUM(1)))`, whose case the MEOS function answers with its own
+# absence, stated by the guard on its result below.
+_ARGISNULL = re.compile(r"\bPG_ARGISNULL\b|\bPG_GETARG_")
 # How far above a PG_RETURN_NULL its guard may sit.  The guards in the tree are
 # on the line before or, when the condition wraps, two or three lines above; a
 # wider window would start attributing an unrelated earlier `if`.

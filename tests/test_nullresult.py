@@ -7,7 +7,8 @@ PG wrapper that states it, (2) a wrapper that delegates `fcinfo` to a shared
 helper inherits the helper's guard -- a third of the tree takes that shape, and
 reading only the wrapper reports the whole restriction family as always
 answering -- and (3) a `PG_ARGISNULL` guard is NOT an absence guard, since it
-propagates a null argument rather than saying whether an answer exists.
+propagates a null argument rather than saying whether an answer exists, and
+nor is a shortcut reading the raw arguments ahead of the guard on the result.
 """
 
 import sys
@@ -123,6 +124,31 @@ Temporal_tcount_transfn(PG_FUNCTION_ARGS)
 }
 """)
         self.assertEqual({}, extract_null_results(src))
+
+    def test_an_argument_shortcut_does_not_hide_the_result_guard(self):
+        # The sibling of #test_an_argument_null_guard_is_not_an_absence_guard: a
+        # wrapper may answer NULL before the MEOS call from the raw argument
+        # datums (the shape of the generated wrapper NAD_tnumber_tnumber); the
+        # guard on the result is the one that states absence.
+        src = _tree("""
+Datum
+NAD_tnumber_tnumber(PG_FUNCTION_ARGS)
+{
+  if (temporal_slices_share_no_time(PG_GETARG_DATUM(0),
+      PG_GETARG_DATUM(1)))
+    PG_RETURN_NULL();
+  Temporal *temp1 = PG_GETARG_TEMPORAL_P(0);
+  Temporal *temp2 = PG_GETARG_TEMPORAL_P(1);
+  MeosType basetype = temptype_basetype(temp1->temptype);
+  Datum result = nad_tnumber_tnumber(temp1, temp2);
+  if (datum_eq(result, distance_sentinel(basetype), basetype))
+    PG_RETURN_NULL();
+  PG_RETURN_FLOAT8(distance_double(result, basetype));
+}
+""")
+        self.assertEqual({"NAD_tnumber_tnumber":
+                          "if (datum_eq(result, distance_sentinel(basetype), basetype))"},
+                         extract_null_results(src))
 
 
 class AttachTests(unittest.TestCase):
