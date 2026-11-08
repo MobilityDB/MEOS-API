@@ -1314,13 +1314,13 @@
         "dispatch": [
           {
             "py": "Point",
-            "fn": "tpoint_at_value",
+            "fn": "tgeo_at_value",
             "argTransform": "geoToGserialized",
             "geodeticFromSelf": true
           },
           {
             "py": "BaseGeometry",
-            "fn": "tpoint_at_geom",
+            "fn": "tgeo_at_geom",
             "argTransform": "geoToGserialized",
             "geodeticFromSelf": true
           },
@@ -1366,13 +1366,13 @@
         "dispatch": [
           {
             "py": "Point",
-            "fn": "tpoint_minus_value",
+            "fn": "tgeo_minus_value",
             "argTransform": "geoToGserialized",
             "geodeticFromSelf": true
           },
           {
             "py": "BaseGeometry",
-            "fn": "tpoint_minus_geom",
+            "fn": "tgeo_minus_geom",
             "argTransform": "geoToGserialized",
             "geodeticFromSelf": true
           },
