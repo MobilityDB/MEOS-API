@@ -346,6 +346,40 @@ class CountedArrayReturnTests(unittest.TestCase):
         self.assertEqual(shape["outputArrays"], [
             {"param": "timesarr", "lengthFrom": {"kind": "param", "name": "count"}}])
 
+    def test_a_value_of_no_fixed_length_returned_beside_a_count_is_one_value(self):
+        # Same harness as #test_an_output_array_beside_no_array_return_states_its_length,
+        # in tpoint_as_mvtgeom's present form: it answers one geometry and
+        # `*count` timestamps through timesarr; geo_mem_size sizes a
+        # GSERIALIZED, so a GSERIALIZED * is one value and the count is the
+        # out-array's alone.
+        mvt = _fn("tpoint_as_mvtgeom", "GSERIALIZED *",
+                  [("temp", "const Temporal *"), ("bounds", "const STBox *"),
+                   ("timesarr", "int64_t **"), ("count", "int *")])
+        size = _fn("geo_mem_size", "size_t", [("gs", "const GSERIALIZED *")])
+        idl, stats = infer_shapes({"functions": [mvt, size]})
+        shape = idl["functions"][0]["shape"]
+        self.assertNotIn("arrayReturn", shape)
+        self.assertEqual(stats["arrayReturn"], 0)
+        self.assertEqual(shape["outputArrays"], [
+            {"param": "timesarr", "lengthFrom": {"kind": "param", "name": "count"}}])
+        # The sizing function is what decides: without it the same signature
+        # reads as an array of `*count` geometries.
+        idl, _ = infer_shapes({"functions": [_fn(
+            mvt["name"], "GSERIALIZED *",
+            [(p["name"], p["cType"]) for p in mvt["params"]])]})
+        self.assertIn("arrayReturn", idl["functions"][0]["shape"])
+
+    def test_a_value_of_fixed_length_returned_beside_a_count_is_an_array(self):
+        # Same harness as #test_output_array_with_pointer_count: set_spans
+        # answers `*count` spans, and a Span has no `_mem_size`, so its pointer
+        # return stays an array even beside a sized type.
+        idl = {"functions": [
+            _fn("set_spans", "Span *", [("s", "const Set *"), ("count", "int *")]),
+            _fn("set_mem_size", "int", [("s", "const Set *")])]}
+        idl, _ = infer_shapes(idl)
+        self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"]["lengthFrom"],
+                         {"kind": "param", "name": "count"})
+
     def test_an_output_array_beside_an_array_return_shares_its_length(self):
         # Same harness as #test_two_parallel_output_arrays: the array return
         # states the length, and the out-arrays beside it take it from there.

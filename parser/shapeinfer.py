@@ -285,20 +285,43 @@ def _is_index_pair_return(func: dict, count: str) -> bool:
                and prm.get("name") == count for prm in params)
 
 
-def _shape_from_count(func: dict, count: str) -> tuple[int, int]:
+def _variable_length_types(idl: dict) -> frozenset:
+    """The types whose values have no fixed length: each one a function named
+    ``_mem_size`` sizes from a pointer to one value, as #_image of
+    parser/codecs.py reads the size of a value's image (``geo_mem_size`` sizes a
+    ``GSERIALIZED``, ``temporal_mem_size`` a ``Temporal``). A ``Span`` or an
+    ``STBox`` has the length clang lays it in and no such function."""
+    out = set()
+    for f in idl.get("functions", []):
+        params = f.get("params") or []
+        if not f["name"].endswith("_mem_size") or len(params) != 1:
+            continue
+        ctype = _bare(params[0].get("cType")).replace("struct ", "")
+        if ctype.endswith("*") and not ctype.endswith("**"):
+            out.add(_strip_one_ptr(ctype))
+    return frozenset(out)
+
+
+def _shape_from_count(func: dict, count: str,
+                      varlen: frozenset = frozenset()) -> tuple[int, int]:
     """State the arrays an output count is the length of, and answer how many
     array returns and output arrays were stated.
 
     The primary pointer return takes its length from the count. Each parallel
     written-back out-array (``TYPE **extra`` beside the count) is one array; with
     no pointer return to take a length from, each states its own, the count,
-    so a binding reads the out-arrays of ``tpoint_as_mvtgeom``, which answers a
-    ``bool`` beside them, as it reads those beside an array return."""
+    so a binding reads the out-arrays of ``tpoint_as_mvtgeom`` as it reads those
+    beside an array return. A pointer to a value of a type in ``varlen``
+    (#_variable_length_types) is that one value and not an array, since values
+    of no fixed length cannot lie one after another in a C array: an array of
+    them is spelled ``TYPE **``. ``tpoint_as_mvtgeom`` answers one
+    ``GSERIALIZED *`` and ``*count`` times through ``timesarr``."""
     n_arr = 0
     shape = func.setdefault("shape", {})
     rtype = func.get("returnType", {})
     ret = rtype.get("c", "")
-    returns_array = ret.rstrip().endswith("*")
+    returns_array = (ret.rstrip().endswith("*") and _strip_one_ptr(
+        _bare(ret).replace("struct ", "")) not in varlen)
     if returns_array:
         ar = shape.setdefault("arrayReturn", {})
         ar["lengthFrom"] = {"kind": "param", "name": count}
@@ -347,6 +370,7 @@ def attach_documented_output_counts(idl: dict, docs: dict) -> tuple[dict, int]:
     #attach_struct_input_arrays does, and leaves a function #infer_shapes already
     shaped from its ``count`` as it is."""
     n = 0
+    varlen = _variable_length_types(idl)
     for func in idl["functions"]:
         if _out_count_param(func):
             continue
@@ -356,7 +380,7 @@ def attach_documented_output_counts(idl: dict, docs: dict) -> tuple[dict, int]:
                   and _OUTPUT_COUNT_DOC.match(fdocs.get(p["name"], ""))]
         if len(counts) != 1:
             continue
-        arr, oa = _shape_from_count(func, counts[0])
+        arr, oa = _shape_from_count(func, counts[0], varlen)
         if arr or oa:
             n += 1
     return idl, n
@@ -399,6 +423,7 @@ def infer_shapes(idl: dict) -> tuple[dict, dict]:
     from the signatures.  Returns ``(idl, stats)``.  Idempotent and additive:
     only the array-output families are touched, everything else is untouched."""
     n_arr = n_oa = n_ia = 0
+    varlen = _variable_length_types(idl)
     for func in idl["functions"]:
         inputs = _input_arrays(func)
         if inputs:
@@ -407,7 +432,7 @@ def infer_shapes(idl: dict) -> tuple[dict, dict]:
         count = _out_count_param(func)
         if not count:
             continue  # not array-returning; nothing more to infer
-        arr, oa = _shape_from_count(func, count)
+        arr, oa = _shape_from_count(func, count, varlen)
         n_arr += arr
         n_oa += oa
     return idl, {"arrayReturn": n_arr, "outputArrays": n_oa,
