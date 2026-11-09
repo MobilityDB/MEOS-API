@@ -266,6 +266,18 @@ being the value its `startValue` returns, so `trgeometry`, a reference geometry
 and a temporal pose, takes `geoRound`. A signature selecting no name or several
 stops the catalog. See [`parser/altsqlfn.py`](parser/altsqlfn.py).
 
+## Type support functions
+
+Every SQL signature a type's `CREATE TYPE` binds as its input, output, receive or
+send function states that role: `typeSupport: input` on `intset_in(cstring)`,
+`typeSupport: send` on `temporal_send(tint)`. A signature is marked when its name
+is `<stem>_in`, `<stem>_out`, `<stem>_recv` or `<stem>_send` and its signature is
+the one PostgreSQL requires of that role, the stem being the type or a class whose
+temporal types include it in the object model's lattice. No engine calls these
+functions by name: each reaches the same MEOS function through its portable reader
+or writer (`<type>FromText` and `asText`, `<type>FromBinary` and `asBinary`), so a
+binding registers no marked signature. See [`parser/typesupport.py`](parser/typesupport.py).
+
 ## OpenAPI generation
 
 The enriched catalog (the `network` / `wire` / `typeEncodings` produced by the

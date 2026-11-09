@@ -27,6 +27,7 @@ from parser.altsqlfn import attach_aggregate_alt_sql_names, attach_alt_sql_names
 from parser.compositions import attach_compositions, attach_wrapper_compositions
 from parser.indexsearch import attach_index_search
 from parser.enumtext import attach_enum_text
+from parser.typesupport import attach_type_support
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
@@ -489,6 +490,13 @@ def main():
                                  + "\n  ".join(agg_alt_errors))
             print(f"      SQL aggregates stating their alternative name: {nagg_alt}",
                   file=sys.stderr)
+
+    # Mark the signatures of the four functions a type's CREATE TYPE binds (input, output,
+    # receive, send), which every engine reaches through its portable reader or writer, so a
+    # binding registers none of them and holds no rule of its own for telling one.
+    idl, n_support = attach_type_support(idl)
+    print(f"      type support signatures: "
+          f"{', '.join(f'{n} {role}' for role, n in n_support.items())}", file=sys.stderr)
 
     # Stamp the MobilityDB source commit so the catalog is SELF-DESCRIBING about its freshness:
     # a consumer proves it is current by comparing sourceCommit to live upstream master, never by
