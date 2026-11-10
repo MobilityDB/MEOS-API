@@ -289,6 +289,32 @@ class AttachTests(unittest.TestCase):
                                "contains_set_float": ("FloatSet", "Set"),
                                "distance_set_float": ("FloatSet", "Set")})
 
+    def test_an_operator_of_another_answer_than_its_inherited_name_takes_its_sql_name(self):
+        # Same harness as #test_an_operator_is_a_member_of_its_first_operand.
+        # `contains` of two temporal values answers a bool, the containment of
+        # their times (spanContains); `contains` of two temporal JSONB values
+        # answers a temporal boolean, the containment of their values
+        # (tjsonbContains), so it takes its SQL name (#_sql_named_operators).
+        # `contains` of two temporal numbers answers a bool too, the same
+        # operation on another class, and keeps the shared name.
+        def op(name, ret, sqlfn):
+            fn = self._fn(name, "const Temporal *", "const Temporal *")
+            fn["returnType"] = {"c": ret, "canonical": ret}
+            fn["sqlfn"] = sqlfn
+            return fn
+        _om, ops = self._operators(
+            self._fn("temporal_num_instants", "const Temporal *"),
+            self._fn("tjsonb_start_value", "const Temporal *"),
+            self._fn("tnumber_integral", "const Temporal *"),
+            op("contains_temporal_temporal", "bool", "spanContains"),
+            op("contains_tjsonb_tjsonb", "Temporal *", "tjsonbContains"),
+            op("contains_tnumber_tnumber", "bool", "tboxContains"))
+        got = {f: (c, o["ooName"]) for f, (c, o) in ops.items()}
+        self.assertEqual(got, {
+            "contains_temporal_temporal": ("Temporal", "contains"),
+            "contains_tjsonb_tjsonb": ("TJsonb", "tjsonbContains"),
+            "contains_tnumber_tnumber": ("TNumber", "contains")})
+
     def test_an_operator_over_every_instantiation_stays_on_the_template(self):
         # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation.
         _om, ops = self._operators(self._sql(

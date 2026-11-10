@@ -516,6 +516,45 @@ def _sql_return_class(fn: dict, sql_classes: dict, parents: dict) -> str | None:
     return _nearest_common(found, parents) if found else None
 
 
+def _sql_named_operators(classes: dict, by_name: dict, parents: dict) -> int:
+    """Name an operator after its SQL function where the name of its operation
+    is another operation on its class, and answer how many it renamed.
+
+    An operator is named after the leading verb of its C name (#_operator_entry),
+    so ``contains_tjsonb_jsonb`` is ``contains``, the name ``contains_temporal_temporal``
+    gives every temporal class. Where an ancestor's members of that name answer
+    another type than the operator does (a ``bool`` beside a ``Temporal *``), the
+    two are different operations, which no dispatcher of one name can answer
+    both of, and SQL already tells them apart by name: ``@>`` on two temporal
+    JSONB values is ``tjsonbContains``, the containment of their values, and
+    ``#@>`` is ``spanContains``, that of their times. The operator then takes
+    the name of its SQL function (``sqlfn``), as the owner ruled on 2026-11-10;
+    an operator answering the type its ancestor's members answer
+    (``tboxContains`` beside ``spanContains``) is the same operation on another
+    class and keeps the shared name, as #_sql_receiver_class keeps it."""
+    def ret(fn):
+        return " ".join((((by_name.get(fn) or {}).get("returnType") or {})
+                         .get("c") or "").replace("const ", "").split())
+    named = {}
+    for cls, spec in classes.items():
+        for m in spec.get("methods", []) + spec.get("operators", []):
+            if not m.get("ooExclude"):
+                named.setdefault((cls, m["ooName"]), []).append(m["function"])
+    n = 0
+    for cls, spec in classes.items():
+        for entry in spec.get("operators", []):
+            inherited = [f for a in _ancestors_of(cls, parents)
+                         for f in named.get((a, entry["ooName"]), [])]
+            if not inherited or ret(entry["function"]) in {ret(f) for f in inherited}:
+                continue
+            sql = (by_name.get(entry["function"]) or {}).get("sqlfn")
+            if not sql:
+                continue
+            entry["ooName"] = sql
+            n += 1
+    return n
+
+
 def _operator_entry(fn: dict, op: str, receiver: str, other: str) -> dict:
     """One operator of a class: the method the receiver-typed rule names."""
     entry = {"function": fn["name"], "role": "operator", "scope": "operator",
@@ -1080,6 +1119,7 @@ def attach_object_model(idl: dict, path: Path,
             "class": cls, "scope": "operator", "axis": "operator",
             "via": "operator", "backing": name}
     unclassified = still
+    _sql_named_operators(classes, by_name, parents)
 
     # What a member called on a value answers, where its C return type names
     # the template and every SQL signature answers the receiver's own type.
