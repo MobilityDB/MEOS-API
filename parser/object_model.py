@@ -272,6 +272,24 @@ def _classify_operator(fn: dict, candidates: list, ctypes: dict):
             continue
         if params and _operator_receiver(params[0], tgt["class"], ctypes):
             return tgt["class"], _operator_entry(fn, op, "left", other)
+    # A point operand: MEOS spells a geometry operand `point` where the
+    # operation takes a point (``bearing_point_tpoint``, after its SQL wrapper
+    # Bearing_point_tpoint), which is the `geo` token of #_classify. It is read
+    # so only where a whole type token follows it, ``point`` or a class's, so
+    # ``line_point_n`` and ``quadbin_point_to_cell`` stay unclassified.
+    if len(params) >= 2:
+        for i in range(1, len(parts) - 1):
+            if parts[i] != _POINT_TOKEN:
+                continue
+            other = "_".join(parts[i + 1:])
+            opref, _ = _classify(other, candidates)
+            if other != _POINT_TOKEN and opref != other:
+                continue
+            pref, tgt = _classify("geo_" + other, candidates)
+            if tgt is not None and pref == "geo" and \
+                    _operator_receiver(params[0], tgt["class"], ctypes):
+                return tgt["class"], _operator_entry(
+                    fn, "_".join(parts[:i]), "left", other)
     # Reflected: the class token is the LAST type token and its value the
     # second parameter, the first being no class value.
     if len(params) == 2 and not any(
@@ -613,6 +631,11 @@ _ACRONYMS = {"wkb": "WKB", "ewkb": "EWKB", "hexwkb": "HexWKB",
 # collection). Tried after the class's own token, longest first.
 _GENERIC_TOKENS = ("temporal", "tnumber", "tspatial", "tgeo", "tpoint",
                    "spanset", "span", "set", "box")
+
+# The token MEOS gives a geometry operand where the operation takes a point
+# (``bearing_point_tpoint``); #_classify_operator reads it as the ``geo``
+# token, beside the tokens of #_GENERIC_TOKENS.
+_POINT_TOKEN = "point"
 
 # Internal machinery that is classified to a class but is not a user-facing
 # method: SQL aggregate transition/final/combine functions.
