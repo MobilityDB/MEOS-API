@@ -8,7 +8,7 @@ library — so CI without a MEOS build still passes. Run it with:
 It drives the exact path the server uses: a temporal value is read and
 written through the reader and writer the catalog states for its SQL type,
 each called with the trailing inputs the catalog states by name
-(``tfloat_out(temp, maxdd=15)``), and bad input raises ``MeosError`` instead of
+(``temporal_out(temp, maxdd=15)``), and bad input raises ``MeosError`` instead of
 terminating the process (MEOS's default handler calls ``exit()``).
 """
 
@@ -78,7 +78,7 @@ class CtypesIntegrationTests(unittest.TestCase):
     def test_each_type_states_its_own_reader_and_writer(self):
         for sqltype in _LITERAL_BY_TYPE:
             self.assertEqual(self.readers[sqltype], sqltype + "_in")
-            self.assertEqual(self.writers[sqltype], sqltype + "_out")
+            self.assertEqual(self.writers[sqltype], "temporal_out")
         self.assertEqual(_aux(self.writer_aux["tfloat"]), [("int", 15)])
 
     def test_decode_invoke_scalar(self):
@@ -159,7 +159,7 @@ class CtypesIntegrationTests(unittest.TestCase):
         ptrs = self.eng.invoke_counted_array(
             "temparr_round", [("ptrarray", [h1, h2]), ("int", 2), ("int", 2)], 2)
         self.assertEqual(len(ptrs), 2)
-        outs = [self.encode("tfloat_out", p, [("int", 15)]) for p in ptrs]
+        outs = [self.encode("temporal_out", p, [("int", 15)]) for p in ptrs]
         self.assertIn("1.23@", outs[0])
         self.assertIn("7.65@", outs[1])
 
@@ -196,25 +196,25 @@ class CtypesIntegrationTests(unittest.TestCase):
         outs = self.outs
         for reader, literal, writer, back, out in (
                 ("intset_in", "{1, 2, 3}", "set_as_hexwkb", "set_from_hexwkb",
-                 "intset_out"),
+                 "set_out"),
                 ("intspan_in", "[1, 5)", "span_as_hexwkb", "span_from_hexwkb",
-                 "intspan_out"),
+                 "span_out"),
                 ("tint_in", "{1@2000-01-01, 2@2000-01-02}", "temporal_as_hexwkb",
-                 "temporal_from_hexwkb", "tint_out")):
+                 "temporal_from_hexwkb", "temporal_out")):
             self.assertEqual(outs[writer], [(2, "size_t *")], writer)
             h = self.eng.decode(reader, literal)
             hexwkb = self.encode(writer, h, [("int", 0)])
             self.assertRegex(hexwkb, r"^(?:[0-9A-F]{2})+$", writer)
-            aux = [("int", 15)] if out == "tint_out" else []
+            aux = [("int", 15)]
             again = self.encode(out, self.eng.decode(back, hexwkb), aux)
             self.assertEqual(again, self.encode(out, h, aux), writer)
 
     def test_a_string_route_reads_the_size_meos_writes(self):
-        """``tfloat_out(temp, maxdd, size_out)`` served as its route, the size an
+        """``temporal_out(temp, maxdd, size_out)`` served as its route, the size an
         out-parameter of its result (#_string_size of parser/enrich.py), answers the
         string #test_each_type_round_trips_through_its_own_writer writes."""
         from server.app import _dispatch, build_routes
-        route = build_routes(self.catalog)["/tfloat_out"]
+        route = build_routes(self.catalog)["/temporal_out"]
         self.assertEqual([p["name"] for p in route["params"]], ["temp", "maxdd"])
         self.assertEqual(route["result"]["size_outparam"], "size_out")
         # the value crosses the wire as a client sends it: written by the out of its

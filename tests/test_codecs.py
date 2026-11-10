@@ -402,7 +402,7 @@ class CodecContractTests(unittest.TestCase):
     def test_the_classes_a_binding_reads(self):
         te = self.idl["typeEncodings"]
         self.assertEqual(te["Set"]["readers"]["text"]["intset"], "intset_in")
-        self.assertEqual(te["Temporal"]["writers"]["text"]["tfloat"], "tfloat_out")
+        self.assertEqual(te["Temporal"]["writers"]["text"]["tfloat"], "temporal_out")
         self.assertEqual(te["Raster"]["out"], "raster_as_hexwkb")
         self.assertEqual(te["GSERIALIZED"]["readers"]["hexewkb"],
                          {"geometry": "geom_from_hexewkb", "geography": "geog_from_hexewkb"})
@@ -422,13 +422,13 @@ class CodecContractTests(unittest.TestCase):
         for t in ("geomset", "geogset", "cbufferset", "npointset", "poseset",
                   "posechainset"):
             self.assertEqual(sets[t], "spatialset_as_text")
-        self.assertEqual(sets["intset"], "intset_out")
+        self.assertEqual(sets["intset"], "set_out")
         temps = te["Temporal"]["writers"]["text"]
         for t in ("tgeompoint", "tgeogpoint", "tgeometry", "tgeography", "tcbuffer",
                   "tnpoint", "tpose", "tposechain"):
             self.assertEqual(temps[t], "tspatial_as_text")
         self.assertEqual(temps["trgeometry"], "trgeometry_as_text")
-        self.assertEqual(temps["tint"], "tint_out")
+        self.assertEqual(temps["tint"], "temporal_out")
 
     def test_every_format_is_an_encoding_of_its_own(self):
         """The seven formats, read as #test_the_classes_a_binding_reads reads a class."""
