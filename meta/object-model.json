@@ -1128,11 +1128,6 @@
         "meaning": "GEOJSON output error"
       },
       {
-        "name": "MEOS_ERR_SQL_JSON_ERROR",
-        "value": 28,
-        "meaning": "SQL JSON error"
-      },
-      {
         "name": "MEOS_ERR_INVALID_REGULAR_EXPRESSION",
         "value": 29,
         "meaning": "Regular expression error"
@@ -1141,6 +1136,61 @@
         "name": "MEOS_ERR_DATETIME_OUT_OF_RANGE",
         "value": 30,
         "meaning": "Date or time value out of range"
+      },
+      {
+        "name": "MEOS_ERR_NON_NUMERIC_SQL_JSON_ITEM",
+        "value": 31,
+        "meaning": "Non-numeric SQL/JSON item"
+      },
+      {
+        "name": "MEOS_ERR_INVALID_ARGUMENT_FOR_SQL_JSON_DATETIME_FUNCTION",
+        "value": 32,
+        "meaning": "Invalid argument for an SQL/JSON datetime function"
+      },
+      {
+        "name": "MEOS_ERR_MORE_THAN_ONE_SQL_JSON_ITEM",
+        "value": 33,
+        "meaning": "More than one SQL/JSON item"
+      },
+      {
+        "name": "MEOS_ERR_SINGLETON_SQL_JSON_ITEM_REQUIRED",
+        "value": 34,
+        "meaning": "Singleton SQL/JSON item required"
+      },
+      {
+        "name": "MEOS_ERR_SQL_JSON_ARRAY_NOT_FOUND",
+        "value": 35,
+        "meaning": "SQL/JSON array not found"
+      },
+      {
+        "name": "MEOS_ERR_INVALID_SQL_JSON_SUBSCRIPT",
+        "value": 36,
+        "meaning": "Invalid SQL/JSON subscript"
+      },
+      {
+        "name": "MEOS_ERR_SQL_JSON_OBJECT_NOT_FOUND",
+        "value": 37,
+        "meaning": "SQL/JSON object not found"
+      },
+      {
+        "name": "MEOS_ERR_SQL_JSON_MEMBER_NOT_FOUND",
+        "value": 38,
+        "meaning": "SQL/JSON member not found"
+      },
+      {
+        "name": "MEOS_ERR_SQL_JSON_NUMBER_NOT_FOUND",
+        "value": 39,
+        "meaning": "SQL/JSON number not found"
+      },
+      {
+        "name": "MEOS_ERR_DUPLICATE_JSON_OBJECT_KEY_VALUE",
+        "value": 40,
+        "meaning": "Duplicate JSON object key value"
+      },
+      {
+        "name": "MEOS_ERR_UNDEFINED_OBJECT",
+        "value": 41,
+        "meaning": "Undefined object"
       }
     ],
     "derivation": {
