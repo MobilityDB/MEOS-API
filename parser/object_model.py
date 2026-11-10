@@ -522,8 +522,9 @@ def _sql_named_operators(classes: dict, by_name: dict, parents: dict) -> int:
 
     An operator is named after the leading verb of its C name (#_operator_entry),
     so ``contains_tjsonb_jsonb`` is ``contains``, the name ``contains_temporal_temporal``
-    gives every temporal class. Where an ancestor's members of that name answer
-    another type than the operator does (a ``bool`` beside a ``Temporal *``), the
+    gives every temporal class. Where a method of its own class, or an ancestor's
+    members, of that name answer another type than the operator does (a ``bool``
+    beside a ``Temporal *``), the
     two are different operations, which no dispatcher of one name can answer
     both of, and SQL already tells them apart by name: ``@>`` on two temporal
     JSONB values is ``tjsonbContains``, the containment of their values, and
@@ -535,17 +536,21 @@ def _sql_named_operators(classes: dict, by_name: dict, parents: dict) -> int:
     def ret(fn):
         return " ".join((((by_name.get(fn) or {}).get("returnType") or {})
                          .get("c") or "").replace("const ", "").split())
-    named = {}
+    named, methods = {}, {}
     for cls, spec in classes.items():
         for m in spec.get("methods", []) + spec.get("operators", []):
             if not m.get("ooExclude"):
                 named.setdefault((cls, m["ooName"]), []).append(m["function"])
+        for m in spec.get("methods", []):
+            if not m.get("ooExclude"):
+                methods.setdefault((cls, m["ooName"]), []).append(m["function"])
     n = 0
     for cls, spec in classes.items():
         for entry in spec.get("operators", []):
-            inherited = [f for a in _ancestors_of(cls, parents)
-                         for f in named.get((a, entry["ooName"]), [])]
-            if not inherited or ret(entry["function"]) in {ret(f) for f in inherited}:
+            taken = methods.get((cls, entry["ooName"]), []) + [
+                f for a in _ancestors_of(cls, parents)
+                for f in named.get((a, entry["ooName"]), [])]
+            if not taken or ret(entry["function"]) in {ret(f) for f in taken}:
                 continue
             sql = (by_name.get(entry["function"]) or {}).get("sqlfn")
             if not sql:

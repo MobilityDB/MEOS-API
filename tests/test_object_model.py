@@ -315,6 +315,39 @@ class AttachTests(unittest.TestCase):
             "contains_tjsonb_tjsonb": ("TJsonb", "tjsonbContains"),
             "contains_tnumber_tnumber": ("TNumber", "contains")})
 
+    def test_an_operator_of_another_answer_than_a_method_of_its_class_takes_its_sql_name(self):
+        # Same harness as #test_an_operator_of_another_answer_than_its_inherited_name_takes_its_sql_name.
+        # `concat` and `contains` of two JSONB values are methods of Jsonb
+        # answering a JSONB value and a bool; with a temporal JSONB value they
+        # answer a temporal JSONB value and a temporal boolean, so they take
+        # their SQL names (#_sql_named_operators). `contained` of a JSONB value
+        # in a JSONB set answers a bool, as the method does, and keeps the
+        # shared name.
+        def fn(name, ret, sqlfn, *ctypes):
+            f = self._fn(name, *ctypes)
+            f["returnType"] = {"c": ret, "canonical": ret}
+            f["sqlfn"] = sqlfn
+            return f
+        _om, ops = self._operators(
+            fn("jsonb_concat", "Jsonb *", "jsonbConcat",
+               "const Jsonb *", "const Jsonb *"),
+            fn("jsonb_contains", "bool", "jsonbContains",
+               "const Jsonb *", "const Jsonb *"),
+            fn("jsonb_contained", "bool", "jsonbContained",
+               "const Jsonb *", "const Jsonb *"),
+            fn("tjsonb_start_value", "Jsonb *", "startValue", "const Temporal *"),
+            fn("concat_jsonb_tjsonb", "Temporal *", "tConcat",
+               "const Jsonb *", "const Temporal *"),
+            fn("contains_jsonb_tjsonb", "Temporal *", "tjsonbContains",
+               "const Jsonb *", "const Temporal *"),
+            fn("contained_jsonb_set", "bool", "setContained",
+               "const Jsonb *", "const Set *"))
+        got = {f: (c, o["ooName"]) for f, (c, o) in ops.items()}
+        self.assertEqual(got, {
+            "concat_jsonb_tjsonb": ("Jsonb", "tConcat"),
+            "contains_jsonb_tjsonb": ("Jsonb", "tjsonbContains"),
+            "contained_jsonb_set": ("Jsonb", "contained")})
+
     def test_an_operator_over_every_instantiation_stays_on_the_template(self):
         # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation.
         _om, ops = self._operators(self._sql(
