@@ -348,6 +348,28 @@ class AttachTests(unittest.TestCase):
             "contains_jsonb_tjsonb": ("Jsonb", "tjsonbContains"),
             "contained_jsonb_set": ("Jsonb", "contained")})
 
+    def test_a_point_operand_is_a_geometry_where_a_type_follows_it(self):
+        # Same harness as #test_an_operator_is_a_member_of_its_first_operand;
+        # `geo_srid` states the C type of Geo. MEOS spells a geometry operand
+        # `point` where the operation takes a point (#_POINT_TOKEN), so the
+        # bearings from a point are members of Geo; `line_point_n` takes a
+        # geometry and a number, no type follows `point`, and it stays
+        # unclassified.
+        om, ops = self._operators(
+            self._fn("geo_srid", "const GSERIALIZED *"),
+            self._fn("tpoint_length", "const Temporal *"),
+            self._fn("bearing_point_tpoint",
+                     "const GSERIALIZED *", "const Temporal *"),
+            self._fn("bearing_point_point",
+                     "const GSERIALIZED *", "const GSERIALIZED *", "double *"),
+            self._fn("line_point_n", "const GSERIALIZED *", "int"))
+        got = {f: (c, o["ooName"], o["receiver"], o.get("other"))
+               for f, (c, o) in ops.items()}
+        self.assertEqual(got, {
+            "bearing_point_tpoint": ("Geo", "bearing", "left", "tpoint"),
+            "bearing_point_point": ("Geo", "bearing", "left", "point")})
+        self.assertIsNone(om["functionToClass"]["line_point_n"]["class"])
+
     def test_an_operator_over_every_instantiation_stays_on_the_template(self):
         # Same harness as #test_an_operator_of_a_template_is_a_member_of_its_instantiation.
         _om, ops = self._operators(self._sql(
