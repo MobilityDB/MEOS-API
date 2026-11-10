@@ -60,7 +60,7 @@ class FamilyClassificationTests(unittest.TestCase):
 
     def test_core_symbols_are_core(self):
         # temporal core + base geo/tpoint stay CORE (never an optional family).
-        for name in ("temporal_eq", "tint_values", "stbox_out", "bigintset_out"):
+        for name in ("temporal_eq", "tint_values", "stbox_out", "set_out"):
             self.assertEqual(self._family(name), "CORE", name)
 
     def test_each_optional_family_is_populated(self):

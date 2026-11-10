@@ -108,7 +108,7 @@ class StringSizeContractTests(unittest.TestCase):
         names = {f["name"] for f in self.functions
                  if f.get("api") == "public"
                  and _ctype(f["returnType"].get("canonical")) == "char*"}
-        for name in ("tfloat_out", "temporal_as_mfjson", "geo_as_text", "floatspan_out",
+        for name in ("temporal_out", "temporal_as_mfjson", "geo_as_text", "span_out",
                      "temporal_as_hexwkb"):
             self.assertIn(name, names)
 
