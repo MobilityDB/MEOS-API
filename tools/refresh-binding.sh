@@ -223,13 +223,10 @@ fi
 # generator emits calls into the `functions.GeneratedFunctions` JMEOS produces, so the two move
 # together. Each consumer receives the same copy rather than vendoring its own, staged rather
 # than committed exactly as the catalog is, so a consumer's tree holds no copy to go stale.
-# `codegen_spark_udfs.py` travels with it because the spark arm loads it by `__file__`.parent,
-# so the two are one unit wherever they sit.
 if [ -n "$GENERATOR_DEST" ]; then
   [ -n "$JMEOS" ] || { echo "GENERATOR_DEST needs the JMEOS checkout (set JMEOS_COORDS)" >&2; exit 2; }
   mkdir -p "$BINDING/$GENERATOR_DEST"
-  cp "$JMEOS/tools/codegen_jvm.py" "$JMEOS/tools/codegen_spark_udfs.py" \
-     "$BINDING/$GENERATOR_DEST/"
+  cp "$JMEOS/tools/codegen_jvm.py" "$BINDING/$GENERATOR_DEST/"
 fi
 
 step "Building the ${ENGINE:-binding} surface from the catalog"
