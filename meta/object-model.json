@@ -727,13 +727,13 @@
       }
     },
     "Value": {
-      "_comment": "A value crosses the MEOS boundary as a POINTER unless basetype_byvalue() names its type, and a method taking or answering one cannot be typed without a class for it. To a binding a pointer to a struct is one thing — an instance it holds and calls through — whether MEOS publishes the struct's layout or forward-declares it, so the schema, the trees and the array sit here beside the base values rather than in a hierarchy of their own. Parallel hierarchy, as Box and Collection are. temptypes gated against the MeosType enum where MEOS registers one, and the by-reference base types gated for COVERAGE against basetype_byvalue().",
+      "_comment": "A value crosses the MEOS boundary as a POINTER unless basetype_byvalue() names its type, and a method taking or answering one cannot be typed without a class for it. To a binding a pointer to a struct is one thing — an instance it holds and calls through — whether MEOS publishes the struct's layout or forward-declares it, so the schema, the trees and the array sit here beside the base values rather than in a hierarchy of their own. Parallel hierarchy, as Box and Collection are. temptypes gated against the MeosType enum where MEOS registers one, and the by-reference base types gated for COVERAGE against basetype_byvalue(). A leaf marked byValue is a base type basetype_byvalue() names that is a class nonetheless, because it has formats of its own to read and write: its cType is the typedef its methods take and answer by value, never a pointer.",
       "root": "Value",
       "nodes": {
         "Value": {
           "kind": "root",
           "parent": null,
-          "doc": "Base values MEOS passes by reference."
+          "doc": "Base values a binding holds as instances: those MEOS passes by reference, and the grid cells, which it passes by value."
         },
         "Text": {
           "kind": "leaf",
@@ -867,6 +867,39 @@
           "temptype": "T_RAQUET",
           "conditional": "RASTER",
           "doc": "A raster tile. A MeosType no membership predicate admits, as NSegment is."
+        },
+        "H3Index": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "h3index"
+          ],
+          "temptype": "T_H3INDEX",
+          "conditional": "H3",
+          "byValue": true,
+          "doc": "A cell of the H3 grid, the base type of TH3Index and H3IndexSet. MEOS passes it by value, as a uint64; it is a class all the same because it reads and writes formats of its own (text, WKB, hex WKB), and every type a binding exposes has its readers and writers."
+        },
+        "Quadbin": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "quadbin"
+          ],
+          "temptype": "T_QUADBIN",
+          "conditional": "QUADBIN",
+          "byValue": true,
+          "doc": "A cell of the Quadbin grid, the base type of TQuadbin and QuadbinSet, passed by value as H3Index is."
+        },
+        "S2Cell": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "s2cell"
+          ],
+          "temptype": "T_S2CELL",
+          "conditional": "S2CELL",
+          "byValue": true,
+          "doc": "A cell of the S2 grid, the base type of TS2Cell and S2CellSet, passed by value as H3Index is."
         },
         "Raster": {
           "kind": "leaf",

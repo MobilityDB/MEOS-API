@@ -691,6 +691,34 @@ class AttachTests(unittest.TestCase):
         ]}, MODEL, None)["objectModel"]
         self.assertEqual(om["classes"]["Pcschema"]["cType"], "PCSCHEMA")
 
+    def test_a_cell_is_a_class_of_its_typedef_passed_by_value(self):
+        # The by-value sibling of
+        # #test_a_class_nothing_is_called_on_takes_what_it_makes: a cell
+        # crosses the boundary by value, so no method takes a pointer to it,
+        # and the typedef its methods take and answer is its C type, the class
+        # saying it is passed by value. Each format of the cell is a method of
+        # it, as every class reads and writes its own formats.
+        om = attach_object_model({"functions": [
+            {"name": "h3index_in", "returnType": {"c": "uint64_t", "typedef": "H3Index"},
+             "params": [{"name": "str", "cType": "const char *"}]},
+            {"name": "h3index_out", "returnType": {"c": "char *"},
+             "params": [{"name": "cell", "cType": "uint64_t", "typedef": "H3Index"}]},
+            {"name": "h3index_as_hexwkb", "returnType": {"c": "char *"},
+             "params": [{"name": "cell", "cType": "uint64_t", "typedef": "H3Index"},
+                        {"name": "variant", "cType": "uint8_t"}]},
+            {"name": "quadbin_get_resolution", "returnType": {"c": "uint32_t"},
+             "params": [{"name": "cell", "cType": "uint64_t", "typedef": "Quadbin"}]},
+            {"name": "s2cell_out", "returnType": {"c": "char *"},
+             "params": [{"name": "cell", "cType": "uint64_t", "typedef": "S2CellId"}]},
+        ]}, MODEL, None)["objectModel"]
+        for cls, ctype in (("H3Index", "H3Index"), ("Quadbin", "Quadbin"),
+                           ("S2Cell", "S2CellId")):
+            self.assertEqual(om["classes"][cls]["cType"], ctype)
+            self.assertTrue(om["classes"][cls]["byValue"])
+        self.assertEqual({m["function"] for m in om["classes"]["H3Index"]["methods"]},
+                         {"h3index_in", "h3index_out", "h3index_as_hexwkb"})
+        self.assertNotIn("byValue", om["classes"].get("Pcschema", {}))
+
     def test_a_type_meos_registers_in_no_enum_still_gets_a_class(self):
         # A pointer to a struct is one thing to a binding whether MEOS
         # publishes the layout or forward-declares it, so these sit in `Value`
@@ -1232,10 +1260,15 @@ class DriftGate(unittest.TestCase):
                          "a base type MEOS passes by reference has no Value "
                          "class, so every method naming it stays untypable")
         self.assertEqual(set(seen) - needed,
-                         {"T_NSEGMENT", "T_RAQUET", "T_JSONPATH"},
+                         {"T_NSEGMENT", "T_RAQUET", "T_JSONPATH",
+                          "T_H3INDEX", "T_QUADBIN", "T_S2CELL"},
                          "the Value classes MEOS admits without making them "
-                         "base types moved; each is a MeosType a signature "
-                         "names, and this states which")
+                         "base types passed by reference moved; each is a "
+                         "MeosType a signature names, the cells passed by "
+                         "value, and this states which")
+        self.assertEqual({n for n, s in nodes.items() if s.get("byValue")},
+                         {"H3Index", "Quadbin", "S2Cell"},
+                         "a Value class passed by value is a grid cell")
 
     def test_leaf_base_types_match_catalog(self):
         # The relation is a `.temptype_basetype` field of the type-indexed

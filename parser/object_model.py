@@ -110,6 +110,26 @@ def _slot_pointee(slot: dict) -> str | None:
     return _pointee(declared) or _pointee(slot.get("canonical") or "")
 
 
+def _slot_value_type(slot: dict) -> str | None:
+    """The type a parameter or return carries by value, the by-value sibling of
+    #_slot_pointee: the typedef the slot names (`h3index_out(H3Index cell)`
+    takes an H3Index, which the slot's cType states as its width, uint64_t),
+    else its declared type when that is no pointer."""
+    if slot.get("typedef"):
+        return slot["typedef"]
+    declared = _QUALIFIER_RE.sub("", slot.get("cType") or slot.get("c") or "").strip()
+    return declared if declared and "*" not in declared else None
+
+
+def _byvalue_classes(model: dict) -> set:
+    """The companion leaves the model marks `byValue`, read over the families
+    #_companion_families names: classes whose values MEOS passes by value, so
+    their C type is no pointer."""
+    return {name for fam in _companion_families(model)
+            for name, spec in model["companions"][fam]["nodes"].items()
+            if not name.startswith("_") and spec.get("byValue")}
+
+
 def _companion_families(model: dict) -> list:
     """The companion hierarchies the model carries, in file order.
 
@@ -933,8 +953,9 @@ def derive_membership(nodes: dict, cat_src: str, basetypes: dict) -> None:
 
 
 def _class_ctypes(classes: dict, functions: dict, parents: dict,
-                  subtype_classes: dict) -> dict:
-    """The C type each class's instances are a pointer to.
+                  subtype_classes: dict, byvalue: frozenset = frozenset()) -> dict:
+    """The C type each class's instances are a pointer to, read through
+    #_slot_pointee, or carry by value, read through #_slot_value_type.
 
     A binding declares every wrapper in terms of it, so leaving it to each
     binding to work out is what makes a class a binding cannot type unless it
@@ -945,15 +966,18 @@ def _class_ctypes(classes: dict, functions: dict, parents: dict,
     concrete `<leaf><subtype>` classes hold constructors alone — takes the
     answer of the subtype it is a product of, then what its own methods RETURN,
     and any other class its parent's, which is the same C type by construction.
+    A class in ``byvalue`` reads the same evidence through #_slot_value_type,
+    as its values cross by value: H3Index is the typedef its methods take.
     """
     own, made = {}, {}
     for cls, spec in classes.items():
         seen, answered = {}, {}
+        carried = _slot_value_type if cls in byvalue else _slot_pointee
         for method in spec["methods"]:
             fn = functions.get(method["function"])
             if not fn:
                 continue
-            pointee = _slot_pointee(fn.get("returnType", {}))
+            pointee = carried(fn.get("returnType", {}))
             if pointee and pointee not in _NOT_A_CLASS_POINTEE:
                 answered[pointee] = answered.get(pointee, 0) + 1
             if method["role"] not in _RECEIVER_ROLES:
@@ -961,7 +985,7 @@ def _class_ctypes(classes: dict, functions: dict, parents: dict,
             params = fn.get("params")
             if not params:
                 continue
-            pointee = _slot_pointee(params[0])
+            pointee = carried(params[0])
             if pointee:
                 seen[pointee] = seen.get(pointee, 0) + 1
         for source, out in ((seen, own), (answered, made)):
@@ -1088,11 +1112,14 @@ def attach_object_model(idl: dict, path: Path,
         for _tok, suffix, subtype in _SUBTYPE_SUFFIX:
             if leaf + suffix in classes:
                 subtype_classes[leaf + suffix] = subtype
+    byvalue = frozenset(_byvalue_classes(model))
     ctypes = _class_ctypes(classes, {f["name"]: f for f in functions},
-                           parents, subtype_classes)
+                           parents, subtype_classes, byvalue)
     for cls, ctype in ctypes.items():
         if ctype:
             classes[cls]["cType"] = ctype
+        if cls in byvalue:
+            classes[cls]["byValue"] = True
 
     by_name = {f["name"]: f for f in functions}
     sql_classes = _sql_type_classes(model)
