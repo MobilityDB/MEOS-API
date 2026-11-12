@@ -38,18 +38,23 @@ def sig(name, args, ret, **kw):
 
 
 FUNCTIONS = [
-    # one reader and one writer per set type, keyed by the SQL type each serves
+    # one reader and one writer per set type, keyed by the SQL type each serves; each
+    # backs the type's input or output function and its portable reader or writer, as
+    # every MobilityDB type has <type>FromText and asText beside them
     fn("intset_in", "Set *", [("const char *", "str")],
-       [sig("intset_in", ["cstring"], "intset")]),
+       [sig("intset_in", ["cstring"], "intset"),
+        sig("intsetFromText", ["text"], "intset")]),
     fn("floatset_in", "Set *", [("const char *", "str")],
-       [sig("floatset_in", ["cstring"], "floatset")]),
+       [sig("floatset_in", ["cstring"], "floatset"),
+        sig("floatsetFromText", ["text"], "floatset")]),
     fn("intset_out", "char *", [(SET, "s")],
        [sig("intset_out", ["intset"], "cstring"), sig("asText", ["intset"], "text")]),
     fn("floatset_out", "char *", [(SET, "s"), ("int", "maxdd")],
-       [sig("floatset_out", ["floatset"], "cstring")]),
+       [sig("floatset_out", ["floatset"], "cstring"), sig("asText", ["floatset"], "text")]),
     # a generic writer serving several types loses to each type's own
     fn("spatialset_out", "char *", [(SET, "s"), ("int", "maxdd")],
-       [sig("geomset_out", ["geomset"], "cstring"), sig("intset_out", ["intset"], "cstring")]),
+       [sig("geomset_out", ["geomset"], "cstring"), sig("intset_out", ["intset"], "cstring"),
+        sig("asText", ["geomset"], "text")]),
     # the generic reader of one internal programmer surface is no codec
     fn("set_in", "Set *", [("const char *", "str")],
        [sig("intset_in", ["cstring"], "intset")], api="internal"),
@@ -293,13 +298,31 @@ class CodecTests(unittest.TestCase):
         self.assertNotIn("through", idl["typeEncodings"]["Set"])
         self.assertEqual(errors, [])
 
+    def test_a_type_support_function_alone_serves_no_format(self):
+        """The input and output functions a CREATE TYPE binds, reached in SQL by no
+        portable name, serve no format of the class: a type whose text is its hex WKB
+        (a raquet, as a PostGIS raster) is read and written in hex WKB alone, its
+        ``in`` and ``out`` the hex WKB pair, and states no text. It reads the raster
+        of the fixture, as #test_without_a_send_the_variant_is_the_sql_writers_default
+        does, with its input and output functions added."""
+        idl, errors = state_type_encodings(_idl(FUNCTIONS + [
+            fn("raster_in", "Raster *", [("const char *", "str")],
+               [sig("raster_in", ["cstring"], "raster")]),
+            fn("raster_out", "char *", [(RAST, "rast"), ("size_t *", "size_out")],
+               [sig("raster_out", ["raster"], "cstring")],
+               shape={"outParams": ["size_out"]})]))
+        r = idl["typeEncodings"]["Raster"]
+        self.assertNotIn("text", r["encodings"])
+        self.assertEqual((r["in"], r["out"]), ("raster_from_hexwkb", "raster_as_hexwkb"))
+        self.assertEqual(errors, [])
+
     def test_a_cell_is_a_class_of_its_own(self):
         h = self.te["H3Index"]
         self.assertEqual((h["in"], h["out"]), ("h3index_in", "h3index_out"))
 
     def test_two_functions_alike_for_one_type_stop_the_catalog(self):
         twin = fn("intset_in2", "Set *", [("const char *", "str")],
-                  [sig("intset_in", ["cstring"], "intset")])
+                  [sig("intsetFromText", ["text"], "intset")])
         twin["name"] = "intsetx_in"
         _, errors = state_type_encodings(_idl(FUNCTIONS + [twin]))
         self.assertEqual(errors, ["Set: intset read by intset_in and intsetx_in"])

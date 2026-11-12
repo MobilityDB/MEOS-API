@@ -45,6 +45,7 @@ literals are attached:
 """
 import re
 
+from parser.typesupport import _class_stems, role_of
 from parser.enrich import (_BYTE_ENCODINGS, _DECODERS, _ENCODERS, _INT_BASES,
                            _SQL_DECODERS, _SQL_ENCODERS, _STRING_PTR_BASES, _aux_specs,
                            _base, _ptr_depth, wire_pair)
@@ -141,6 +142,21 @@ def _sql_encoding(name, side):
     return _encoding(name, _SQL_DECODERS)
 
 
+def _plumbing(f, stems):
+    """Whether every SQL signature of ``f`` is a type support function, the input,
+    output, receive or send function a ``CREATE TYPE`` binds, which the dialect never
+    names: ``raquet_in`` and ``raquet_out``, whose text is a raquet's hex WKB, or
+    ``pose_out``, which writes ``POSE (<hex EWKB>, 0.5)``. Such a function serves no
+    format of a class, which its portable readers and writers state (#_serves); a
+    function with no SQL signature (``interval_in``, the readers of PostGIS's types)
+    is not plumbing. The role of a signature is the one #attach_type_support of
+    parser/typesupport.py marks later in the derivation (#role_of), read here with
+    the class stems of the object model the pass is given."""
+    sigs = f.get("sqlSignatures") or []
+    return bool(sigs) and all(
+        role_of(s, s.get("sqlName") or f.get("sqlfn"), stems) for s in sigs)
+
+
 def _serves(f, sql_type, side, table):
     """{encoding: {SQL type}}: the encodings ``f`` serves for each SQL type a signature
     reads or writes (``sql_type``). A signature named by a portable I/O function
@@ -213,6 +229,11 @@ def state_type_encodings(idl, model=None):
     (#_subtype_parents)."""
     fns = [f for f in idl.get("functions", []) if f.get("api") == "public"]
     parents = _subtype_parents(model)
+    # The class stems a type support function of a temporal type is named by
+    # (#_plumbing), from the lattice of the object model
+    lattice = {k: v for k, v in ((model or {}).get("lattice") or {}).items()
+               if not k.startswith("_")}
+    stems = _class_stems({"objectModel": {"lattice": lattice}})
     macros = {m["name"]: m.get("value") for m in idl.get("macros", [])}
     encs = idl.setdefault("typeEncodings", {})
     errors = []
@@ -230,7 +251,7 @@ def state_type_encodings(idl, model=None):
 
     for f in fns:
         ps = f.get("params") or []
-        if not ps:
+        if not ps or _plumbing(f, stems):
             continue
         ret, p0 = f["returnType"], ps[0]
         p0c, retc = p0.get("cType") or "", ret.get("c") or ""
@@ -308,7 +329,8 @@ def state_type_encodings(idl, model=None):
                          else (None, {}))
         if pick or by_type:
             return pick, by_type
-        if prior in every and every[prior].get("api") == "public":
+        if (prior in every and every[prior].get("api") == "public"
+                and not _plumbing(every[prior], stems)):
             aux = _trailing(every[prior])
             return ((every[prior], aux) if aux is not None else None), {}
         return ((cands[0][0], cands[0][1]) if len(cands) == 1 else None), {}
