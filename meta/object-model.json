@@ -1246,7 +1246,17 @@
       "pose",
       "rgeo"
     ],
-    "note": "cbuffer / npoint / pose / rgeo are FULL user-facing temporal types and ARE in scope — full leaf classes like every other type, never deferred or excluded from any parity headline. The companion Box and Collection hierarchies are in scope because the closed algebra requires them to type method returns/arguments. Where the parity oracle (PyMEOS) lacks a class that MEOS defines, that is incomplete work in the oracle to close (a gap with a stated correction), never an accepted exclusion of the MEOS class."
+    "note": "cbuffer / npoint / pose / rgeo are FULL user-facing temporal types and ARE in scope — full leaf classes like every other type, never deferred or excluded from any parity headline. The companion Box and Collection hierarchies are in scope because the closed algebra requires them to type method returns/arguments. Where the parity oracle (PyMEOS) lacks a class that MEOS defines, that is incomplete work in the oracle to close (a gap with a stated correction), never an accepted exclusion of the MEOS class.",
+    "hostTypes": {
+      "types": ["DateADT", "TimeADT", "TimeTzADT", "Timestamp", "TimestampTz", "Interval"],
+      "ruling": "The owner, 2026-11-12 (MobilityDB #3353, IO-B23): \"time types should be using their native language (e.g. Python) ones\".",
+      "note": "A binding holds a date, time, timetz, timestamp, timestamptz or interval as its language's own type, converted at the boundary through the class's in and out; it carries no class of its own for it. The catalog states bindingScope: host on each class of typeEncodings."
+    },
+    "outOfBindingScope": {
+      "types": ["NumericData", "BOX3D", "GBOX"],
+      "ruling": "The owner, 2026-11-13 (MobilityDB #3353, IO-B23): numeric, box2d and box3d stay out of binding scope, STBox holding every box a binding states.",
+      "note": "numeric serves the jsonb inputs of PostgreSQL alone; box2d 'BOX(1 1,2 2)' is stbox 'STBOX X((1,1),(2,2))' and box3d 'BOX3D(1 1 1,2 2 2)' is stbox 'STBOX Z((1,1,1),(2,2,2))'. MEOS keeps their functions and MobilityDB the casts between stbox and the PostGIS boxes; a binding carries no class for them. The catalog states bindingScope: none on each class of typeEncodings."
+    }
   },
   "notes": [
     "Derive classes and methods by REUSING the MEOS prefix convention (equivalence by construction), never by reimplementing or guessing; a function with no prefix match is recorded honestly as unclassified with a reason, never force-fitted.",

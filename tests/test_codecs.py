@@ -545,5 +545,39 @@ class CodecContractTests(unittest.TestCase):
         self.assertEqual(bad, [])
 
 
+class BindingScopeTests(unittest.TestCase):
+    """#_binding_scope of parser/codecs.py: the object model's ``scope`` lists mark the
+    classes of ``typeEncodings``."""
+
+    def run_scope(self, host=(), none=()):
+        model = {"scope": {"hostTypes": {"types": list(host)},
+                           "outOfBindingScope": {"types": list(none)}}}
+        idl, errors = state_type_encodings(_idl(), model)
+        return idl["typeEncodings"], errors
+
+    def test_each_list_marks_its_classes(self):
+        te, errors = self.run_scope(host=["Set"], none=["Raster"])
+        self.assertEqual(te["Set"]["bindingScope"], "host")
+        self.assertEqual(te["Raster"]["bindingScope"], "none")
+        self.assertNotIn("bindingScope", te["GSERIALIZED"])
+        self.assertEqual(errors, [])
+
+    def test_a_listed_type_without_a_class_is_an_error(self):
+        te, errors = self.run_scope(none=["NoSuchType"])
+        self.assertEqual(errors, ["bindingScope: outOfBindingScope lists NoSuchType, "
+                                  "which has no typeEncodings class"])
+
+    def test_a_type_listed_twice_is_an_error(self):
+        te, errors = self.run_scope(host=["Set"], none=["Set"])
+        self.assertEqual(te["Set"]["bindingScope"], "host")
+        self.assertEqual(errors, ["bindingScope: Set is listed in both hostTypes "
+                                  "and outOfBindingScope"])
+
+    def test_without_a_scope_no_class_is_marked(self):
+        te, errors = self.run_scope()
+        self.assertFalse(any("bindingScope" in e for e in te.values()))
+        self.assertEqual(errors, [])
+
+
 if __name__ == "__main__":
     unittest.main()

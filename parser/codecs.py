@@ -406,7 +406,34 @@ def state_type_encodings(idl, model=None):
         if te:
             struct["serialization"] = {"encodings": te["encodings"], "in": te["in"],
                                        "out": te["out"]}
+    _binding_scope(encs, model, errors)
     return idl, errors
+
+
+#: The value of ``bindingScope`` for each list of the object model's ``scope``
+_SCOPE_LISTS = (("hostTypes", "host"), ("outOfBindingScope", "none"))
+
+
+def _binding_scope(encs, model, errors):
+    """State ``bindingScope`` on the class of each type the object model's ``scope`` lists
+    (#state_type_encodings): ``host`` for a type a binding holds as its language's own
+    type, converted at the boundary through the class's ``in`` and ``out``, and ``none``
+    for a type no binding carries, whose readers and writers serve PostgreSQL alone. A
+    class no list names carries no ``bindingScope``: a binding holds it as a class of its
+    own. A listed type with no class, or listed twice, is an error, so a renamed C type
+    cannot leave its ruling unapplied."""
+    scope = (model or {}).get("scope") or {}
+    seen = {}
+    for key, value in _SCOPE_LISTS:
+        for cls in (scope.get(key) or {}).get("types") or ():
+            if cls in seen:
+                errors.append(f"bindingScope: {cls} is listed in both {seen[cls]} and {key}")
+                continue
+            seen[cls] = key
+            if cls not in encs:
+                errors.append(f"bindingScope: {key} lists {cls}, which has no typeEncodings class")
+                continue
+            encs[cls]["bindingScope"] = value
 
 
 def _byte_codec(cls, fns):
