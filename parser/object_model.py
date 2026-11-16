@@ -915,6 +915,23 @@ def check_class_names(model: dict, cat_src: str) -> None:
         raise ValueError("classes the catalog names otherwise: " + "; ".join(wrong))
 
 
+def check_scope_classes(classes: dict, model: dict) -> None:
+    """No class wraps a type the model's ``scope`` lists, as #check_class_names refuses
+    a class named otherwise: a type of ``hostTypes`` a binding holds as its language's
+    own type and a type of ``outOfBindingScope`` no binding carries, the lists
+    #_binding_scope of parser/codecs.py marks on ``typeEncodings`` from
+    #_SCOPE_LISTS, so a class wrapping one would hand every binding what the ruling
+    keeps out."""
+    from parser.codecs import _SCOPE_LISTS
+    scope = model.get("scope") or {}
+    listed = {t: key for key, _value in _SCOPE_LISTS
+              for t in (scope.get(key) or {}).get("types") or ()}
+    wrong = sorted(f"{cls} wraps {c['cType']}, which scope.{listed[c['cType']]} lists"
+                   for cls, c in classes.items() if c.get("cType") in listed)
+    if wrong:
+        raise ValueError("classes of types out of the object layer: " + "; ".join(wrong))
+
+
 def membership_source(catalog: Path) -> str:
     """The text a membership predicate is read from: ``meos_catalog.c`` first,
     then every other source beside it in ``meos/src/temporal``, the directory
@@ -1120,6 +1137,7 @@ def attach_object_model(idl: dict, path: Path,
             classes[cls]["cType"] = ctype
         if cls in byvalue:
             classes[cls]["byValue"] = True
+    check_scope_classes(classes, model)
 
     by_name = {f["name"]: f for f in functions}
     sql_classes = _sql_type_classes(model)

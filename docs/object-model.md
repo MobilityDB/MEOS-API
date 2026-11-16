@@ -131,13 +131,19 @@ base type MEOS adds reaches the model with no edit to the file.
 `NSegment`, `RaQuet` and `JsonPath` are the MeosTypes no membership
 predicate admits; the model states them, and the same gate states that it
 does. `Pcschema`, `Raster`, `RTree`, `RTreeNNCursor`, `SPTree`, `SPNNCursor`,
-`MeosArray`, `Numeric` and `SkipList` go further: MEOS
+`MeosArray` and `SkipList` go further: MEOS
 registers them in no enum at all, and they say so with a null `temptype`
 rather than by leaving the field out. To a binding a pointer to a struct
 is one thing — an instance it holds and calls through — whether MEOS
 publishes the struct's layout or forward-declares it, which is why they
 sit here rather than in a hierarchy of their own; GoMEOS's own wrapper
-table draws no such line either.
+table draws no such line either. A type the model's `scope` lists has no
+class: `hostTypes` (`DateADT`, `TimeADT`, `TimeTzADT`, `Timestamp`,
+`TimestampTz`, `Interval`) a binding holds as its language's own type, and
+`outOfBindingScope` (`NumericData`, `BOX3D`, `GBOX`) no binding carries, so
+`numeric_in`, `box3d_in` and their siblings belong to no class, and
+`check_scope_classes` stops the catalog when a leaf's functions would make
+one of them the C type of a class.
 
 `Box` is covered the same way, from the `type_bboxtype` column of
 `MEOS_RELTYPE_CATALOG`: it names the box each type stores, so its

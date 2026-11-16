@@ -729,14 +729,14 @@ class AttachTests(unittest.TestCase):
                         if s["kind"] == "leaf" and s["temptype"] is None}
         self.assertEqual(unregistered,
                          {"Pcschema", "Raster", "RTree", "RTreeNNCursor", "SPTree",
-                          "SPNNCursor", "MeosArray", "Numeric", "SkipList"})
+                          "SPNNCursor", "MeosArray", "SkipList"})
 
-    def test_numeric_and_the_aggregate_state_are_classes(self):
-        # A Numeric is what jsonb_to_numeric answers, and a SkipList what every
-        # temporal aggregate's transition function takes and answers; the
-        # functions their prefixes name take one first, so each class states
-        # the C type a binding wraps, as #test_a_raster_is_a_class_its_functions_are_methods_of
-        # states Raster's.
+    def test_the_aggregate_state_is_a_class_and_numeric_is_none(self):
+        # A SkipList is what every temporal aggregate's transition function
+        # takes and answers, so its class states the C type a binding wraps, as
+        # #test_a_raster_is_a_class_its_functions_are_methods_of states
+        # Raster's. A Numeric, a struct NumericData *, is out of binding scope
+        # (scope.outOfBindingScope), so numeric_out belongs to no class.
         om = attach_object_model({"functions": [
             {"name": "numeric_out", "api": "public",
              "returnType": {"c": "char *"},
@@ -748,10 +748,35 @@ class AttachTests(unittest.TestCase):
              "params": [{"name": "state", "cType": "SkipList *"},
                         {"name": "size_out", "cType": "size_t *"}]},
         ]}, MODEL, None)["objectModel"]
-        self.assertEqual(om["classes"]["Numeric"]["cType"], "NumericData")
+        self.assertNotIn("Numeric", om["classes"])
+        self.assertIsNone(om["functionToClass"]["numeric_out"]["class"])
         self.assertEqual(om["classes"]["SkipList"]["cType"], "SkipList")
         self.assertEqual({m["ooName"] for m in om["classes"]["SkipList"]["methods"]},
                          {"serialize"})
+
+    def test_no_class_wraps_a_type_the_scope_lists(self):
+        # A type of hostTypes is the binding's own, and one of
+        # outOfBindingScope no binding carries: a leaf whose functions take
+        # one first would hand every binding a class the ruling keeps out.
+        for cls, ctype, canonical in (("Numeric", "Numeric", "struct NumericData *"),
+                                      ("Interval", "const Interval *", "")):
+            model = json.loads(MODEL.read_text())
+            model["companions"]["Value"]["nodes"][cls] = {
+                "kind": "leaf", "parent": "Value", "prefixes": [cls.lower()],
+                "temptype": None, "doc": ""}
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump(model, f)
+            try:
+                with self.assertRaisesRegex(ValueError, f"{cls} wraps"):
+                    attach_object_model({"functions": [
+                        {"name": cls.lower() + "_out", "api": "public",
+                         "returnType": {"c": "char *"},
+                         "params": [{"name": "v", "cType": ctype,
+                                     "canonical": canonical},
+                                    {"name": "size_out", "cType": "size_t *"}]},
+                    ]}, Path(f.name), None)
+            finally:
+                os.unlink(f.name)
 
     def test_a_raster_is_a_class_its_functions_are_methods_of(self):
         # MEOS registers no MeosType for a raster, its tile RaQuet being the type the
