@@ -466,9 +466,13 @@ class CallLiteralCatalogTests(unittest.TestCase):
         if not idl_path.exists():
             self.skipTest(f"{idl_path} not generated; run `python run.py` first")
         te = json.loads(idl_path.read_text())["typeEncodings"]
-        for cls in ("Interval", "TimeTzADT", "NumericData"):
+        for cls in ("Interval", "TimeTzADT"):
             self.assertEqual(te[cls]["in_aux"],
                              [{"name": "typmod", "kind": "integer", "default": -1}], cls)
+        # The numeric is out of binding scope and has no class, so no reader of it is
+        # stated, its type modifier with it
+        self.assertIsNone(te["NumericData"].get("in"))
+        self.assertEqual(te["NumericData"]["in_aux"], [])
 
 
 class ValueTypeCatalogTests(unittest.TestCase):
