@@ -611,6 +611,30 @@ class InputShapeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reclass"):
             _input_idl(inputs)
 
+    def test_the_layout_states_the_length_of_each_array_it_names(self):
+        """The run of `values`, `nodata` and `noset` that #_input_arrays of
+        parser/shapeinfer.py counts by `nosetwidth`, the integer after it: the values and
+        their nulls are `count` long, the flags as long as their rows times their columns,
+        which no one parameter is, so they leave `inputArrays`; an array the layout does
+        not name keeps its length."""
+        names = ["rast", "band", "x", "y", "width", "height", "values", "nodata", "noset",
+                 "nosetwidth", "nosetheight", "count", "keepnodata", "other", "n"]
+        run = [{"param": p, "lengthFrom": {"kind": "param", "name": "nosetwidth"},
+                "element": {"c": "double", "canonical": "double"}}
+               for p in ("values", "nodata", "noset")]
+        other = {"param": "other", "lengthFrom": {"kind": "param", "name": "n"},
+                 "element": {"c": "double", "canonical": "double"}}
+        func = {"name": "raster_set_values", "sqlfn": "setValues",
+                "params": [{"name": n} for n in names],
+                "shape": {"inputArrays": run + [other]},
+                "sqlSignatures": [{"args": ["raster", "integer", "integer", "integer",
+                                            "float[]", "boolean[]", "boolean"],
+                                   "ret": "raster"}]}
+        idl, _ = attach_input_shapes({"functions": [func]}, SET_VALUES_INPUTS)
+        arrays = {a["param"]: a["lengthFrom"]["name"]
+                  for a in idl["functions"][0]["shape"]["inputArrays"]}
+        self.assertEqual(arrays, {"values": "count", "nodata": "count", "other": "n"})
+
     def test_the_inputs_are_read_by_sql_name(self):
         """As #test_the_array_layouts_are_read_by_sql_name."""
         self.assertEqual(declared_inputs(COLUMNS)["setValues"],

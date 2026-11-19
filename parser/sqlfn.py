@@ -600,6 +600,34 @@ def declared_inputs(path=_COLUMNS_META):
             for key, entry in (doc.get("inputs") or {}).items()}
 
 
+def _restate_input_arrays(func, stated):
+    """Give the C arrays the layout `stated` names the length it states in
+    `shape.inputArrays` of `func`. #_input_arrays of parser/shapeinfer.py counts a run of
+    arrays by the integer that follows it, which a block of rows and columns does not
+    follow: raster_set_values takes `values`, `nodata` and `noset` before `nosetwidth`,
+    `nosetheight` and `count`, so the run reads all three as `nosetwidth` long. An array
+    whose layout states its `count` is that long, its `nulls` as long as its `values`; an
+    array whose layout states only its rows and columns is as long as their product, which
+    no one parameter is, so it leaves `shape.inputArrays`, its layout stated in
+    `inputShape` alone."""
+    lengths = {}
+    for layout in stated.values():
+        for key in ("values", "nulls"):
+            if key in layout:
+                lengths[layout[key]] = layout.get("count")
+    shape = func.get("shape") or {}
+    arrays = []
+    for a in shape.get("inputArrays") or ():
+        if a["param"] not in lengths:
+            arrays.append(a)
+        elif lengths[a["param"]]:
+            arrays.append(dict(a, lengthFrom={"kind": "param", "name": lengths[a["param"]]}))
+    if arrays:
+        shape["inputArrays"] = arrays
+    elif "inputArrays" in shape:
+        del shape["inputArrays"]
+
+
 def attach_input_shapes(idl, declared=None):
     """(idl, number of signatures stating the layout of an array they take) once each SQL
     signature taking a two-dimensional array whose layout only its wrapper reads states it
@@ -632,6 +660,7 @@ def attach_input_shapes(idl, declared=None):
                 bad.append(f"{f['name']}: {key}({', '.join(args)})")
                 continue
             s["inputShape"] = {str(k): dict(v) for k, v in sorted(st.items())}
+            _restate_input_arrays(f, st)
             n += 1
     bad += [f"{key}: no SQL signature taking an array" for key in declared if key not in used]
     if bad:
