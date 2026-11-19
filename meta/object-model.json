@@ -911,6 +911,16 @@
           "conditional": "RASTER",
           "doc": "A georeferenced raster of one or more bands, the value every raster accessor, clip, warp and polygonization takes. MEOS registers it in no enum, so it names no temptype."
         },
+        "BandStats": {
+          "kind": "leaf",
+          "parent": "Value",
+          "prefixes": [
+            "bandstats"
+          ],
+          "temptype": null,
+          "conditional": "RASTER",
+          "doc": "What a raster band's pixels amount to, taken in one pass: how many pixels hold a value and their sum, mean, standard deviation, least and greatest, the record PostGIS's ST_SummaryStats states. Raster.summaryStats answers one and the summaryStats aggregate gathers one over rasters; MEOS registers it in no enum, so it names no temptype."
+        },
         "Pcschema": {
           "kind": "leaf",
           "parent": "Value",
