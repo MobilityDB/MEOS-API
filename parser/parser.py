@@ -173,8 +173,12 @@ def parse_meos(entry: Path, include_dir: Path,
         if not loc or str(Path(loc.name).resolve()) not in own_files:
             continue
         if node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+            # A typedef names an anonymous record when the record IS the type it
+            # defines (`typedef struct {...} ways_record;`); a typedef whose type only
+            # contains it, a function pointer taking a `ways_record *`
+            # (`ways_fetch_fn`), names something else
             canonical = node.underlying_typedef_type.get_canonical().spelling
-            m = re.search(r"\(unnamed at ([^)]+)\)", canonical)
+            m = re.fullmatch(r"(?:struct|union)\s+\(unnamed at ([^)]+)\)", canonical)
             if m:
                 typedef_map[m.group(1)] = node.spelling
 
