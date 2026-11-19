@@ -447,6 +447,19 @@ class AttachTests(unittest.TestCase):
             "tbigintbox_expand": "expandBigint"})
         self.assertEqual(om["functionToClass"]["tintbox_expand"]["class"], "TBox")
 
+    def test_the_statistics_of_a_band_are_a_class_of_their_own(self):
+        # As #test_the_ever_and_always_forms_of_a_member_stand_beside_it: the record
+        # raster_summary_stats answers is the class BandStats, whose accessors are
+        # its members named by what they read.
+        idl = attach_object_model({"functions": [
+            self._fn("bandstats_count", "const BandStats *"),
+            self._fn("bandstats_mean", "const BandStats *", "double *"),
+        ]}, MODEL, None)
+        om = idl["objectModel"]
+        names = {m["function"]: m["ooName"] for m in om["classes"]["BandStats"]["methods"]}
+        self.assertEqual(names, {"bandstats_count": "count", "bandstats_mean": "mean"})
+        self.assertEqual(om["functionToClass"]["bandstats_mean"]["class"], "BandStats")
+
     def test_the_ever_and_always_forms_of_a_member_stand_beside_it(self):
         # As #test_a_member_of_a_leafs_box_is_named_with_its_value_type, for the
         # e<prefix> and a<prefix> forms #_candidates derives: eraster_value is the
@@ -743,8 +756,8 @@ class AttachTests(unittest.TestCase):
         unregistered = {n for n, s in nodes.items()
                         if s["kind"] == "leaf" and s["temptype"] is None}
         self.assertEqual(unregistered,
-                         {"Pcschema", "Raster", "RTree", "RTreeNNCursor", "SPTree",
-                          "SPNNCursor", "MeosArray", "SkipList"})
+                         {"Pcschema", "Raster", "BandStats", "RTree", "RTreeNNCursor",
+                          "SPTree", "SPNNCursor", "MeosArray", "SkipList"})
 
     def test_the_aggregate_state_is_a_class_and_numeric_is_none(self):
         # A SkipList is what every temporal aggregate's transition function
