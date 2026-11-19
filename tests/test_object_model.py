@@ -447,6 +447,21 @@ class AttachTests(unittest.TestCase):
             "tbigintbox_expand": "expandBigint"})
         self.assertEqual(om["functionToClass"]["tintbox_expand"]["class"], "TBox")
 
+    def test_the_ever_and_always_forms_of_a_member_stand_beside_it(self):
+        # As #test_a_member_of_a_leafs_box_is_named_with_its_value_type, for the
+        # e<prefix> and a<prefix> forms #_candidates derives: eraster_value is the
+        # ever form of raster_value, a member of Raster named with its letter.
+        idl = attach_object_model({"functions": [
+            self._fn("raster_value", "const Temporal *", "const Raster *", "int"),
+            self._fn("eraster_value", "const Temporal *", "const Raster *", "int", "const Span *"),
+            self._fn("araster_tile_value", "const Temporal *", "const Raquet *", "const Span *"),
+        ]}, MODEL, None)
+        om = idl["objectModel"]
+        names = {m["function"]: m["ooName"] for m in om["classes"]["Raster"]["methods"]}
+        self.assertEqual(names, {"raster_value": "value", "eraster_value": "eValue",
+                                 "araster_tile_value": "aTileValue"})
+        self.assertEqual(om["functionToClass"]["eraster_value"]["class"], "Raster")
+
     def test_a_constructor_whose_first_token_is_no_class_is_no_operator(self):
         # Same harness as #test_a_constructor_from_a_base_value_is_named_from_it.
         # numspan_tstzspan_to_tbox takes two Span *, and the operator pass reads

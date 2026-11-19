@@ -214,8 +214,27 @@ def _candidates(model: dict) -> list:
                 out.append((pref + "box", {"class": rel["to"], "scope": "companion",
                                            "axis": "valueBox", "valueOf": name,
                                            "valueToken": pref}))
+    # The ever and always forms of a class's members: MEOS writes the letter of
+    # ever (`e`) or always (`a`) before the class token (`eraster_value`, the ever
+    # form of `raster_value`), so `e<prefix>` and `a<prefix>` are prefixes of the
+    # class the plain prefix names, and #_ever_always_ooname keeps the letter on the
+    # member, beside the plain form's (Raster.eValue beside Raster.value), as
+    # `ever_eq` is everEq beside eq.
+    for pref, target in list(out):
+        if target.get("valueToken") or "concreteOf" in target:
+            continue
+        for letter in ("e", "a"):
+            out.append((letter + pref, dict(target, everAlways=letter, basePrefix=pref)))
     out.sort(key=lambda kv: len(kv[0]), reverse=True)
     return out
+
+
+def _ever_always_ooname(fn_name: str, cls: str, target: dict) -> str:
+    """The member name of the ever or always form of a class's member: the letter
+    the target states (#_candidates) before the name #_ooname gives the plain form,
+    so `araster_tile_value` is aTileValue as `raster_tile_value` is tileValue."""
+    base = _ooname(fn_name[1:], cls, target["basePrefix"])
+    return target["everAlways"] + base[:1].upper() + base[1:]
 
 
 def _lattice_ancestors(name: str, lat: dict) -> list:
@@ -1096,7 +1115,8 @@ def attach_object_model(idl: dict, path: Path,
         role = _role(name)
         method = {"function": name, "role": role,
                   "scope": tgt["scope"], "backing": name,
-                  "ooName": _ooname(name, cls, pref)
+                  "ooName": (_ever_always_ooname(name, cls, tgt) if tgt.get("everAlways")
+                             else _ooname(name, cls, pref))
                             + (_value_box_suffix(tgt["valueToken"]) if tgt.get("valueToken") else "")}
         if _oo_excluded(fn, role):
             method["ooExclude"] = True
