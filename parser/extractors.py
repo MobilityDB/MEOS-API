@@ -7,13 +7,19 @@ from parser.families import all_families, header_family, subdir_family
 
 
 def _canonical_spelling(ty) -> str:
-    # Return canonical type spelling, resolving anonymous typedef-struct names.
+    # Return canonical type spelling, resolving anonymous typedef-struct names. A
+    # record declared without a tag (`typedef struct {...} GeomVal;`) is named by its
+    # typedef alone, as #parse_meos names the record itself through its typedef map,
+    # so the keyword libclang writes before `(unnamed at ...)` goes with it:
+    # `struct (unnamed at meos_raster.h:130:9) *` is `GeomVal *`, a type C declares,
+    # where `struct GeomVal *` names a tag no header declares.
     canonical = ty.get_canonical().spelling
-    if "(unnamed at" not in canonical:
+    if "(unnamed" not in canonical:
         return canonical
     c = ty.spelling
     base_name = re.sub(r"\bconst\b", "", c).replace("*", "").strip()
-    return re.sub(r"\(unnamed at [^)]+\)", base_name, canonical)
+    return re.sub(r"\b(?:struct|union|enum)\s+\(unnamed(?: struct| union| enum)? at [^)]+\)"
+                  r"|\(unnamed(?: struct| union| enum)? at [^)]+\)", base_name, canonical)
 
 
 # Spellings that always represent a boolean type, regardless of the underlying C representation:
