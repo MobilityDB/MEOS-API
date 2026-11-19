@@ -62,6 +62,50 @@ runs:
       with:
         python-version: "3.11"
 
+    # MobilityDB supports one H3 release, H3_REQUIRED_VERSION of its top-level CMakeLists.txt,
+    # and its configure refuses any other; its .github/scripts/install-h3.sh builds that
+    # release from its tag. A checkout carrying the script takes H3 from it, the release a
+    # package would leave to its distribution; one predating it takes the package.
+    - name: Choose the H3 the MobilityDB checkout names
+      id: h3
+      shell: bash
+      run: |
+        src="$GITHUB_WORKSPACE/_mobilitydb_src"
+        if [ -f "$src/.github/scripts/install-h3.sh" ]; then
+          version="$(sed -n 's/^ *set(H3_REQUIRED_VERSION "\([0-9.]*\)").*/\1/p' "$src/CMakeLists.txt")"
+          {
+            echo "from-tag=true"
+            echo "package="
+            echo "key=provision-meos-h3-${ImageOS:-unknown}-${ImageVersion:-unknown}-$version"
+          } >> "$GITHUB_OUTPUT"
+        else
+          { echo "from-tag=false"; echo "package=libh3-dev"; } >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Restore the H3 build
+      id: h3-cache
+      if: steps.h3.outputs.from-tag == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/h3-prefix
+        key: ${{ steps.h3.outputs.key }}
+
+    - name: Build the H3 release MobilityDB names
+      if: steps.h3.outputs.from-tag == 'true' && steps.h3-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        bash "$GITHUB_WORKSPACE/_mobilitydb_src/.github/scripts/install-h3.sh" \
+          "$RUNNER_TEMP/h3-prefix"
+
+    # Installed on a cache hit too, under /usr/local, where MobilityDB's CMake finds it and
+    # where the catalog parse reads its header (`h3/h3api.h`), as GDAL is installed below.
+    - name: Install H3
+      if: steps.h3.outputs.from-tag == 'true'
+      shell: bash
+      run: |
+        sudo cp -a "$RUNNER_TEMP/h3-prefix/." /usr/local/
+        sudo ldconfig
+
     # libclang (Python wheel) needs the system C headers MEOS depends on so
     # types like size_t / json_object * / GSERIALIZED * / H3Index resolve to
     # their real names instead of degrading to int / int * / uint64_t. Same
@@ -75,7 +119,7 @@ runs:
       shell: bash
       env:
         PACKAGES: >-
-          clang libclang-dev libjson-c-dev libproj-dev libh3-dev
+          clang libclang-dev libjson-c-dev libproj-dev ${{ steps.h3.outputs.package }}
       run: |
         # The PostgreSQL server headers are those of the PostgreSQL the image ships.
         packages="$PACKAGES $(bash "$GITHUB_ACTION_PATH/server-dev-package.sh")"
@@ -164,7 +208,7 @@ runs:
       shell: bash
       env:
         PACKAGES: >-
-          libproj-dev libjson-c-dev libh3-dev libsqlite3-dev zlib1g-dev libxml2-dev
+          libproj-dev libjson-c-dev ${{ steps.h3.outputs.package }} libsqlite3-dev zlib1g-dev libxml2-dev
           autoconf automake libtool pkg-config postgresql-17 postgresql-server-dev-17
         FAMILIES: ${{ inputs.families }}
       run: |
