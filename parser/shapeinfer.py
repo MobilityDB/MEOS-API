@@ -108,6 +108,16 @@ def _bare(ctype: str) -> str:
     return " ".join((ctype or "").replace("const ", "").split())
 
 
+def _is_array_param(prm: dict) -> bool:
+    """Whether a parameter is an array by its type alone, as #_input_arrays reads a run: a
+    pointer to pointers other than a string array or an untyped one, or a pointer to a
+    scalar element."""
+    ctype = _bare(prm.get("cType"))
+    if ctype.endswith("**"):
+        return ctype not in ("char **", "void **")
+    return ctype.endswith("*") and ctype[:-1].strip() in _ELEMENT_SCALARS
+
+
 def _input_arrays(func: dict) -> list:
     """The array ARGUMENTS a function reads, with the parameter each takes its
     length from.
@@ -133,13 +143,7 @@ def _input_arrays(func: dict) -> list:
     keeps ``arr1`` on ``count1``.
     """
     params = func.get("params", [])
-
-    def is_array(prm) -> bool:
-        ctype = _bare(prm.get("cType"))
-        if ctype.endswith("**"):
-            return ctype not in ("char **", "void **")
-        return ctype.endswith("*") and ctype[:-1].strip() in _ELEMENT_SCALARS
-
+    is_array = _is_array_param
     out = []
     start = 0
     while start < len(params):
@@ -191,7 +195,19 @@ def attach_struct_input_arrays(idl: dict, docs: dict) -> tuple[dict, int]:
         shape = func.get("shape") or {}
         known = {a["param"] for a in shape.get("inputArrays") or ()}
         found = []
-        for prm, nxt in zip(params, params[1:]):
+
+        def array(prm, count):
+            return {
+                "param": prm["name"],
+                "lengthFrom": {"kind": "param", "name": count},
+                "element": {
+                    "c": _strip_one_ptr(_bare(prm.get("cType"))),
+                    "canonical": _strip_one_ptr(
+                        _bare(prm.get("canonical") or prm.get("cType"))),
+                },
+            }
+
+        for i, (prm, nxt) in enumerate(zip(params, params[1:])):
             ctype = _bare(prm.get("cType"))
             if (prm["name"] in known or not ctype.endswith("*") or ctype.endswith("**")
                     or _bare(nxt.get("cType")) not in _LENGTH_TYPES):
@@ -199,15 +215,17 @@ def attach_struct_input_arrays(idl: dict, docs: dict) -> tuple[dict, int]:
             if not (_ARRAY_DOC.match(fdocs.get(prm["name"], ""))
                     and _COUNT_DOC.match(fdocs.get(nxt["name"], ""))):
                 continue
-            found.append({
-                "param": prm["name"],
-                "lengthFrom": {"kind": "param", "name": nxt["name"]},
-                "element": {
-                    "c": _strip_one_ptr(ctype),
-                    "canonical": _strip_one_ptr(
-                        _bare(prm.get("canonical") or prm.get("cType"))),
-                },
-            })
+            # The arrays documented as such just before it are of the same run, which
+            # #_input_arrays ends at the array of structs: raster_value_series(traj,
+            # rasts, spans, count) reads count rasters and count spans.
+            run = []
+            for before in reversed(params[:i]):
+                if (before["name"] in known or not _is_array_param(before)
+                        or not _ARRAY_DOC.match(fdocs.get(before["name"], ""))):
+                    break
+                run.insert(0, array(before, nxt["name"]))
+            found.extend(run)
+            found.append(array(prm, nxt["name"]))
         if found:
             func.setdefault("shape", {}).setdefault("inputArrays", []).extend(found)
             n += len(found)
