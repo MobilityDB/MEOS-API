@@ -261,6 +261,40 @@ class StructInputArrayTests(unittest.TestCase):
         self.assertEqual(n, 0)
         self.assertNotIn("shape", idl["functions"][0])
 
+    def test_the_arrays_documented_before_an_array_of_structs_share_its_count(self):
+        """As #test_a_documented_array_of_structs_is_an_input_array, with the run of
+        arrays #_input_arrays ends at the array of structs before it."""
+        idl = {"functions": [_fn("raster_value_series", "Temporal *",
+                                 [("traj", "const Temporal *"),
+                                  ("rasts", "const struct Raster **"),
+                                  ("spans", "const Span *"), ("count", "int"),
+                                  ("band", "int")])]}
+        docs = {"raster_value_series": {
+            "traj": "Trajectory (temporal geometry point)",
+            "rasts": "Array of the rasters of the series",
+            "spans": "Array of the validity periods of the rasters, one per raster",
+            "count": "Number of elements in the arrays"}}
+        idl, n = attach_struct_input_arrays(idl, docs)
+        self.assertEqual(n, 2)
+        self.assertEqual(
+            [(a["param"], a["lengthFrom"]["name"], a["element"]["canonical"])
+             for a in idl["functions"][0]["shape"]["inputArrays"]],
+            [("rasts", "count", "struct Raster *"), ("spans", "count", "Span")])
+
+    def test_a_pointer_before_an_array_of_structs_documented_otherwise_is_no_array(self):
+        """As #test_one_struct_and_an_integer_is_no_array: the documentation, not the
+        type alone, makes the pointer before the array of structs one of its run."""
+        idl = {"functions": [_fn("f", "Temporal *",
+                                 [("rasts", "const struct Raster **"),
+                                  ("spans", "const Span *"), ("count", "int")])]}
+        docs = {"f": {"rasts": "Rasters of the series",
+                      "spans": "Array of spans",
+                      "count": "Number of elements in the array"}}
+        idl, n = attach_struct_input_arrays(idl, docs)
+        self.assertEqual(n, 1)
+        self.assertEqual([a["param"] for a in idl["functions"][0]["shape"]["inputArrays"]],
+                         ["spans"])
+
     def test_an_array_read_at_an_index_is_no_input_array(self):
         idl = {"functions": [_fn("meos_array_get", "void *",
                                  [("array", "MeosArray *"), ("n", "int")])]}
