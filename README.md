@@ -278,6 +278,24 @@ functions by name: each reaches the same MEOS function through its portable read
 or writer (`<type>FromText` and `asText`, `<type>FromBinary` and `asBinary`), so a
 binding registers no marked signature. See [`parser/typesupport.py`](parser/typesupport.py).
 
+## SQL types a binding carries
+
+`sqlTypes` states, for every SQL type a value of the SQL surface has, how an engine
+binding carries it, so MobilityFlink, MobilitySpark, MobilityNebula and MobilityDuck
+carry each type the same way without deriving it again:
+
+- `cType`: the C type the SQL type stands for, read off the signatures that pair it
+  with a single C value (`tfloat`: `Temporal`, `tstzspan`: `Span`), and `byValue` for
+  one passed by value behind its typedef (`h3index`: `H3Index`).
+- `codec`: the form a value crosses an engine in, `kind` `bytes` (the byte codec of
+  the C type), `wkb` (its hex WKB, the extended one where the C type states it, which
+  keeps the SRID: `geometry` is written by `geo_as_hexewkb`) or `text`, with its
+  `decoder`, `encoder` and the trailing inputs each takes by name.
+- `image`: the copy and the size of the block the C type is laid in, for a type
+  carried through a codec and not by value.
+
+Every function named is public. See [`parser/sqltypes.py`](parser/sqltypes.py).
+
 ## OpenAPI generation
 
 The enriched catalog (the `network` / `wire` / `typeEncodings` produced by the
