@@ -294,6 +294,12 @@ carry each type the same way without deriving it again:
 - `image`: the copy and the size of the block the C type is laid in, for a type
   carried through a codec and not by value.
 
+- `element`, on a SQL scalar whose array a signature passes or answers: the C type an
+  element of the array is laid in (`integer[]` an `int` array, `text[]` a `text *` array)
+  and its text codec, the core reader and writer MEOS has for it (`int32_in` and
+  `int32_out`, `float8_out` with its `maxdd`), so a binding reads and writes the array
+  element by element.
+
 Every function named is public. See [`parser/sqltypes.py`](parser/sqltypes.py).
 
 ## OpenAPI generation
