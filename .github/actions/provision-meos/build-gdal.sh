@@ -4,11 +4,14 @@
 # function, and the GDAL a distribution packages (libgdal-dev on Ubuntu) links GEOS, so a
 # libmeos linked against it loads GEOS with it; this GDAL loads none.
 #
-# The configuration is the one MEOS.js builds its GDAL with: every optional driver off, the
-# libraries GDAL carries internally used in place of external ones, and only PROJ, SQLite and
-# zlib taken from the system, which libmeos already needs. MEOS reads raster bands through the
-# generic GDAL API and the built-in drivers (MEM, VRT, GTiff), so the core is the whole
-# requirement. The libraries are shared, as the hosted bindings link libmeos.so.
+# The drivers are the standard raster formats MEOS writes and reads by name (asTIFF, asPNG,
+# asJPEG, asGDALRaster and the readers taking the bytes of a file): GTiff with the
+# Cloud-Optimized GeoTIFF COG built from its sources, PNG, JPEG and GIF, beside the MEM and VRT
+# drivers of the core and the GeoJSON and Shapefile vector drivers. Every other optional driver
+# is off, the libraries those drivers need are the ones GDAL carries internally (libtiff,
+# libgeotiff, libpng, libjpeg, giflib), and only PROJ, SQLite and zlib come from the system,
+# which libmeos already needs. The libraries are shared, as the hosted bindings link
+# libmeos.so.
 #
 # The release is pinned by its SHA-256, so the build is the same on every runner and a changed
 # file fails the step rather than building something else.
@@ -53,6 +56,9 @@ cmake -S "$WORK/gdal-$VERSION" -B "$WORK/build" \
   -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF \
   -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
   -DGDAL_ENABLE_DRIVER_GTIFF=ON \
+  -DGDAL_ENABLE_DRIVER_PNG=ON \
+  -DGDAL_ENABLE_DRIVER_JPEG=ON \
+  -DGDAL_ENABLE_DRIVER_GIF=ON \
   -DGDAL_ENABLE_DRIVER_VRT=ON \
   -DOGR_ENABLE_DRIVER_GEOJSON=ON \
   -DOGR_ENABLE_DRIVER_SHAPE=ON \
