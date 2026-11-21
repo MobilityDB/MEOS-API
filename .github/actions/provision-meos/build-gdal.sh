@@ -6,12 +6,12 @@
 #
 # The drivers are the standard raster formats MEOS writes and reads by name (asTIFF, asPNG,
 # asJPEG, asGDALRaster and the readers taking the bytes of a file): GTiff with the
-# Cloud-Optimized GeoTIFF COG built from its sources, PNG, JPEG and GIF, beside the MEM and VRT
-# drivers of the core and the GeoJSON and Shapefile vector drivers. Every other optional driver
-# is off, the libraries those drivers need are the ones GDAL carries internally (libtiff,
-# libgeotiff, libpng, libjpeg, giflib), and only PROJ, SQLite and zlib come from the system,
-# which libmeos already needs. The libraries are shared, as the hosted bindings link
-# libmeos.so.
+# Cloud-Optimized GeoTIFF COG built from its sources, PNG, JPEG, GIF and netCDF, beside the MEM
+# and VRT drivers of the core and the GeoJSON and Shapefile vector drivers. Every other optional
+# driver is off, the libraries those drivers need are the ones GDAL carries internally (libtiff,
+# libgeotiff, libpng, libjpeg, giflib), and only PROJ, SQLite, zlib and the netCDF library
+# (libnetcdf-dev, which GDAL carries no copy of) come from the system. The libraries are shared,
+# as the hosted bindings link libmeos.so.
 #
 # The release is pinned by its SHA-256, so the build is the same on every runner and a changed
 # file fails the step rather than building something else.
@@ -60,6 +60,7 @@ cmake -S "$WORK/gdal-$VERSION" -B "$WORK/build" \
   -DGDAL_ENABLE_DRIVER_JPEG=ON \
   -DGDAL_ENABLE_DRIVER_GIF=ON \
   -DGDAL_ENABLE_DRIVER_VRT=ON \
+  -DGDAL_ENABLE_DRIVER_NETCDF=ON \
   -DOGR_ENABLE_DRIVER_GEOJSON=ON \
   -DOGR_ENABLE_DRIVER_SHAPE=ON \
   -DGDAL_USE_EXTERNAL_LIBS=OFF \
@@ -67,6 +68,7 @@ cmake -S "$WORK/gdal-$VERSION" -B "$WORK/build" \
   -DGDAL_USE_PROJ=ON \
   -DGDAL_USE_GEOS=OFF \
   -DGDAL_USE_SQLITE3=ON \
+  -DGDAL_USE_NETCDF=ON \
   -DGDAL_USE_ZLIB=ON \
   -DGDAL_USE_ZLIB_INTERNAL=OFF
 cmake --build "$WORK/build" -j "${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
