@@ -209,7 +209,7 @@ runs:
       env:
         PACKAGES: >-
           libproj-dev libjson-c-dev ${{ steps.h3.outputs.package }} libsqlite3-dev zlib1g-dev libxml2-dev
-          autoconf automake libtool pkg-config postgresql-17 postgresql-server-dev-17
+          libnetcdf-dev autoconf automake libtool pkg-config postgresql-17 postgresql-server-dev-17
         FAMILIES: ${{ inputs.families }}
       run: |
         REPO_ROOT="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
