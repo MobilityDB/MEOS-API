@@ -180,15 +180,39 @@
       "note": "Serves trgeometry alone; its only remaining parameter is the digit count, whose type names nothing it serves."
     },
 
-    "tintbox_shift_scale": {
+    "tintbox_shift_value": {
       "types": ["tbox"],
-      "note": "Shifts and scales a tbox. Its body names the value span it moves (T_INTSPAN), so the span is what a body-read derives — the type it serves is the box."
+      "note": "Shifts a tbox. Its body names the value span it moves (T_INTSPAN), so the span is what a body-read derives — the type it serves is the box."
     },
-    "tbigintbox_shift_scale": {
+    "tintbox_scale_value": {
+      "types": ["tbox"],
+      "note": "Scales a tbox; the body names its value span, not the box."
+    },
+    "tintbox_shift_scale_value": {
       "types": ["tbox"],
       "note": "Shifts and scales a tbox; the body names its value span, not the box."
     },
-    "tfloatbox_shift_scale": {
+    "tbigintbox_shift_value": {
+      "types": ["tbox"],
+      "note": "Shifts a tbox; the body names its value span, not the box."
+    },
+    "tbigintbox_scale_value": {
+      "types": ["tbox"],
+      "note": "Scales a tbox; the body names its value span, not the box."
+    },
+    "tbigintbox_shift_scale_value": {
+      "types": ["tbox"],
+      "note": "Shifts and scales a tbox; the body names its value span, not the box."
+    },
+    "tfloatbox_shift_value": {
+      "types": ["tbox"],
+      "note": "Shifts a tbox; the body names its value span, not the box."
+    },
+    "tfloatbox_scale_value": {
+      "types": ["tbox"],
+      "note": "Scales a tbox; the body names its value span, not the box."
+    },
+    "tfloatbox_shift_scale_value": {
       "types": ["tbox"],
       "note": "Shifts and scales a tbox; the body names its value span, not the box."
     },
