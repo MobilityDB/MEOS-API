@@ -30,6 +30,7 @@ from parser.enumtext import attach_enum_text
 from parser.typesupport import attach_type_support
 from parser.enrich import enrich_idl, restate_wire
 from parser.codecs import state_type_encodings
+from parser.sqlcasts import attach_sql_casts
 from parser.sqltypes import attach_sql_types
 from parser.sqlfn import (attach_sqlfn_map, attach_aggfn_map, attach_row_sources,
                           attach_array_shapes, attach_claims_fit, attach_input_shapes,
@@ -522,6 +523,12 @@ def main():
     print(f"      SQL types a binding carries: {len(idl['sqlTypes'])} "
           f"({sum('codec' in e for e in idl['sqlTypes'].values())} through a codec)",
           file=sys.stderr)
+    # State every cast MobilityDB declares and the public MEOS function it calls, so an
+    # engine binding registers the casts of the SQL surface instead of writing them by hand.
+    if SQL_SRC.exists():
+        idl, ncast, ncastfn = attach_sql_casts(idl, SQL_SRC)
+        print(f"      SQL casts: {ncast} ({ncastfn} through a public MEOS function)",
+              file=sys.stderr)
     idl_path = OUTPUT_DIR / "meos-idl.json"
     with open(idl_path, "w") as f:
         json.dump(idl, f, indent=2)

@@ -302,6 +302,27 @@ carry each type the same way without deriving it again:
 
 Every function named is public. See [`parser/sqltypes.py`](parser/sqltypes.py).
 
+## SQL casts a binding registers
+
+`sqlCasts` states every cast MobilityDB declares with `CREATE CAST`, in the order of
+their source and target types, so an engine binding registers the casts of the SQL
+surface from the catalog:
+
+- `source` and `target`: the two SQL types (`tfloat` and `tint`).
+- `context`: `implicit`, `assignment` or `explicit`, the context PostgreSQL applies
+  the cast in.
+- `sqlFunction`: the SQL function of `WITH FUNCTION`, its `name` and `args`; a cast
+  `WITHOUT FUNCTION` states `binary` instead (`quadbin` to `bigint`).
+- `typmod`: on a cast whose function takes the type modifier after the value
+  (`tgeompoint(tgeompoint, integer)`), which only a PostgreSQL column carries.
+- `function`: the public MEOS function the SQL function calls, the one whose C wrapper
+  is the SQL function's and one of whose signatures takes its arguments
+  (`tfloat_to_tint`); a generic wrapper serving several functions is told apart by the
+  signature (`set(integer)` calls `int_to_set`). A cast over a type MEOS does not have
+  (`int4range`, `numeric`) has none.
+
+See [`parser/sqlcasts.py`](parser/sqlcasts.py).
+
 ## OpenAPI generation
 
 The enriched catalog (the `network` / `wire` / `typeEncodings` produced by the
