@@ -265,9 +265,13 @@ def state_type_encodings(idl, model=None):
             if aux is not None:
                 add(decoders, _cls(ret), f, aux, enc,
                     _serves(f, _read_type, "read", _DECODERS))
-        # a writer: a value of the class in; a string, or WKB bytes, out
+        # a writer: a value of the class in; a string, or WKB bytes, out. One value
+        # written as one string: an array of values written as an array of strings
+        # (tspatialarr_as_ewkt, taking `const Temporal **` and answering `char **`)
+        # is the text of an array, no codec of the class
         enc = _encoding(f["name"], _ENCODERS)
-        if (enc and "*" in retc and ("*" in p0c or p0.get("typedef"))
+        if (enc and retc.count("*") == 1
+                and (p0c.count("*") == 1 or (p0.get("typedef") and "*" not in p0c))
                 and _base(retc) in ({"uint8_t"} if enc in _BYTE_ENCODINGS
                                     else _STRING_PTR_BASES)):
             aux = _trailing(f)
