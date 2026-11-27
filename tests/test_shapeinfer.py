@@ -332,6 +332,41 @@ class CountedArrayReturnTests(unittest.TestCase):
             "lengthFrom": {"kind": "param", "name": "count"},
             "element": {"c": "STBox", "canonical": "STBox"}})
 
+    def test_an_array_of_strings_is_as_long_as_the_array_it_writes(self):
+        # As #test_an_array_of_structs_is_as_long_as_the_array_of_structs_read, for the
+        # text writer of an array, whose element differs from the array it reads.
+        idl = {"functions": [_fn("tspatialarr_as_text", "char **",
+                                 [("temparr", "const Temporal **"), ("count", "int"),
+                                  ("maxdd", "int")])]}
+        idl, _ = infer_shapes(idl)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 1)
+        self.assertEqual(idl["functions"][0]["shape"]["arrayReturn"], {
+            "lengthFrom": {"kind": "param", "name": "count"},
+            "element": {"c": "char *", "canonical": "char *"}})
+
+    def test_one_string_of_an_input_array_is_no_array(self):
+        # Refuting case, as #test_one_element_of_the_input_arrays_type_is_no_array: a
+        # `char *` return is one string written of the whole array.
+        idl = {"functions": [_fn("tposechainarr_as_geopose", "char *",
+                                 [("temparr", "const Temporal **"), ("count", "int"),
+                                  ("precision", "int")])]}
+        idl, _ = infer_shapes(idl)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 0)
+        self.assertNotIn("arrayReturn", idl["functions"][0]["shape"])
+
+    def test_strings_beside_two_input_arrays_name_no_length(self):
+        # Refuting case, as #test_an_array_counted_on_its_own_keeps_its_own_length reads
+        # two arrays: neither says how many strings come back.
+        idl = {"functions": [_fn("pairs_as_text", "char **",
+                                 [("arr1", "const Temporal **"), ("count1", "int"),
+                                  ("arr2", "const Temporal **"), ("count2", "int")])]}
+        idl, _ = infer_shapes(idl)
+        idl, n = attach_counted_array_returns(idl)
+        self.assertEqual(n, 0)
+        self.assertNotIn("arrayReturn", idl["functions"][0]["shape"])
+
     def test_one_element_of_the_input_arrays_type_is_no_array(self):
         # Refuting case: the return is the element type itself, one value made of
         # the `count` read, so it states no array return.
