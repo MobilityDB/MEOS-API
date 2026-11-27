@@ -245,6 +245,11 @@ def attach_counted_array_returns(idl: dict) -> tuple[dict, int]:
     A return of the element type itself is one element, not an array:
     ``temporal_merge_array(Temporal **temparr, int count)`` returns one ``Temporal *``.
 
+    An array of strings is the text of an array it reads, one string per element:
+    ``tspatialarr_as_text(const Temporal **temparr, int count, int maxdd)`` returns
+    ``count`` strings as ``char **``. A ``char **`` return beside exactly one input
+    array takes that array's length, whatever its element; beside two it names none.
+
     The array return takes its length from that input array's ``lengthFrom`` and reads
     its ``element`` from the return, as #infer_shapes states both. It runs after
     #attach_struct_input_arrays, which states the arrays of structs it compares with."""
@@ -258,9 +263,11 @@ def attach_counted_array_returns(idl: dict) -> tuple[dict, int]:
         if not ret.rstrip().endswith("*"):
             continue
         elem = _bare(_strip_one_ptr(ret))
+        inputs = shape.get("inputArrays") or ()
         lengths = {a["lengthFrom"]["name"]: a["lengthFrom"]
-                   for a in shape.get("inputArrays") or ()
-                   if _bare(a["element"]["c"]) == elem}
+                   for a in inputs if _bare(a["element"]["c"]) == elem}
+        if not lengths and elem == "char *" and len(inputs) == 1:
+            lengths = {inputs[0]["lengthFrom"]["name"]: inputs[0]["lengthFrom"]}
         if len(lengths) != 1:
             continue
         shape["arrayReturn"] = {
